@@ -36,6 +36,7 @@ from ghg_tool.api.routers import (
     auth,
     dq_findings,
     emissions,
+    exports,
     factor_catalog,
     go_certificates,
     health,
@@ -165,6 +166,7 @@ def _create_app() -> FastAPI:
     app.include_router(dq_findings.router)
     app.include_router(go_certificates.router)
     app.include_router(reports.router)
+    app.include_router(exports.router)
 
     return app
 

@@ -1,0 +1,219 @@
+/* ESG-grade print stylesheet — A4 — CSRD ESRS E1-6/E1-7 */
+
+@page {
+  size: A4;
+  margin: 20mm 15mm 20mm 15mm;
+  @top-center {
+    content: "Saturnia Ceramica S.r.l. — GHG Report ESRS E1";
+    font-size: 8pt;
+    color: #555;
+  }
+  @bottom-right {
+    content: "Pagina " counter(page) " di " counter(pages);
+    font-size: 8pt;
+    color: #555;
+  }
+  @bottom-left {
+    content: "GHG Accounting Tool v1";
+    font-size: 8pt;
+    color: #555;
+  }
+}
+
+/* Embed standard fonts for PDF/A compliance */
+body {
+  font-family: Arial, Helvetica, sans-serif;
+  font-size: 9pt;
+  color: #111;
+  line-height: 1.4;
+}
+
+/* Headings */
+h1 {
+  font-size: 16pt;
+  font-weight: bold;
+  color: #0072B2;  /* Okabe-Ito Blue */
+  margin-bottom: 4mm;
+  border-bottom: 1px solid #0072B2;
+  padding-bottom: 2mm;
+}
+
+h2 {
+  font-size: 12pt;
+  font-weight: bold;
+  color: #0072B2;
+  margin-top: 6mm;
+  margin-bottom: 2mm;
+}
+
+h3 {
+  font-size: 10pt;
+  font-weight: bold;
+  color: #333;
+  margin-top: 4mm;
+  margin-bottom: 1mm;
+}
+
+/* Tables */
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 3mm 0;
+  font-size: 8pt;
+  page-break-inside: avoid;
+}
+
+thead tr {
+  background-color: #0072B2;  /* Okabe-Ito Blue */
+  color: white;
+  font-weight: bold;
+}
+
+thead th {
+  padding: 2mm 3mm;
+  text-align: left;
+  border: 1px solid #004D80;
+}
+
+tbody tr:nth-child(odd) {
+  background-color: #F5F9FF;
+}
+
+tbody tr:nth-child(even) {
+  background-color: #FFFFFF;
+}
+
+tbody td {
+  padding: 1.5mm 3mm;
+  border: 1px solid #CCE0F0;
+  vertical-align: top;
+}
+
+/* Right-align numeric columns */
+td.numeric, th.numeric {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Biogenic memo block (ADR-007) */
+.biogenic-memo {
+  background-color: #FFF3CD;
+  border: 1px solid #E69F00;  /* Okabe-Ito Orange */
+  border-left: 4px solid #E69F00;
+  padding: 3mm 4mm;
+  margin: 4mm 0;
+  font-size: 8.5pt;
+}
+
+.biogenic-memo h3 {
+  color: #E69F00;
+  margin-top: 0;
+}
+
+/* VIANO 2025 banner */
+.viano-banner {
+  background-color: #FFF3CD;
+  border: 1px solid #D55E00;  /* Okabe-Ito Vermilion */
+  border-left: 4px solid #D55E00;
+  padding: 3mm 4mm;
+  margin: 4mm 0;
+  font-size: 8.5pt;
+}
+
+/* Header block */
+.report-header {
+  margin-bottom: 8mm;
+}
+
+.report-header .company-name {
+  font-size: 14pt;
+  font-weight: bold;
+  color: #0072B2;
+}
+
+.report-header .report-subtitle {
+  font-size: 10pt;
+  color: #555;
+}
+
+/* Metadata footer for each page section */
+.metadata-footer {
+  font-size: 7pt;
+  color: #666;
+  border-top: 1px solid #DDD;
+  padding-top: 2mm;
+  margin-top: 4mm;
+}
+
+/* Signature block */
+.signature-block {
+  margin-top: 8mm;
+  page-break-inside: avoid;
+}
+
+.signature-block table {
+  width: 100%;
+}
+
+.signature-block td {
+  border: none;
+  border-bottom: 1px solid #333;
+  padding: 1mm 3mm 4mm 3mm;
+  width: 33%;
+}
+
+/* Zero-line disclosures */
+.zero-line {
+  color: #666;
+  font-style: italic;
+}
+
+/* Disclaimer */
+.disclaimer {
+  font-size: 7.5pt;
+  color: #666;
+  background-color: #F5F5F5;
+  border: 1px solid #DDD;
+  padding: 3mm 4mm;
+  margin-top: 6mm;
+}
+
+/* Page break hints */
+.page-break-before {
+  page-break-before: always;
+}
+
+.avoid-break {
+  page-break-inside: avoid;
+}
+
+/* Uncertainty disclosure */
+.uncertainty {
+  font-size: 7.5pt;
+  color: #555;
+  font-style: italic;
+}
+
+/* DQ finding severity colours (Okabe-Ito) */
+.severity-crit {
+  background-color: #D55E00;
+  color: white;
+  padding: 0 2mm;
+  border-radius: 1mm;
+  font-weight: bold;
+}
+
+.severity-warn {
+  background-color: #E69F00;
+  color: white;
+  padding: 0 2mm;
+  border-radius: 1mm;
+  font-weight: bold;
+}
+
+.severity-info {
+  background-color: #009E73;
+  color: white;
+  padding: 0 2mm;
+  border-radius: 1mm;
+}
