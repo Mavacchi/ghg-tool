@@ -209,3 +209,27 @@ def sum_decimals(values: Iterable[Decimal]) -> Decimal:
     for v in values:
         total += v
     return total
+
+
+# ---------------------------------------------------------------------------
+# UUID coercion
+# ---------------------------------------------------------------------------
+
+def _uuid_or_none(value: Any) -> uuid.UUID | None:
+    """Coerce a raw-row id value to ``uuid.UUID`` or return ``None``.
+
+    Centralised here (REV-001) so the 11 calc modules no longer carry
+    11 verbatim copies of the same helper.  Calc modules import this
+    function rather than redefining it locally.
+
+    Args:
+        value: Source value (``uuid.UUID``, ``str``, or ``None``).
+
+    Returns:
+        ``uuid.UUID`` instance, or ``None`` when ``value`` is ``None``.
+    """
+    if value is None:
+        return None
+    if isinstance(value, uuid.UUID):
+        return value
+    return uuid.UUID(str(value))

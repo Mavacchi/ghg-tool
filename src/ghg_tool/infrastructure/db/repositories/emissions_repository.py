@@ -13,7 +13,7 @@ from __future__ import annotations
 import uuid
 from collections.abc import Sequence
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ghg_tool.infrastructure.db.models.emission import Emission
@@ -70,6 +70,7 @@ class EmissionsRepository:
         codice_sito: str | None = None,
         regulatory_stream: str | None = None,
         gwp_set: str | None = None,
+        sub_scope: str | None = None,
     ) -> Sequence[Emission]:
         """Fetch active (valid_to IS NULL) emission rows with optional filters.
 
@@ -80,6 +81,7 @@ class EmissionsRepository:
             codice_sito: Optional site code filter.
             regulatory_stream: Optional stream filter ('CSRD_ESRS_E1' or 'EU_ETS_PHASE_IV').
             gwp_set: Optional GWP set filter ('AR6' or 'AR5').
+            sub_scope: Optional sub-scope filter pushed to DB (REV-021).
 
         Returns:
             Sequence of active ``Emission`` rows matching the filters.
@@ -98,6 +100,8 @@ class EmissionsRepository:
             stmt = stmt.where(Emission.regulatory_stream == regulatory_stream)
         if gwp_set is not None:
             stmt = stmt.where(Emission.gwp_set == gwp_set)
+        if sub_scope is not None:
+            stmt = stmt.where(Emission.sub_scope == sub_scope)
         result = await self._session.execute(stmt)
         return result.scalars().all()
 
@@ -117,7 +121,6 @@ class EmissionsRepository:
             new_id: UUID of the newly inserted replacement row.
             reason_code: One of the approved correction reason codes.
         """
-        from sqlalchemy import text  # local import to keep module-level clean
         await self._session.execute(
             text(
                 "SELECT calc.fn_emit_correction("

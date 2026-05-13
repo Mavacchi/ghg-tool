@@ -58,7 +58,7 @@ def _read_csv(path: Path, required_cols: list[str]) -> pd.DataFrame:
         keep_default_na=False, # preserve empty strings vs NaN distinction
     )
     # Normalise column names: strip leading/trailing whitespace
-    df.columns = [c.strip() for c in df.columns]
+    df.columns = pd.Index([c.strip() for c in df.columns])
     missing = [c for c in required_cols if c not in df.columns]
     if missing:
         raise ValueError(f"Missing required columns in {path.name}: {missing}")

@@ -96,7 +96,15 @@ ignore = [
 max-complexity = 15  # NFR-16
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**" = ["ANN"]  # no annotation enforcement in tests
+"tests/**" = [
+    "ANN",   # no annotation enforcement in tests
+    "E402",  # tests set env vars before importing app — canonical pytest pattern
+    "N806",  # PascalCase mock class instances (MockRepo) — idiomatic
+    "N814",  # uppercase aliases for imported exceptions in tests
+]
+"src/ghg_tool/api/**" = [
+    "B008",  # FastAPI canonical dependency injection: Depends(...) as default arg
+]
 
 # ---------------------------------------------------------------------------
 # Mypy (strict — NFR-16)

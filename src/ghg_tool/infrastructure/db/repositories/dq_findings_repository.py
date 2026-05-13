@@ -73,6 +73,53 @@ class DQFindingsRepository:
         result = await self._session.execute(stmt)
         return result.scalars().all()
 
+    async def get_findings(
+        self,
+        tenant_id: uuid.UUID,
+        *,
+        resolution_status: str | None = None,
+        severity: str | None = None,
+        rule_id: str | None = None,
+        anno: int | None = None,
+        codice_sito: str | None = None,
+        correlation_id: uuid.UUID | None = None,
+        limit: int = 50,
+    ) -> Sequence[DqFinding]:
+        """Fetch DQ findings with fully dynamic predicate (REV-023).
+
+        Replaces the combination of ``get_open_findings`` + in-memory Python
+        filtering that caused ``resolution_status=RESOLVED`` to always return [].
+
+        Args:
+            tenant_id: Tenant UUID.
+            resolution_status: Optional filter ('OPEN', 'WAIVED', or 'REMEDIATED').
+            severity: Optional filter ('CRIT', 'WARN', or 'INFO').
+            rule_id: Optional filter on DQ rule identifier.
+            anno: Optional filter on reporting year.
+            codice_sito: Optional filter on site code.
+            correlation_id: Optional filter on correlation UUID.
+            limit: Maximum rows to fetch (pushed to DB; default 50).
+
+        Returns:
+            Sequence of ``DqFinding`` rows matching all supplied predicates.
+        """
+        stmt = select(DqFinding).where(DqFinding.tenant_id == tenant_id)
+        if resolution_status is not None:
+            stmt = stmt.where(DqFinding.resolution_status == resolution_status)
+        if severity is not None:
+            stmt = stmt.where(DqFinding.severity == severity)
+        if rule_id is not None:
+            stmt = stmt.where(DqFinding.rule_id == rule_id)
+        if anno is not None:
+            stmt = stmt.where(DqFinding.anno == anno)
+        if codice_sito is not None:
+            stmt = stmt.where(DqFinding.codice_sito == codice_sito)
+        if correlation_id is not None:
+            stmt = stmt.where(DqFinding.correlation_id == correlation_id)
+        stmt = stmt.limit(limit + 1)
+        result = await self._session.execute(stmt)
+        return result.scalars().all()
+
     async def get_pending_dlq(self, tenant_id: uuid.UUID) -> Sequence[Dlq]:
         """Fetch DLQ entries with replay_status='PENDING'.
 

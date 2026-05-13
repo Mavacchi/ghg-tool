@@ -19,6 +19,7 @@ from typing import Any
 
 from ghg_tool.application.calc._helpers import (
     KG_TO_TONNE,
+    _uuid_or_none,
     make_emission,
     require_factor,
     to_decimal,
@@ -163,10 +164,26 @@ def _bootstrap_ci(point_estimate: Decimal) -> tuple[Decimal, Decimal]:
 
     Returns:
         ``(lower, upper)`` as Decimals.
+
+    Note:
+        REV-024 / ADR-009 — Decimal→float→Decimal round-trip is intentional.
+        The stdlib ``random`` module does not accept ``Decimal`` (and the
+        Decimal arithmetic library has no built-in PRNG anyway), so the
+        point estimate is converted to ``float64`` for the resampling
+        loop.  Binary-fraction representation noise is bounded by
+        ``Decimal``'s str-round-trip guard and is at most ~2.2e-16
+        relative; this is dwarfed by the ±30% spend-factor uncertainty
+        envelope encoded in ``_SPEND_RELATIVE_SIGMA``.  The final CI
+        bounds are converted back to ``Decimal`` via ``str()`` so float
+        binary leakage cannot reach the database column.  See ADR-009
+        (uncertainty methodology) for the full derivation.
     """
     if point_estimate == Decimal("0"):
         return Decimal("0"), Decimal("0")
     rng = random.Random(_BOOTSTRAP_SEED)
+    # Bootstrap resampling uses float64 for stdlib random compatibility.
+    # CI precision at ±30% relative is unaffected by binary-fraction noise.
+    # Final bounds converted back to Decimal via str() to avoid float leakage in DB.
     pe = float(point_estimate)
     sigma_f = float(_SPEND_RELATIVE_SIGMA)
     samples = [pe * (1.0 + rng.gauss(0.0, sigma_f)) for _ in range(_BOOTSTRAP_RESAMPLES)]
@@ -179,18 +196,3 @@ def _bootstrap_ci(point_estimate: Decimal) -> tuple[Decimal, Decimal]:
     upper = Decimal(str(samples[upper_idx]))
     return lower, upper
 
-
-def _uuid_or_none(value: Any) -> uuid.UUID | None:
-    """Coerce a value to UUID if possible; else None.
-
-    Args:
-        value: Source value.
-
-    Returns:
-        ``uuid.UUID`` or ``None``.
-    """
-    if value is None:
-        return None
-    if isinstance(value, uuid.UUID):
-        return value
-    return uuid.UUID(str(value))

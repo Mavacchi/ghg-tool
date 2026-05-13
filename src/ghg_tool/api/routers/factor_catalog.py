@@ -7,10 +7,12 @@ from typing import Annotated
 
 import structlog
 from fastapi import APIRouter, Depends, status
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ghg_tool.api.dependencies.auth import CurrentUser
 from ghg_tool.api.dependencies.db import get_db
+from ghg_tool.api.dependencies.pagination import encode_cursor
 from ghg_tool.api.middleware.correlation_id import get_correlation_id
 from ghg_tool.api.middleware.rbac import require_permission
 from ghg_tool.api.schemas.common import CursorPage
@@ -58,7 +60,6 @@ async def list_factors(
     Returns:
         Paginated factor catalog rows.
     """
-    from sqlalchemy import select
     correlation_id = get_correlation_id()
     logger.bind(correlation_id=correlation_id).info("list_factors")
 
@@ -82,7 +83,6 @@ async def list_factors(
     items = [FactorCatalogResponse.model_validate(r) for r in rows[: filters.limit]]
     next_cursor: str | None = None
     if len(rows) > filters.limit:
-        from ghg_tool.api.dependencies.pagination import encode_cursor
         next_cursor = encode_cursor(rows[filters.limit - 1].id)
 
     return CursorPage(items=items, next_cursor=next_cursor)
@@ -114,7 +114,6 @@ async def list_factor_versions(
     Returns:
         List of all versions ordered by valid_from desc.
     """
-    from sqlalchemy import select
     stmt = (
         select(FactorCatalog)
         .where(

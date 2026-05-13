@@ -9,6 +9,7 @@ import pytest
 
 from ghg_tool.application.calc._helpers import (
     KG_TO_TONNE,
+    _uuid_or_none,
     make_emission,
     require_factor,
     sum_decimals,
@@ -102,3 +103,34 @@ def test_make_emission_stamps_fields(
     assert rec.factor_version == "2025"
     assert rec.factor_source == "IPCC"
     assert rec.calc_timestamp.tzinfo is not None
+
+
+# ---------------------------------------------------------------------------
+# REV-001 — centralised _uuid_or_none helper
+# ---------------------------------------------------------------------------
+
+
+def test_uuid_or_none_returns_none_for_none() -> None:
+    """REV-001 — None passes through."""
+    assert _uuid_or_none(None) is None
+
+
+def test_uuid_or_none_returns_uuid_identity() -> None:
+    """REV-001 — UUID instance returned as-is (no re-construction)."""
+    u = uuid.uuid4()
+    assert _uuid_or_none(u) is u
+
+
+def test_uuid_or_none_coerces_string() -> None:
+    """REV-001 — valid UUID string coerced to UUID instance."""
+    s = "12345678-1234-5678-1234-567812345678"
+    result = _uuid_or_none(s)
+    assert isinstance(result, uuid.UUID)
+    assert str(result) == s
+
+
+def test_uuid_or_none_coerces_uuid_repr() -> None:
+    """REV-001 — passing the str() of a UUID round-trips correctly."""
+    u = uuid.uuid4()
+    result = _uuid_or_none(str(u))
+    assert result == u

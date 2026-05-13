@@ -19,6 +19,12 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Literal
 
+from ghg_tool.domain.exceptions.calc_errors import (
+    InvalidGWPSetError,
+    InvalidIntensityDenominatorError,
+    NaiveTimestampError,
+)
+
 _ALLOWED_KPI_CODES: frozenset[str] = frozenset({"KPI-09", "KPI-10", "KPI-11"})
 _ALLOWED_SCOPE2_VARIANTS: frozenset[str] = frozenset({"LB", "MB"})
 _ALLOWED_GWP_SETS: frozenset[str] = frozenset({"AR6", "AR5"})
@@ -68,8 +74,15 @@ class IntensityMetric:
         """Validate invariants.
 
         Raises:
-            ValueError: If kpi_code, scope2_variant, gwp_set are out of vocab,
-                or denominator_value is non-positive, or calc_timestamp naive.
+            ValueError: When kpi_code or scope2_variant are out of vocab,
+                or numerator_tco2e is negative.  These remain ValueError
+                since they are enum-range / sign checks rather than
+                domain-meaningful conditions on their own.
+            InvalidGWPSetError: When gwp_set is not in ``{'AR6', 'AR5'}``.
+            InvalidIntensityDenominatorError: When denominator_value is
+                non-positive — a CSRD-level concern that deserves its own
+                exception type per REV-020.
+            NaiveTimestampError: When calc_timestamp lacks tzinfo.
         """
         if self.kpi_code not in _ALLOWED_KPI_CODES:
             raise ValueError(
@@ -81,11 +94,11 @@ class IntensityMetric:
                 f"not in {sorted(_ALLOWED_SCOPE2_VARIANTS)}"
             )
         if self.gwp_set not in _ALLOWED_GWP_SETS:
-            raise ValueError(
+            raise InvalidGWPSetError(
                 f"gwp_set={self.gwp_set!r} not in {sorted(_ALLOWED_GWP_SETS)}"
             )
         if self.denominator_value <= Decimal("0"):
-            raise ValueError(
+            raise InvalidIntensityDenominatorError(
                 f"denominator_value must be > 0; got {self.denominator_value} "
                 f"(kpi={self.kpi_code}, anno={self.anno})"
             )
@@ -94,6 +107,6 @@ class IntensityMetric:
                 f"numerator_tco2e must be >= 0; got {self.numerator_tco2e}"
             )
         if self.calc_timestamp.tzinfo is None:
-            raise ValueError(
+            raise NaiveTimestampError(
                 "calc_timestamp must be timezone-aware (UTC); naive datetime rejected"
             )

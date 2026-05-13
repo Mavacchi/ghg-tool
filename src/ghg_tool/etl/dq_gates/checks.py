@@ -23,6 +23,16 @@ _VALID_SITI = {
 # VIANO electricity 2025 / 2024 ratio threshold for DQ-WARN-01
 _WARN_01_RATIO_THRESHOLD = 0.6
 
+_ZSCORE_CRIT_THRESHOLD: float = 2.0
+"""Critical outlier threshold for site-level z-scores.
+
+Derived from the maximum achievable z-score for n=7 sites
+(σ ≈ 2.27 minus safety margin). Documented in DPM §4.2.
+"""
+
+_MIN_OUTLIER_GROUP_SIZE: int = 3
+"""Minimum group size below which z-score outlier detection is skipped (insufficient power)."""
+
 
 def check_facility_coverage(
     df_s1: pd.DataFrame,
@@ -187,12 +197,14 @@ def check_outlier_zscore(df: pd.DataFrame, scope: int) -> tuple[bool, list[Findi
     # Group by (fuel_col, Anno) and compute z-score within each group
     for (fuel, anno), grp in df.groupby([fuel_col, "Anno"]):
         grp_qty = grp["_qty"].dropna()
-        if grp_qty.std() == 0 or len(grp_qty) < 3:
+        if grp_qty.std() == 0 or len(grp_qty) < _MIN_OUTLIER_GROUP_SIZE:
             continue
         z_scores = (grp_qty - grp_qty.mean()) / grp_qty.std()
         for idx, z in z_scores.items():
-            if abs(z) > 2.0:
-                row = df.loc[idx]
+            if abs(z) > _ZSCORE_CRIT_THRESHOLD:
+                # pandas-stubs types idx as Hashable; runtime types are int/str labels.
+                row = df.loc[idx]  # type: ignore[call-overload]
+                value_observed = float(grp_qty[idx])  # type: ignore[call-overload]
                 findings.append(
                     {
                         "rule_id": "DQ-CRIT-04",
@@ -201,12 +213,12 @@ def check_outlier_zscore(df: pd.DataFrame, scope: int) -> tuple[bool, list[Findi
                         "anno": int(anno),
                         "codice_sito": str(row.get("Codice_Sito", "")),
                         "metric": f"zscore_{fuel}",
-                        "value_observed": float(grp_qty[idx]),
+                        "value_observed": value_observed,
                         "z_score": float(z),
                         "trigger_desc": (
-                            f"DQ-CRIT-04: z-score={z:.2f} > 2.0 for "
+                            f"DQ-CRIT-04: z-score={z:.2f} > {_ZSCORE_CRIT_THRESHOLD} for "
                             f"{fuel_col}={fuel!r}, site={row.get('Codice_Sito')!r}, "
-                            f"Anno={anno}, Quantità={grp_qty[idx]}."
+                            f"Anno={anno}, Quantità={value_observed}."
                         ),
                         "blocks_pipeline": True,
                     }

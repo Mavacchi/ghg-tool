@@ -10,9 +10,12 @@ callable for user lookup to support dependency injection.
 
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from typing import Any, Protocol
 
 import structlog
+from jose import JWTError  # type: ignore[import-untyped]
+from jose.exceptions import ExpiredSignatureError  # type: ignore[import-untyped]
 
 from ghg_tool.api.schemas.auth_schemas import TokenResponse
 from ghg_tool.infrastructure.security import jwt as jwt_module
@@ -44,7 +47,7 @@ async def authenticate_user(
     username: str,
     password: str,
     *,
-    lookup_user: Any,  # Callable[[str], Awaitable[UserRecord | None]]
+    lookup_user: Callable[[str], Awaitable[UserRecord | None]],
     correlation_id: str = "",
 ) -> TokenResponse | None:
     """Verify credentials and return token pair or None on failure.
@@ -124,8 +127,8 @@ def refresh_access_token(
     log = logger.bind(correlation_id=correlation_id)
     try:
         claims = jwt_module.decode_token(refresh_token)
-    except Exception:  # noqa: BLE001
-        log.warning("Refresh token validation failed")
+    except (JWTError, ExpiredSignatureError, ValueError) as exc:
+        log.warning("Refresh token validation failed", exc_type=type(exc).__name__)
         return None
 
     if claims.get("token_type") != "refresh":

@@ -19,6 +19,7 @@ from typing import Any
 
 from ghg_tool.application.calc._helpers import (
     KG_TO_TONNE,
+    _uuid_or_none,
     make_emission,
     require_factor,
     to_decimal,
@@ -170,19 +171,3 @@ def _build_record(  # noqa: PLR0913 — internal builder dispatch
             + (" Biogenic CO2 memo populated (ADR-007)." if co2_biogenic_tonne is not None else "")
         ),
     )
-
-
-def _uuid_or_none(value: Any) -> uuid.UUID | None:
-    """Coerce a value to UUID if possible; else None.
-
-    Args:
-        value: Source value (UUID, str, or None).
-
-    Returns:
-        ``uuid.UUID`` instance or ``None``.
-    """
-    if value is None:
-        return None
-    if isinstance(value, uuid.UUID):
-        return value
-    return uuid.UUID(str(value))

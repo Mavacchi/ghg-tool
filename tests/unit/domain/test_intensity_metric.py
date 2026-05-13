@@ -9,6 +9,12 @@ from decimal import Decimal
 import pytest
 
 from ghg_tool.domain.entities.intensity_metric import IntensityMetric
+from ghg_tool.domain.exceptions.calc_errors import (
+    CalcError,
+    InvalidGWPSetError,
+    InvalidIntensityDenominatorError,
+    NaiveTimestampError,
+)
 
 
 def _kwargs(**overrides: object) -> dict[str, object]:
@@ -54,13 +60,19 @@ def test_invalid_scope2_variant_rejected() -> None:
 
 
 def test_invalid_gwp_set_rejected() -> None:
-    with pytest.raises(ValueError, match="gwp_set"):
+    with pytest.raises(InvalidGWPSetError, match="gwp_set"):
         IntensityMetric(**_kwargs(gwp_set="AR4"))
 
 
 def test_non_positive_denominator_rejected() -> None:
-    with pytest.raises(ValueError, match="denominator_value"):
+    with pytest.raises(InvalidIntensityDenominatorError, match="denominator_value"):
         IntensityMetric(**_kwargs(denominator_value=Decimal("0")))
+
+
+def test_negative_denominator_rejected() -> None:
+    """REV-020: negative denominator is also rejected via dedicated exception."""
+    with pytest.raises(InvalidIntensityDenominatorError, match="denominator_value"):
+        IntensityMetric(**_kwargs(denominator_value=Decimal("-1")))
 
 
 def test_negative_numerator_rejected() -> None:
@@ -69,5 +81,14 @@ def test_negative_numerator_rejected() -> None:
 
 
 def test_naive_timestamp_rejected() -> None:
-    with pytest.raises(ValueError, match="timezone-aware"):
+    with pytest.raises(NaiveTimestampError, match="timezone-aware"):
         IntensityMetric(**_kwargs(calc_timestamp=datetime(2024, 1, 1)))  # noqa: DTZ001
+
+
+# ---------------------------------------------------------------------------
+# REV-020: new exception types subclass CalcError
+# ---------------------------------------------------------------------------
+
+
+def test_invalid_intensity_denominator_is_calc_error() -> None:
+    assert issubclass(InvalidIntensityDenominatorError, CalcError)

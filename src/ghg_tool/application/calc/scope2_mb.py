@@ -21,6 +21,7 @@ from typing import Any, Protocol
 
 from ghg_tool.application.calc._helpers import (
     KG_TO_TONNE,
+    _uuid_or_none,
     make_emission,
     require_factor,
     to_decimal,
@@ -213,19 +214,3 @@ def _build_mb_record(  # noqa: PLR0913 — internal builder dispatch
         co2_fossil_tonne=tco2e,
         disclosure_notes=disclosure,
     )
-
-
-def _uuid_or_none(value: Any) -> uuid.UUID | None:
-    """Coerce a value to UUID if possible; else None.
-
-    Args:
-        value: Source value (UUID, str, or None).
-
-    Returns:
-        ``uuid.UUID`` instance or ``None``.
-    """
-    if value is None:
-        return None
-    if isinstance(value, uuid.UUID):
-        return value
-    return uuid.UUID(str(value))

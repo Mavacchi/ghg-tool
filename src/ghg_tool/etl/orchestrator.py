@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import hashlib
 import uuid
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -52,32 +53,44 @@ from ghg_tool.etl.writers.staging_writer import (
 FindingDict = dict[str, Any]
 
 
+@dataclass(frozen=True)
 class ETLResult:
-    """Result envelope returned by ``run_ingestion_pipeline``."""
+    """Result envelope returned by ``run_ingestion_pipeline``.
 
-    def __init__(
-        self,
-        correlation_id: uuid.UUID,
-        scope1_row_count: int,
-        scope2_row_count: int,
-        scope3_row_count: int,
-        all_findings: list[FindingDict],
-        dlq_entries: list[dict[str, Any]],
-        pipeline_blocked: bool,
-        scope1_rows: list[dict[str, Any]],
-        scope2_rows: list[dict[str, Any]],
-        scope3_rows: list[dict[str, Any]],
-    ) -> None:
-        self.correlation_id = correlation_id
-        self.scope1_row_count = scope1_row_count
-        self.scope2_row_count = scope2_row_count
-        self.scope3_row_count = scope3_row_count
-        self.all_findings = all_findings
-        self.dlq_entries = dlq_entries
-        self.pipeline_blocked = pipeline_blocked
-        self.scope1_rows = scope1_rows
-        self.scope2_rows = scope2_rows
-        self.scope3_rows = scope3_rows
+    All fields are set at construction time and are immutable thereafter
+    (``frozen=True``).  The mutable containers (lists) are passed in by the
+    orchestrator and must not be mutated by callers after construction.
+
+    Attributes:
+        correlation_id: UUID that ties this ETL result to its ingestion batch.
+            Equals the ``batch_id`` passed to ``run_ingestion_pipeline``.
+        scope1_row_count: Number of Scope 1 staging rows produced.
+            Non-negative integer; 0 when the pipeline is blocked.
+        scope2_row_count: Number of Scope 2 staging rows produced.
+            Non-negative integer; 0 when the pipeline is blocked.
+        scope3_row_count: Number of Scope 3 staging rows produced.
+            Non-negative integer; 0 when the pipeline is blocked.
+        all_findings: Flat list of every DQ finding dict (INFO, WARN, CRIT)
+            emitted during the run, tagged with ``dq_report_version``.
+        dlq_entries: DLQ dicts for every CRIT finding that blocked the
+            pipeline; empty list when ``pipeline_blocked`` is False.
+        pipeline_blocked: True if at least one DQ-CRIT gate failed.
+            When True the caller must NOT persist staging rows to the DB.
+        scope1_rows: Scope 1 staging row dicts ready for bulk insert.
+        scope2_rows: Scope 2 staging row dicts ready for bulk insert.
+        scope3_rows: Scope 3 staging row dicts ready for bulk insert.
+    """
+
+    correlation_id: uuid.UUID
+    scope1_row_count: int
+    scope2_row_count: int
+    scope3_row_count: int
+    all_findings: list[FindingDict]
+    dlq_entries: list[dict[str, Any]]
+    pipeline_blocked: bool
+    scope1_rows: list[dict[str, Any]]
+    scope2_rows: list[dict[str, Any]]
+    scope3_rows: list[dict[str, Any]]
 
 
 def _sha256_file(path: Path) -> str:
@@ -94,6 +107,75 @@ def _sha256_file(path: Path) -> str:
         for chunk in iter(lambda: fh.read(8192), b""):
             h.update(chunk)
     return h.hexdigest()
+
+
+def _run_crit_checks(
+    df1: Any,
+    df2: Any,
+    df3: Any,
+    tenant_id: uuid.UUID,
+    correlation_id: uuid.UUID,
+    dq_report_version: str,
+) -> tuple[bool, list[FindingDict], list[dict[str, Any]]]:
+    """Run all DQ-CRIT gates (01..05) and collect findings and DLQ entries.
+
+    Args:
+        df1: Validated Scope 1 DataFrame.
+        df2: Validated Scope 2 DataFrame.
+        df3: Validated Scope 3 DataFrame.
+        tenant_id: Tenant UUID for DLQ rows.
+        correlation_id: Correlation UUID for DLQ rows.
+        dq_report_version: Version tag to stamp on each finding.
+
+    Returns:
+        ``(all_passed, findings, dlq_entries)`` — ``all_passed`` is False if
+        any CRIT gate failed; ``dlq_entries`` contains one entry per CRIT hit.
+    """
+    checks = [
+        check_facility_coverage(df1, df2),
+        check_mandatory_columns(df1, 1),
+        check_mandatory_columns(df2, 2),
+        check_mandatory_columns(df3, 3),
+        check_negative_quantities(df1, 1),
+        check_negative_quantities(df2, 2),
+        check_negative_quantities(df3, 3),
+        check_outlier_zscore(df1, 1),
+        check_temporal_gap(df1, df2),
+    ]
+    all_passed = True
+    findings: list[FindingDict] = []
+    dlq_entries: list[dict[str, Any]] = []
+    for passes, gate_findings in checks:
+        findings.extend(_tag_findings(gate_findings, dq_report_version))
+        if not passes:
+            all_passed = False
+            dlq_entries.extend(_findings_to_dlq(gate_findings, tenant_id, correlation_id))
+    return all_passed, findings, dlq_entries
+
+
+def _run_warn_checks(
+    df1: Any,
+    df2: Any,
+    dq_report_version: str,
+) -> list[FindingDict]:
+    """Run all DQ-WARN gates (01..02) and return annotating findings.
+
+    Args:
+        df1: Validated Scope 1 DataFrame.
+        df2: Validated Scope 2 DataFrame.
+        dq_report_version: Version tag to stamp on each finding.
+
+    Returns:
+        Flat list of WARN-level finding dicts; never blocks the pipeline.
+    """
+    findings: list[FindingDict] = []
+    _, w1 = check_warn_01_viano_electricity(df2)
+    findings.extend(_tag_findings(w1, dq_report_version))
+    _, w2a = check_warn_02_estimated_quality(df1, 1)
+    findings.extend(_tag_findings(w2a, dq_report_version))
+    _, w2b = check_warn_02_estimated_quality(df2, 2)
+    findings.extend(_tag_findings(w2b, dq_report_version))
+    return findings
 
 
 def run_ingestion_pipeline(
@@ -128,23 +210,16 @@ def run_ingestion_pipeline(
     """
     correlation_id = batch_id  # ETL batch_id == correlation_id
     all_findings: list[FindingDict] = []
-    dlq_entries: list[dict[str, Any]] = []
 
-    # -- Step 1: Read CSVs ---------------------------------------------------
+    # -- Steps 1–3: Read CSVs + synthetic rows --------------------------------
     df1 = read_scope1(scope1_path)
     df2 = read_scope2(scope2_path)
     df3 = read_scope3(scope3_path)
-
-    # -- Step 2: FR-01 synthetic row -----------------------------------------
     df1, f1 = synthesise_viano_gargola_gas_nat_2024(df1)
-    all_findings.extend(_tag_findings(f1, dq_report_version))
-
-    # -- Step 3: FR-02 synthetic row -----------------------------------------
     df2, f2 = synthesise_sassuolo_grid_2025(df2)
-    all_findings.extend(_tag_findings(f2, dq_report_version))
-
-    # -- Step 4: FR-37 defaulting --------------------------------------------
     df3, f37 = apply_fr37_cat3_metadata_defaulting(df3)
+    all_findings.extend(_tag_findings(f1, dq_report_version))
+    all_findings.extend(_tag_findings(f2, dq_report_version))
     all_findings.extend(_tag_findings(f37, dq_report_version))
 
     # -- Step 5: Pandera schema validation ------------------------------------
@@ -152,36 +227,14 @@ def run_ingestion_pipeline(
     df2 = scope2_schema.validate(df2, lazy=True)
     df3 = scope3_schema.validate(df3, lazy=True)
 
-    # -- Step 6: DQ-CRIT gates -----------------------------------------------
-    pipeline_blocked = False
-    _crit_checks = [
-        (check_facility_coverage(df1, df2)),
-        (check_mandatory_columns(df1, 1)),
-        (check_mandatory_columns(df2, 2)),
-        (check_mandatory_columns(df3, 3)),
-        (check_negative_quantities(df1, 1)),
-        (check_negative_quantities(df2, 2)),
-        (check_negative_quantities(df3, 3)),
-        (check_outlier_zscore(df1, 1)),
-        (check_temporal_gap(df1, df2)),
-    ]
-    for passes, findings in _crit_checks:
-        all_findings.extend(_tag_findings(findings, dq_report_version))
-        if not passes:
-            pipeline_blocked = True
-            dlq_entries.extend(
-                _findings_to_dlq(findings, tenant_id, correlation_id)
-            )
+    # -- Steps 6–7: DQ-CRIT gates then DQ-WARN gates -------------------------
+    crit_passed, crit_findings, dlq_entries = _run_crit_checks(
+        df1, df2, df3, tenant_id, correlation_id, dq_report_version
+    )
+    all_findings.extend(crit_findings)
+    all_findings.extend(_run_warn_checks(df1, df2, dq_report_version))
 
-    # -- Step 7: DQ-WARN gates -----------------------------------------------
-    _, w1 = check_warn_01_viano_electricity(df2)
-    all_findings.extend(_tag_findings(w1, dq_report_version))
-    _, w2a = check_warn_02_estimated_quality(df1, 1)
-    all_findings.extend(_tag_findings(w2a, dq_report_version))
-    _, w2b = check_warn_02_estimated_quality(df2, 2)
-    all_findings.extend(_tag_findings(w2b, dq_report_version))
-
-    # -- Step 8: Build staging rows (not yet written to DB here) -------------
+    # -- Step 8: Build staging rows -------------------------------------------
     scope1_rows = build_scope1_rows(df1, batch_id=batch_id, tenant_id=tenant_id,
                                     ingested_by=ingested_by)
     scope2_rows = build_scope2_rows(df2, batch_id=batch_id, tenant_id=tenant_id,
@@ -189,9 +242,8 @@ def run_ingestion_pipeline(
     scope3_rows = build_scope3_rows(df3, batch_id=batch_id, tenant_id=tenant_id,
                                     ingested_by=ingested_by)
 
-    # -- Step 9: Cat 3 FR-11 reconciliation ----------------------------------
-    rec_findings = compute_cat3_reconciliation(df1, df3)
-    all_findings.extend(_tag_findings(rec_findings, dq_report_version))
+    # -- Step 9: Cat 3 FR-11 reconciliation -----------------------------------
+    all_findings.extend(_tag_findings(compute_cat3_reconciliation(df1, df3), dq_report_version))
 
     return ETLResult(
         correlation_id=correlation_id,
@@ -200,7 +252,7 @@ def run_ingestion_pipeline(
         scope3_row_count=len(scope3_rows),
         all_findings=all_findings,
         dlq_entries=dlq_entries,
-        pipeline_blocked=pipeline_blocked,
+        pipeline_blocked=not crit_passed,
         scope1_rows=scope1_rows,
         scope2_rows=scope2_rows,
         scope3_rows=scope3_rows,

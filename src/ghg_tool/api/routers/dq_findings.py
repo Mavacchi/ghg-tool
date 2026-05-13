@@ -12,10 +12,12 @@ from typing import Annotated
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ghg_tool.api.dependencies.auth import CurrentUser
 from ghg_tool.api.dependencies.db import get_db
+from ghg_tool.api.dependencies.pagination import encode_cursor
 from ghg_tool.api.middleware.correlation_id import get_correlation_id
 from ghg_tool.api.middleware.rbac import require_permission
 from ghg_tool.api.schemas.common import CursorPage
@@ -63,27 +65,20 @@ async def list_findings(
     logger.bind(correlation_id=correlation_id).info("list_findings")
 
     repo = DQFindingsRepository(session)
-    rows = await repo.get_open_findings(
+    rows = await repo.get_findings(
         tenant_id=uuid.UUID(user.tenant_id),
+        resolution_status=filters.resolution_status,
         severity=filters.severity,
+        rule_id=filters.rule_id,
+        anno=filters.anno,
+        codice_sito=filters.codice_sito,
+        correlation_id=filters.correlation_id,
+        limit=filters.limit,
     )
-
-    # Additional in-Python filters for fields not in get_open_findings
-    if filters.resolution_status is not None and filters.resolution_status != "OPEN":
-        rows = []  # get_open_findings only returns OPEN; handle via raw query in wave 3
-    if filters.rule_id is not None:
-        rows = [r for r in rows if r.rule_id == filters.rule_id]
-    if filters.anno is not None:
-        rows = [r for r in rows if r.anno == filters.anno]
-    if filters.codice_sito is not None:
-        rows = [r for r in rows if r.codice_sito == filters.codice_sito]
-    if filters.correlation_id is not None:
-        rows = [r for r in rows if r.correlation_id == filters.correlation_id]
 
     items = [DqFindingResponse.model_validate(r) for r in rows[: filters.limit]]
     next_cursor: str | None = None
     if len(rows) > filters.limit:
-        from ghg_tool.api.dependencies.pagination import encode_cursor
         next_cursor = encode_cursor(rows[filters.limit - 1].id)
 
     return CursorPage(items=items, next_cursor=next_cursor, total=len(rows))
@@ -135,7 +130,6 @@ async def waive_finding(
     log = logger.bind(correlation_id=correlation_id, user=user.sub[:8])
     log.info("waive_finding", finding_id=str(finding_id), reason_code=body.reason_code)
 
-    from sqlalchemy import select
     result = await session.execute(
         select(DqFinding).where(DqFinding.id == finding_id)
     )

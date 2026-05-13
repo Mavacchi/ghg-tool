@@ -17,6 +17,7 @@ from typing import Any
 
 from ghg_tool.application.calc._helpers import (
     KG_TO_TONNE,
+    _uuid_or_none,
     make_emission,
     require_factor,
     to_decimal,
@@ -111,19 +112,3 @@ def _resolve_waste_factor(sottocategoria: str) -> str | None:
     if is_recycle:
         return "WASTE_RECYCLE_NONPERIC_DEFRA_2025"
     return None
-
-
-def _uuid_or_none(value: Any) -> uuid.UUID | None:
-    """Coerce a value to UUID if possible; else None.
-
-    Args:
-        value: Source value.
-
-    Returns:
-        ``uuid.UUID`` or ``None``.
-    """
-    if value is None:
-        return None
-    if isinstance(value, uuid.UUID):
-        return value
-    return uuid.UUID(str(value))

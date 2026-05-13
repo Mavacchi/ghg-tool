@@ -22,7 +22,11 @@ from decimal import Decimal
 from typing import Literal
 
 from ghg_tool.domain.exceptions.calc_errors import (
+    InvalidGWPSetError,
+    InvalidMethodologyError,
+    InvalidRegulatoryStreamError,
     InvalidSubScopeError,
+    NaiveTimestampError,
     NegativeEmissionError,
 )
 
@@ -30,7 +34,7 @@ from ghg_tool.domain.exceptions.calc_errors import (
 # Sub-scope vocabulary per scope (architecture.md §8 / §9)
 # ---------------------------------------------------------------------------
 
-_ALLOWED_SUB_SCOPES: dict[int, frozenset[str]] = {
+ALLOWED_SUB_SCOPES: dict[int, frozenset[str]] = {
     1: frozenset({"combustion", "process", "fugitive"}),
     2: frozenset({"LB", "MB"}),
     3: frozenset({
@@ -41,8 +45,13 @@ _ALLOWED_SUB_SCOPES: dict[int, frozenset[str]] = {
         "Cat12", "Cat13_ZERO", "Cat14_ZERO", "Cat15_ZERO",
     }),
 }
+"""Allowed ``sub_scope`` values keyed by ``scope``.
 
-_ALLOWED_METHODOLOGIES: frozenset[str] = frozenset({
+Public per REV-011 so other layers (e.g. BackendAgent API schemas) can
+re-import the same vocabulary instead of duplicating it.
+"""
+
+ALLOWED_METHODOLOGIES: frozenset[str] = frozenset({
     "activity-based",
     "mass-based",
     "spend-based",
@@ -52,16 +61,40 @@ _ALLOWED_METHODOLOGIES: frozenset[str] = frozenset({
     "location-based",
     "market-based",
 })
+"""Allowed ``methodology`` discriminators on EmissionRecord (public per REV-011)."""
 
-_ALLOWED_REGULATORY_STREAMS: frozenset[str] = frozenset({
+ALLOWED_REGULATORY_STREAMS: frozenset[str] = frozenset({
     "CSRD_ESRS_E1",
     "EU_ETS_PHASE_IV",
 })
+"""Allowed ``regulatory_stream`` tags on EmissionRecord (public per REV-011)."""
 
-_ALLOWED_GWP_SETS: frozenset[str] = frozenset({"AR6", "AR5"})
+ALLOWED_GWP_SETS: frozenset[str] = frozenset({"AR6", "AR5"})
+"""Allowed GWP set codes on EmissionRecord (public per REV-011).
+
+``AR6`` is the CSRD default; ``AR5`` is the EU ETS dual-track per FR-34.
+``AR4`` and any free-text value are rejected at construction time.
+"""
+
+# Backwards-compatibility aliases (kept private to avoid accidental external usage).
+# These will be removed in a future wave once all internal callers migrate.
+_ALLOWED_SUB_SCOPES = ALLOWED_SUB_SCOPES
+_ALLOWED_METHODOLOGIES = ALLOWED_METHODOLOGIES
+_ALLOWED_REGULATORY_STREAMS = ALLOWED_REGULATORY_STREAMS
+_ALLOWED_GWP_SETS = ALLOWED_GWP_SETS
 
 RegulatoryStream = Literal["CSRD_ESRS_E1", "EU_ETS_PHASE_IV"]
 GWPSetCode = Literal["AR6", "AR5"]
+
+__all__ = [
+    "ALLOWED_GWP_SETS",
+    "ALLOWED_METHODOLOGIES",
+    "ALLOWED_REGULATORY_STREAMS",
+    "ALLOWED_SUB_SCOPES",
+    "EmissionRecord",
+    "GWPSetCode",
+    "RegulatoryStream",
+]
 
 
 @dataclass(frozen=True, slots=True)
@@ -78,7 +111,7 @@ class EmissionRecord:
         raw_row_id: FK back to the raw_*_ingestions row.  ``None`` for
             synthesised zero-lines (FR-18 Cat 11, FR-35 fugitive, FR-36).
         scope: 1, 2, or 3.
-        sub_scope: One of ``_ALLOWED_SUB_SCOPES[scope]``.
+        sub_scope: One of ``ALLOWED_SUB_SCOPES[scope]``.
         codice_sito: 7-site code or ``None`` for corporate-level rows
             (most Scope 3 rows; FR-36 zero-lines).
         anno: Reporting year.
@@ -94,7 +127,7 @@ class EmissionRecord:
         factor_version: Version tag of the factor used.
         factor_source: Provider (DEFRA / ISPRA / AIB / ecoinvent v3.10 / IPCC).
         gwp_set: AR6 (CSRD default) or AR5 (EU ETS dual-track).
-        methodology: One of ``_ALLOWED_METHODOLOGIES``.
+        methodology: One of ``ALLOWED_METHODOLOGIES``.
         regulatory_stream: CSRD_ESRS_E1 or EU_ETS_PHASE_IV.
         calc_timestamp: UTC datetime at calc run.
         created_by: Username or service account identifier.
@@ -142,10 +175,17 @@ class EmissionRecord:
         """Validate invariants per requirements + architecture.
 
         Raises:
+            ValueError: When ``scope`` is not in {1, 2, 3} — programmer
+                error; kept as plain ``ValueError`` so it surfaces as a
+                bug rather than a domain condition.
             NegativeEmissionError: If tco2e < 0.
             InvalidSubScopeError: If sub_scope is not allowed for scope.
-            ValueError: For other domain invariants (scope range, methodology,
-                regulatory_stream, gwp_set, calc_timestamp naive).
+            InvalidMethodologyError: If methodology is not in
+                ``ALLOWED_METHODOLOGIES``.
+            InvalidRegulatoryStreamError: If regulatory_stream is not in
+                ``ALLOWED_REGULATORY_STREAMS``.
+            InvalidGWPSetError: If gwp_set is not in ``ALLOWED_GWP_SETS``.
+            NaiveTimestampError: If calc_timestamp lacks tzinfo.
         """
         if self.scope not in (1, 2, 3):
             raise ValueError(f"scope must be 1, 2, or 3 — got {self.scope!r}")
@@ -154,27 +194,27 @@ class EmissionRecord:
                 f"tco2e must be >= 0; got {self.tco2e} "
                 f"(scope={self.scope}, sub_scope={self.sub_scope!r})"
             )
-        allowed = _ALLOWED_SUB_SCOPES[self.scope]
+        allowed = ALLOWED_SUB_SCOPES[self.scope]
         if self.sub_scope not in allowed:
             raise InvalidSubScopeError(
                 f"sub_scope={self.sub_scope!r} not allowed for scope={self.scope}. "
                 f"Allowed: {sorted(allowed)}"
             )
-        if self.methodology not in _ALLOWED_METHODOLOGIES:
-            raise ValueError(
-                f"methodology={self.methodology!r} not in {sorted(_ALLOWED_METHODOLOGIES)}"
+        if self.methodology not in ALLOWED_METHODOLOGIES:
+            raise InvalidMethodologyError(
+                f"methodology={self.methodology!r} not in {sorted(ALLOWED_METHODOLOGIES)}"
             )
-        if self.regulatory_stream not in _ALLOWED_REGULATORY_STREAMS:
-            raise ValueError(
+        if self.regulatory_stream not in ALLOWED_REGULATORY_STREAMS:
+            raise InvalidRegulatoryStreamError(
                 f"regulatory_stream={self.regulatory_stream!r} "
-                f"not in {sorted(_ALLOWED_REGULATORY_STREAMS)}"
+                f"not in {sorted(ALLOWED_REGULATORY_STREAMS)}"
             )
-        if self.gwp_set not in _ALLOWED_GWP_SETS:
-            raise ValueError(
-                f"gwp_set={self.gwp_set!r} not in {sorted(_ALLOWED_GWP_SETS)}"
+        if self.gwp_set not in ALLOWED_GWP_SETS:
+            raise InvalidGWPSetError(
+                f"gwp_set={self.gwp_set!r} not in {sorted(ALLOWED_GWP_SETS)}"
             )
         if self.calc_timestamp.tzinfo is None:
-            raise ValueError(
+            raise NaiveTimestampError(
                 "calc_timestamp must be timezone-aware (UTC); naive datetime rejected"
             )
         # ADR-007: biogenic and fossil sum (when both present) must be >= 0

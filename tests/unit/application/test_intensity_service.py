@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from decimal import Decimal
 
 from ghg_tool.application.services.intensity_service import (
@@ -11,6 +11,11 @@ from ghg_tool.application.services.intensity_service import (
     compute_intensities,
 )
 from ghg_tool.domain.entities.emission_record import EmissionRecord
+
+# REV-017: pin the HR confirmation date to keep test fixtures deterministic
+# and decoupled from the session clock.  The literal preserves the prior
+# behaviour (disclosure_notes referenced "HR official 2026-05-13").
+_HR_CONFIRMATION_DATE = date(2026, 5, 13)
 
 
 def _em(
@@ -47,6 +52,7 @@ def test_intensity_returns_three_kpis_x_two_variants_x_n_years() -> None:
         production_tonnes=Decimal("10000"),
         revenue_meur=Decimal("100"),
         fte=506,
+        hr_confirmation_date=_HR_CONFIRMATION_DATE,
     )]
     out = compute_intensities(
         emissions, ref,
@@ -69,6 +75,7 @@ def test_lb_vs_mb_numerators_differ() -> None:
         production_tonnes=Decimal("100"),
         revenue_meur=Decimal("10"),
         fte=100,
+        hr_confirmation_date=_HR_CONFIRMATION_DATE,
     )]
     out = compute_intensities(emissions, ref,
                               correlation_id=uuid.uuid4(), gwp_set="AR6")
@@ -89,6 +96,7 @@ def test_filters_by_gwp_set() -> None:
     ref = [IntensityReferenceInputs(
         anno=2024, production_tonnes=Decimal("100"),
         revenue_meur=Decimal("10"), fte=100,
+        hr_confirmation_date=_HR_CONFIRMATION_DATE,
     )]
     out = compute_intensities(emissions, ref,
                               correlation_id=uuid.uuid4(), gwp_set="AR6")
@@ -102,6 +110,7 @@ def test_kpi_codes_complete() -> None:
     ref = [IntensityReferenceInputs(
         anno=2024, production_tonnes=Decimal("100"),
         revenue_meur=Decimal("10"), fte=100,
+        hr_confirmation_date=_HR_CONFIRMATION_DATE,
     )]
     out = compute_intensities(emissions, ref,
                               correlation_id=uuid.uuid4(), gwp_set="AR6")
@@ -118,6 +127,7 @@ def test_filters_by_regulatory_stream() -> None:
     ref = [IntensityReferenceInputs(
         anno=2024, production_tonnes=Decimal("100"),
         revenue_meur=Decimal("10"), fte=100,
+        hr_confirmation_date=_HR_CONFIRMATION_DATE,
     )]
     out = compute_intensities(emissions, ref,
                               correlation_id=uuid.uuid4(),
@@ -133,6 +143,7 @@ def test_explicit_timestamp_override() -> None:
     ref = [IntensityReferenceInputs(
         anno=2024, production_tonnes=Decimal("100"),
         revenue_meur=Decimal("10"), fte=100,
+        hr_confirmation_date=_HR_CONFIRMATION_DATE,
     )]
     out = compute_intensities(
         emissions, ref, correlation_id=uuid.uuid4(),
@@ -146,8 +157,39 @@ def test_fte_disclosure_note_present() -> None:
     ref = [IntensityReferenceInputs(
         anno=2024, production_tonnes=Decimal("100"),
         revenue_meur=Decimal("10"), fte=506,
+        hr_confirmation_date=_HR_CONFIRMATION_DATE,
     )]
     out = compute_intensities(emissions, ref,
                               correlation_id=uuid.uuid4(), gwp_set="AR6")
     kpi11 = next(r for r in out if r.kpi_code == "KPI-11")
     assert "FTE=506" in (kpi11.disclosure_notes or "")
+
+
+def test_hr_confirmation_date_threaded_into_disclosure() -> None:
+    """REV-017: the HR confirmation date is sourced from the reference input,
+    not from a session-time literal.  Changing the input date changes the
+    disclosure annotation deterministically.
+    """
+    emissions = [_em(scope=1, sub_scope="combustion", tco2e="100")]
+    other_date = date(2025, 1, 31)
+    ref = [IntensityReferenceInputs(
+        anno=2024, production_tonnes=Decimal("100"),
+        revenue_meur=Decimal("10"), fte=100,
+        hr_confirmation_date=other_date,
+    )]
+    out = compute_intensities(emissions, ref,
+                              correlation_id=uuid.uuid4(), gwp_set="AR6")
+    notes = out[0].disclosure_notes or ""
+    assert "2025-01-31" in notes
+    # Negative check — the legacy literal must not leak through
+    assert "2026-05-13" not in notes
+
+
+def test_hr_confirmation_date_default_value_used_in_fixtures() -> None:
+    """Sanity guard — preserves the prior baseline date in the canonical fixture."""
+    ref = IntensityReferenceInputs(
+        anno=2024, production_tonnes=Decimal("100"),
+        revenue_meur=Decimal("10"), fte=100,
+        hr_confirmation_date=_HR_CONFIRMATION_DATE,
+    )
+    assert ref.hr_confirmation_date == date(2026, 5, 13)

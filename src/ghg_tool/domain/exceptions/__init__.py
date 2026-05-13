@@ -5,8 +5,13 @@ from ghg_tool.domain.exceptions.calc_errors import (
     FactorUnitMismatchError,
     GOValidationError,
     GWPSetMismatchError,
+    InvalidGWPSetError,
+    InvalidIntensityDenominatorError,
+    InvalidMethodologyError,
+    InvalidRegulatoryStreamError,
     InvalidSubScopeError,
     MissingFactorError,
+    NaiveTimestampError,
     NegativeEmissionError,
 )
 
@@ -15,7 +20,12 @@ __all__ = [
     "FactorUnitMismatchError",
     "GOValidationError",
     "GWPSetMismatchError",
+    "InvalidGWPSetError",
+    "InvalidIntensityDenominatorError",
+    "InvalidMethodologyError",
+    "InvalidRegulatoryStreamError",
     "InvalidSubScopeError",
     "MissingFactorError",
+    "NaiveTimestampError",
     "NegativeEmissionError",
 ]

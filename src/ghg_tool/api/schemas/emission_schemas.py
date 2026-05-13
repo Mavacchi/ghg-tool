@@ -13,20 +13,20 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+# REV-011: import canonical sub-scope vocabulary from domain to avoid duplication.
+from ghg_tool.domain.entities.emission_record import (
+    ALLOWED_SUB_SCOPES as _DOMAIN_SUB_SCOPES,
+)
+
 # ---------------------------------------------------------------------------
 # Allowed value sets (must match DB CHECK constraints)
 # ---------------------------------------------------------------------------
 
 _ALLOWED_SCOPES: frozenset[int] = frozenset({1, 2, 3})
-_ALLOWED_SUB_SCOPES: frozenset[str] = frozenset({
-    "combustion", "process", "fugitive",
-    "LB", "MB",
-    "Cat1", "Cat2",
-    "Cat3_WTT_FUEL", "Cat3_WTT_ELEC", "Cat3_TND",
-    "Cat4", "Cat5", "Cat6", "Cat7",
-    "Cat8_ZERO", "Cat9", "Cat10_ZERO", "Cat11_ZERO",
-    "Cat12", "Cat13_ZERO", "Cat14_ZERO", "Cat15_ZERO",
-})
+# Flat union of all per-scope sub-scopes from the domain canonical source.
+_ALLOWED_SUB_SCOPES: frozenset[str] = frozenset(
+    sub for subs in _DOMAIN_SUB_SCOPES.values() for sub in subs
+)
 _ALLOWED_GWP_SETS: frozenset[str] = frozenset({"AR6", "AR5"})
 _ALLOWED_REG_STREAMS: frozenset[str] = frozenset({"CSRD_ESRS_E1", "EU_ETS_PHASE_IV"})
 _ALLOWED_METHODOLOGIES: frozenset[str] = frozenset({
@@ -237,24 +237,16 @@ class EmissionCreate(BaseModel):
     def scope_sub_scope_consistency(self) -> EmissionCreate:
         """Ensure sub_scope is valid for the given scope.
 
+        Uses the canonical ``_DOMAIN_SUB_SCOPES`` mapping from the domain layer
+        (REV-011) to avoid duplicating the allowed-value set here.
+
         Returns:
             Self with validated scope/sub_scope combination.
 
         Raises:
             ValueError: If the sub_scope does not belong to the declared scope.
         """
-        scope_map: dict[int, frozenset[str]] = {
-            1: frozenset({"combustion", "process", "fugitive"}),
-            2: frozenset({"LB", "MB"}),
-            3: frozenset({
-                "Cat1", "Cat2",
-                "Cat3_WTT_FUEL", "Cat3_WTT_ELEC", "Cat3_TND",
-                "Cat4", "Cat5", "Cat6", "Cat7",
-                "Cat8_ZERO", "Cat9", "Cat10_ZERO", "Cat11_ZERO",
-                "Cat12", "Cat13_ZERO", "Cat14_ZERO", "Cat15_ZERO",
-            }),
-        }
-        allowed = scope_map.get(self.scope, frozenset())
+        allowed = _DOMAIN_SUB_SCOPES.get(self.scope, frozenset())
         if self.sub_scope not in allowed:
             raise ValueError(
                 f"sub_scope={self.sub_scope!r} is not valid for scope={self.scope}. "

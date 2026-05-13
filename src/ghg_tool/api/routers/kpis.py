@@ -8,16 +8,19 @@ endpoint is testable without a live database.
 
 from __future__ import annotations
 
-from typing import Any
+from datetime import UTC, datetime
 
 import structlog
 from fastapi import APIRouter, Depends, status
+from sqlalchemy import text
+from sqlalchemy.exc import OperationalError, ProgrammingError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ghg_tool.api.dependencies.auth import CurrentUser
 from ghg_tool.api.dependencies.db import get_db
 from ghg_tool.api.middleware.correlation_id import get_correlation_id
 from ghg_tool.api.middleware.rbac import require_permission
+from ghg_tool.api.schemas.kpi_schemas import KpiSummaryResponse
 
 logger = structlog.get_logger(__name__)
 
@@ -33,7 +36,7 @@ router = APIRouter(prefix="/api/v1/kpis", tags=["kpis"])
         "calc.mv_kpi_summary materialised view. All authenticated roles may read. "
         "Filters: anno (optional), gwp_set (optional, default AR6)."
     ),
-    response_model=dict,
+    response_model=KpiSummaryResponse,
     responses={
         200: {"description": "KPI summary"},
         401: {"description": "Not authenticated"},
@@ -45,7 +48,7 @@ async def get_kpis(
     gwp_set: str = "AR6",
     user: CurrentUser = Depends(require_permission("kpis", "read")),
     session: AsyncSession = Depends(get_db),
-) -> dict[str, Any]:
+) -> KpiSummaryResponse:
     """Return aggregated KPI data from the materialised view.
 
     Args:
@@ -55,7 +58,7 @@ async def get_kpis(
         session: Authenticated DB session with RLS GUCs.
 
     Returns:
-        A dict containing aggregated KPI values per scope/year/site.
+        A ``KpiSummaryResponse`` with aggregated KPI values per scope/year/site.
         Returns a stub payload when the MV is not yet available.
     """
     correlation_id = get_correlation_id()
@@ -63,7 +66,6 @@ async def get_kpis(
     log.info("get_kpis", anno=anno)
 
     try:
-        from sqlalchemy import text
         query = text(
             "SELECT * FROM calc.mv_kpi_summary "
             "WHERE (:gwp IS NULL OR gwp_set = :gwp) "
@@ -71,13 +73,22 @@ async def get_kpis(
         )
         result = await session.execute(query, {"gwp": gwp_set, "anno": anno})
         rows = [dict(r._mapping) for r in result]
-        return {"kpis": rows, "gwp_set": gwp_set, "correlation_id": correlation_id}
-    except Exception:  # noqa: BLE001
+        return KpiSummaryResponse(
+            kpis=rows,
+            gwp_set=gwp_set,
+            correlation_id=correlation_id or "",
+            as_of=datetime.now(tz=UTC),
+        )
+    except (ProgrammingError, OperationalError) as exc:
         # MV not yet created (wave 3 will create it); return stub
-        log.warning("mv_kpi_summary not available, returning stub")
-        return {
-            "kpis": [],
-            "gwp_set": gwp_set,
-            "correlation_id": correlation_id,
-            "_note": "calc.mv_kpi_summary not yet available — created in wave 3",
-        }
+        log.warning(
+            "mv_kpi_summary not available, returning stub",
+            exc_type=type(exc).__name__,
+        )
+        return KpiSummaryResponse(
+            kpis=[],
+            gwp_set=gwp_set,
+            correlation_id=correlation_id or "",
+            as_of=datetime.now(tz=UTC),
+            note="calc.mv_kpi_summary not yet available — created in wave 3",
+        )

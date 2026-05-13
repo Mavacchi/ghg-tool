@@ -13,6 +13,7 @@ from typing import Any
 
 from ghg_tool.application.calc._helpers import (
     KG_TO_TONNE,
+    _uuid_or_none,
     make_emission,
     require_factor,
     to_decimal,
@@ -25,6 +26,12 @@ _FACTOR_ID = "COMMUTE_CAR_DEFRA_2025"
 
 # FTE counts confirmed by user 2026-05-13 (HR official)
 _FTE_PER_ANNO: dict[int, int] = {2024: 506, 2025: 484}
+
+# Methodology baseline — derived from ISTAT 2024 commuting survey (Italy,
+# all employees, weighted avg).  Used in disclosure_notes only; never feeds
+# emission arithmetic.  Promoted to a module-level constant (REV-018) so
+# the number is not embedded as a magic literal inside an f-string.
+_KM_PER_FTE_YR_BASELINE: int = 8_800
 
 
 def calculate(
@@ -79,24 +86,10 @@ def calculate(
                 disclosure_notes=(
                     f"Cat 7 distance-based commuting: {km} km via {factor.factor_id}. "
                     f"FTE={fte if fte is not None else 'n/a'} (HR official 2026-05-13); "
-                    "km/FTE/yr estimate = 8,800 (methodology baseline)."
+                    f"km/FTE/yr estimate = {_KM_PER_FTE_YR_BASELINE:,} (methodology baseline)."
                 ),
             )
         )
     return records
 
 
-def _uuid_or_none(value: Any) -> uuid.UUID | None:
-    """Coerce a value to UUID if possible; else None.
-
-    Args:
-        value: Source value.
-
-    Returns:
-        ``uuid.UUID`` or ``None``.
-    """
-    if value is None:
-        return None
-    if isinstance(value, uuid.UUID):
-        return value
-    return uuid.UUID(str(value))

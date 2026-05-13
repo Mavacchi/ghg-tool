@@ -14,7 +14,7 @@ from __future__ import annotations
 import uuid
 from collections.abc import Iterable
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from decimal import Decimal
 
 from ghg_tool.domain.entities.emission_record import EmissionRecord
@@ -30,12 +30,20 @@ class IntensityReferenceInputs:
         production_tonnes: Total tonnes of gres porcellanato produced.
         revenue_meur: Net revenue in M EUR.
         fte: Full-time-equivalent headcount (HR official).
+        hr_confirmation_date: Effective date on which HR officially confirmed
+            the FTE figure.  Used verbatim in ``disclosure_notes``.  Per
+            REV-017 the date must be supplied explicitly by the caller — no
+            in-code default — so the timestamp is not bound to the calc
+            session's clock.  In production wiring this should be the
+            ``effective_from`` value of the HR FTE entry in the factor
+            catalog (or equivalent reference table).
     """
 
     anno: int
     production_tonnes: Decimal
     revenue_meur: Decimal
     fte: int
+    hr_confirmation_date: date
 
 
 def compute_intensities(
@@ -143,7 +151,14 @@ def _build_kpis(  # noqa: PLR0913 — explicit kwargs make the call-site self-do
     Returns:
         List with three ``IntensityMetric`` rows (KPI-09, 10, 11).
     """
-    notes = f"FTE={ref.fte} (HR official 2026-05-13); scope2_variant={variant}."
+    # REV-017: HR confirmation date is sourced from the reference input,
+    # not from a session-time literal.  Caller (orchestrator) must thread
+    # the date through so the disclosure annotation remains stable across
+    # re-runs and replays.
+    notes = (
+        f"FTE={ref.fte} (HR official {ref.hr_confirmation_date}); "
+        f"scope2_variant={variant}."
+    )
     fte_dec = Decimal(ref.fte)
     return [
         IntensityMetric(

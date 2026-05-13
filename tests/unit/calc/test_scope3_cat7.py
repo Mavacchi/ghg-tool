@@ -101,3 +101,25 @@ def test_none_id(
         [row], catalog, ar6_gwp, correlation_id=correlation_id, created_by="t",
     )
     assert out[0].raw_row_id is None
+
+
+def test_km_per_fte_baseline_constant_in_disclosure(
+    catalog: InMemoryFactorCatalog, ar6_gwp, correlation_id: uuid.UUID,
+) -> None:
+    """REV-018 — module constant referenced via comma-formatted f-string.
+
+    The 8,800 figure must appear formatted with the thousands separator
+    and must come from the module-level constant, not a magic literal.
+    """
+    from ghg_tool.application.calc.scope3_cat7_commuting import (
+        _KM_PER_FTE_YR_BASELINE,
+    )
+    assert _KM_PER_FTE_YR_BASELINE == 8_800
+    out = scope3_cat7_commuting.calculate(
+        [_row()], catalog, ar6_gwp,
+        correlation_id=correlation_id, created_by="t",
+    )
+    notes = out[0].disclosure_notes or ""
+    # Comma-formatted thousands separator
+    assert "8,800" in notes
+    assert "methodology baseline" in notes

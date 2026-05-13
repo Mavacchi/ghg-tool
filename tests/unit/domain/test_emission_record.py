@@ -12,9 +12,19 @@ from decimal import Decimal
 
 import pytest
 
-from ghg_tool.domain.entities.emission_record import EmissionRecord
+from ghg_tool.domain.entities.emission_record import (
+    ALLOWED_GWP_SETS,
+    ALLOWED_METHODOLOGIES,
+    ALLOWED_REGULATORY_STREAMS,
+    ALLOWED_SUB_SCOPES,
+    EmissionRecord,
+)
 from ghg_tool.domain.exceptions.calc_errors import (
+    InvalidGWPSetError,
+    InvalidMethodologyError,
+    InvalidRegulatoryStreamError,
     InvalidSubScopeError,
+    NaiveTimestampError,
     NegativeEmissionError,
 )
 
@@ -82,22 +92,22 @@ def test_scope3_cat_subscopes() -> None:
 
 
 def test_invalid_methodology_rejected() -> None:
-    with pytest.raises(ValueError, match="methodology"):
+    with pytest.raises(InvalidMethodologyError, match="methodology"):
         EmissionRecord(**_kwargs(methodology="bad_method"))
 
 
 def test_invalid_regulatory_stream_rejected() -> None:
-    with pytest.raises(ValueError, match="regulatory_stream"):
+    with pytest.raises(InvalidRegulatoryStreamError, match="regulatory_stream"):
         EmissionRecord(**_kwargs(regulatory_stream="MARKET_DAILY"))
 
 
 def test_invalid_gwp_set_rejected() -> None:
-    with pytest.raises(ValueError, match="gwp_set"):
+    with pytest.raises(InvalidGWPSetError, match="gwp_set"):
         EmissionRecord(**_kwargs(gwp_set="AR4"))
 
 
 def test_naive_timestamp_rejected() -> None:
-    with pytest.raises(ValueError, match="timezone-aware"):
+    with pytest.raises(NaiveTimestampError, match="timezone-aware"):
         EmissionRecord(**_kwargs(calc_timestamp=datetime(2024, 1, 1)))  # noqa: DTZ001
 
 
@@ -144,3 +154,60 @@ def test_uncertainty_bands_can_be_set() -> None:
     ))
     assert rec.uncertainty_band_lower == Decimal("0.1")
     assert rec.uncertainty_band_upper == Decimal("0.3")
+
+
+# ---------------------------------------------------------------------------
+# REV-011: public vocabulary exports
+# ---------------------------------------------------------------------------
+
+
+def test_allowed_sub_scopes_publicly_exported() -> None:
+    """REV-011: BackendAgent imports ALLOWED_SUB_SCOPES (no leading _)."""
+    assert "combustion" in ALLOWED_SUB_SCOPES[1]
+    assert "LB" in ALLOWED_SUB_SCOPES[2]
+    assert "Cat1" in ALLOWED_SUB_SCOPES[3]
+
+
+def test_allowed_methodologies_publicly_exported() -> None:
+    """REV-011: ALLOWED_METHODOLOGIES exposed without underscore prefix."""
+    assert "activity-based" in ALLOWED_METHODOLOGIES
+    assert "stoichiometric" in ALLOWED_METHODOLOGIES
+
+
+def test_allowed_regulatory_streams_publicly_exported() -> None:
+    """REV-011: ALLOWED_REGULATORY_STREAMS exposed without underscore prefix."""
+    assert "CSRD_ESRS_E1" in ALLOWED_REGULATORY_STREAMS
+    assert "EU_ETS_PHASE_IV" in ALLOWED_REGULATORY_STREAMS
+
+
+def test_allowed_gwp_sets_publicly_exported() -> None:
+    """REV-011: ALLOWED_GWP_SETS exposed without underscore prefix."""
+    assert "AR6" in ALLOWED_GWP_SETS
+    assert "AR5" in ALLOWED_GWP_SETS
+    assert len(ALLOWED_GWP_SETS) == 2
+
+
+# ---------------------------------------------------------------------------
+# REV-019: custom exception types subclass CalcError
+# ---------------------------------------------------------------------------
+
+
+def test_invalid_methodology_is_calc_error() -> None:
+    """InvalidMethodologyError must inherit from CalcError."""
+    from ghg_tool.domain.exceptions.calc_errors import CalcError
+    assert issubclass(InvalidMethodologyError, CalcError)
+
+
+def test_invalid_regulatory_stream_is_calc_error() -> None:
+    from ghg_tool.domain.exceptions.calc_errors import CalcError
+    assert issubclass(InvalidRegulatoryStreamError, CalcError)
+
+
+def test_invalid_gwp_set_is_calc_error() -> None:
+    from ghg_tool.domain.exceptions.calc_errors import CalcError
+    assert issubclass(InvalidGWPSetError, CalcError)
+
+
+def test_naive_timestamp_is_calc_error() -> None:
+    from ghg_tool.domain.exceptions.calc_errors import CalcError
+    assert issubclass(NaiveTimestampError, CalcError)

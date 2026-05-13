@@ -12,7 +12,7 @@ Key invariants (FR-20, FR-30, FR-31):
 from __future__ import annotations
 
 import uuid
-from datetime import UTC
+from datetime import UTC, datetime
 from typing import Annotated
 
 import structlog
@@ -21,6 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ghg_tool.api.dependencies.auth import CurrentUser
 from ghg_tool.api.dependencies.db import get_db
+from ghg_tool.api.dependencies.pagination import encode_cursor
 from ghg_tool.api.middleware.correlation_id import get_correlation_id
 from ghg_tool.api.middleware.rbac import require_permission, require_role
 from ghg_tool.api.schemas.common import CursorPage
@@ -31,6 +32,7 @@ from ghg_tool.api.schemas.emission_schemas import (
     EmissionFilter,
     EmissionResponse,
 )
+from ghg_tool.api.schemas.kpi_schemas import EmissionCreateResponse
 from ghg_tool.infrastructure.db.models.emission import Emission
 from ghg_tool.infrastructure.db.repositories.emissions_repository import (
     EmissionsRepository,
@@ -39,6 +41,111 @@ from ghg_tool.infrastructure.db.repositories.emissions_repository import (
 logger = structlog.get_logger(__name__)
 
 router = APIRouter(prefix="/api/v1/emissions", tags=["emissions"])
+
+
+# ---------------------------------------------------------------------------
+# Internal factory helpers (REV-002, REV-003)
+# ---------------------------------------------------------------------------
+
+
+def _build_new_emission_row(
+    body: EmissionCreate,
+    user: CurrentUser,
+    correlation_id: str,
+    now: datetime,
+) -> Emission:
+    """Build an Emission ORM instance for a new (non-correction) record.
+
+    Args:
+        body: Validated ``EmissionCreate`` payload.
+        user: Authenticated user creating the record.
+        correlation_id: Request-scoped correlation UUID string.
+        now: UTC datetime of the request.
+
+    Returns:
+        An unsaved ``Emission`` ORM instance ready for ``repo.insert``.
+    """
+    return Emission(
+        id=uuid.uuid4(),
+        tenant_id=uuid.UUID(user.tenant_id),
+        correlation_id=uuid.UUID(correlation_id) if correlation_id else uuid.uuid4(),
+        raw_row_id=body.raw_row_id,
+        raw_scope=body.raw_scope,
+        scope=body.scope,
+        sub_scope=body.sub_scope,
+        codice_sito=body.codice_sito,
+        anno=body.anno,
+        tco2e=body.tco2e,
+        co2_tonne=body.co2_tonne,
+        ch4_tco2e=body.ch4_tco2e,
+        n2o_tco2e=body.n2o_tco2e,
+        co2_biogenic_tonne=body.co2_biogenic_tonne,
+        co2_fossil_tonne=body.co2_fossil_tonne,
+        factor_id=body.factor_id,
+        factor_version=body.factor_version,
+        factor_source=body.factor_source,
+        gwp_set=body.gwp_set,
+        methodology=body.methodology,
+        regulatory_stream=body.regulatory_stream,
+        calc_timestamp=now,
+        created_by=user.sub,
+        valid_from=now,
+        disclosure_notes=body.disclosure_notes,
+    )
+
+
+def _build_correction_row(
+    body: EmissionCorrectionCreate,
+    user: CurrentUser,
+    correlation_id: str,
+    now: datetime,
+) -> tuple[uuid.UUID, Emission]:
+    """Build an Emission ORM instance for a correction row.
+
+    Args:
+        body: Validated ``EmissionCorrectionCreate`` payload.
+        user: Authenticated user performing the correction.
+        correlation_id: Request-scoped correlation UUID string.
+        now: UTC datetime of the request.
+
+    Returns:
+        A tuple of (new_id, unsaved ``Emission`` ORM instance).
+    """
+    new_id = uuid.uuid4()
+    row = Emission(
+        id=new_id,
+        tenant_id=uuid.UUID(user.tenant_id),
+        correlation_id=uuid.UUID(correlation_id) if correlation_id else uuid.uuid4(),
+        raw_row_id=body.new_record.raw_row_id,
+        raw_scope=body.new_record.raw_scope,
+        scope=body.new_record.scope,
+        sub_scope=body.new_record.sub_scope,
+        codice_sito=body.new_record.codice_sito,
+        anno=body.new_record.anno,
+        tco2e=body.new_record.tco2e,
+        co2_tonne=body.new_record.co2_tonne,
+        ch4_tco2e=body.new_record.ch4_tco2e,
+        n2o_tco2e=body.new_record.n2o_tco2e,
+        co2_biogenic_tonne=body.new_record.co2_biogenic_tonne,
+        co2_fossil_tonne=body.new_record.co2_fossil_tonne,
+        factor_id=body.new_record.factor_id,
+        factor_version=body.new_record.factor_version,
+        factor_source=body.new_record.factor_source,
+        gwp_set=body.new_record.gwp_set,
+        methodology=body.new_record.methodology,
+        regulatory_stream=body.new_record.regulatory_stream,
+        calc_timestamp=now,
+        created_by=user.sub,
+        valid_from=now,
+        reason_code=body.reason_code,
+        disclosure_notes=body.new_record.disclosure_notes,
+    )
+    return new_id, row
+
+
+# ---------------------------------------------------------------------------
+# Endpoints
+# ---------------------------------------------------------------------------
 
 
 @router.get(
@@ -86,17 +193,13 @@ async def list_emissions(
         codice_sito=filters.codice_sito,
         regulatory_stream=filters.regulatory_stream,
         gwp_set=filters.gwp_set,
+        sub_scope=filters.sub_scope,
     )
-
-    # Apply sub_scope filter in Python (avoid extra DB param for now)
-    if filters.sub_scope is not None:
-        rows = [r for r in rows if r.sub_scope == filters.sub_scope]
 
     # Cursor-based pagination (simple ID-based slice for v1)
     items = [EmissionResponse.model_validate(r) for r in rows[: filters.limit]]
     next_cursor: str | None = None
     if len(rows) > filters.limit:
-        from ghg_tool.api.dependencies.pagination import encode_cursor
         next_cursor = encode_cursor(rows[filters.limit - 1].id)
 
     return CursorPage(items=items, next_cursor=next_cursor, total=len(rows))
@@ -104,7 +207,7 @@ async def list_emissions(
 
 @router.post(
     "/",
-    response_model=dict,
+    response_model=EmissionCreateResponse,
     status_code=status.HTTP_201_CREATED,
     summary="Append a new emission record (data_steward only, append-only)",
     description=(
@@ -126,7 +229,7 @@ async def create_emission(
     idempotency_key: Annotated[str, Header(alias="Idempotency-Key", min_length=8)],
     user: CurrentUser = Depends(require_role("data_steward")),
     session: AsyncSession = Depends(get_db),
-) -> dict:  # type: ignore[type-arg]
+) -> EmissionCreateResponse:
     """Append a new emission row (FR-30, append-only).
 
     Args:
@@ -136,7 +239,7 @@ async def create_emission(
         session: Authenticated DB session with RLS GUCs.
 
     Returns:
-        A dict with ``id`` and ``correlation_id`` of the new row.
+        An ``EmissionCreateResponse`` with ``id``, ``correlation_id``, and ``created_at``.
 
     Raises:
         HTTPException: 403 if role is not data_steward; 422 on validation error.
@@ -154,40 +257,17 @@ async def create_emission(
         codice_sito=body.codice_sito,
     )
 
-    from datetime import datetime
     now = datetime.now(tz=UTC)
-    new_row = Emission(
-        id=uuid.uuid4(),
-        tenant_id=uuid.UUID(user.tenant_id),
-        correlation_id=uuid.UUID(correlation_id) if correlation_id else uuid.uuid4(),
-        raw_row_id=body.raw_row_id,
-        raw_scope=body.raw_scope,
-        scope=body.scope,
-        sub_scope=body.sub_scope,
-        codice_sito=body.codice_sito,
-        anno=body.anno,
-        tco2e=body.tco2e,
-        co2_tonne=body.co2_tonne,
-        ch4_tco2e=body.ch4_tco2e,
-        n2o_tco2e=body.n2o_tco2e,
-        co2_biogenic_tonne=body.co2_biogenic_tonne,
-        co2_fossil_tonne=body.co2_fossil_tonne,
-        factor_id=body.factor_id,
-        factor_version=body.factor_version,
-        factor_source=body.factor_source,
-        gwp_set=body.gwp_set,
-        methodology=body.methodology,
-        regulatory_stream=body.regulatory_stream,
-        calc_timestamp=now,
-        created_by=user.sub,
-        valid_from=now,
-        disclosure_notes=body.disclosure_notes,
-    )
+    new_row = _build_new_emission_row(body, user, correlation_id, now)
 
     repo = EmissionsRepository(session)
     persisted = await repo.insert(new_row)
     log.info("Emission created", new_id=str(persisted.id))
-    return {"id": str(persisted.id), "correlation_id": correlation_id}
+    return EmissionCreateResponse(
+        id=persisted.id,
+        correlation_id=correlation_id or "",
+        created_at=now,
+    )
 
 
 @router.post(
@@ -234,7 +314,6 @@ async def correct_emission(
     )
     log.info("correct_emission", reason_code=body.reason_code)
 
-    from datetime import datetime
     now = datetime.now(tz=UTC)
     repo = EmissionsRepository(session)
 
@@ -252,35 +331,7 @@ async def correct_emission(
             },
         )
 
-    new_id = uuid.uuid4()
-    new_row = Emission(
-        id=new_id,
-        tenant_id=uuid.UUID(user.tenant_id),
-        correlation_id=uuid.UUID(correlation_id) if correlation_id else uuid.uuid4(),
-        raw_row_id=body.new_record.raw_row_id,
-        raw_scope=body.new_record.raw_scope,
-        scope=body.new_record.scope,
-        sub_scope=body.new_record.sub_scope,
-        codice_sito=body.new_record.codice_sito,
-        anno=body.new_record.anno,
-        tco2e=body.new_record.tco2e,
-        co2_tonne=body.new_record.co2_tonne,
-        ch4_tco2e=body.new_record.ch4_tco2e,
-        n2o_tco2e=body.new_record.n2o_tco2e,
-        co2_biogenic_tonne=body.new_record.co2_biogenic_tonne,
-        co2_fossil_tonne=body.new_record.co2_fossil_tonne,
-        factor_id=body.new_record.factor_id,
-        factor_version=body.new_record.factor_version,
-        factor_source=body.new_record.factor_source,
-        gwp_set=body.new_record.gwp_set,
-        methodology=body.new_record.methodology,
-        regulatory_stream=body.new_record.regulatory_stream,
-        calc_timestamp=now,
-        created_by=user.sub,
-        valid_from=now,
-        reason_code=body.reason_code,
-        disclosure_notes=body.new_record.disclosure_notes,
-    )
+    new_id, new_row = _build_correction_row(body, user, correlation_id, now)
 
     await repo.insert(new_row)
     await repo.apply_correction(

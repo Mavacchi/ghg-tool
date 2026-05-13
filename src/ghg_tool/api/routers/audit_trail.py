@@ -7,17 +7,23 @@ correlation_id, year, and site.
 
 from __future__ import annotations
 
-from typing import Any
 from uuid import UUID
 
 import structlog
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy import text
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ghg_tool.api.dependencies.auth import CurrentUser
 from ghg_tool.api.dependencies.db import get_db
 from ghg_tool.api.middleware.correlation_id import get_correlation_id
 from ghg_tool.api.middleware.rbac import require_permission
+from ghg_tool.api.schemas.kpi_schemas import (
+    AuditTrailEntry,
+    AuditTrailResponse,
+    PaginationMeta,
+)
 
 logger = structlog.get_logger(__name__)
 
@@ -34,11 +40,12 @@ router = APIRouter(prefix="/api/v1/audit-trail", tags=["audit-trail"])
         "Filterable by correlation_id, anno, codice_sito. "
         "esg_manager and auditor roles only (FR-22, FR-31)."
     ),
-    response_model=dict,
+    response_model=AuditTrailResponse,
     responses={
         200: {"description": "Audit trail rows"},
         401: {"description": "Not authenticated"},
         403: {"description": "Insufficient role — esg_manager or auditor required"},
+        500: {"description": "Internal error retrieving audit trail"},
     },
 )
 async def get_audit_trail(
@@ -48,7 +55,7 @@ async def get_audit_trail(
     limit: int = 100,
     user: CurrentUser = Depends(require_permission("audit_trail", "read")),
     session: AsyncSession = Depends(get_db),
-) -> dict[str, Any]:
+) -> AuditTrailResponse:
     """Return emission-to-factor lineage for audit purposes.
 
     Args:
@@ -60,13 +67,15 @@ async def get_audit_trail(
         session: Authenticated DB session.
 
     Returns:
-        A dict with ``rows`` list and metadata.
+        An ``AuditTrailResponse`` with ``entries`` list and pagination metadata.
+
+    Raises:
+        HTTPException: 500 on internal DB error (detail never exposes internals).
     """
     request_cid = get_correlation_id()
     log = logger.bind(correlation_id=request_cid, user=user.sub[:8])
     log.info("get_audit_trail", anno=anno, codice_sito=codice_sito)
 
-    from sqlalchemy import text
     query_sql = """
         SELECT
             e.id               AS emission_id,
@@ -118,7 +127,18 @@ async def get_audit_trail(
             for k, v in r.items():
                 if hasattr(v, "hex"):  # UUID-like
                     r[k] = str(v)
-        return {"rows": rows, "count": len(rows), "correlation_id": request_cid}
-    except Exception as exc:  # noqa: BLE001
-        log.error("audit_trail query failed", error=str(exc))
-        return {"rows": [], "count": 0, "correlation_id": request_cid, "_error": str(exc)}
+        entries = [AuditTrailEntry(**r) for r in rows]
+        return AuditTrailResponse(
+            entries=entries,
+            pagination=PaginationMeta(count=len(entries)),
+            correlation_id=request_cid or "",
+        )
+    except SQLAlchemyError as exc:
+        log.error(
+            "audit_trail query failed",
+            exc_type=type(exc).__name__,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Internal error retrieving audit trail",
+        ) from exc

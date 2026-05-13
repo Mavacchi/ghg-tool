@@ -8,11 +8,12 @@ from typing import Annotated
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ghg_tool.api.dependencies.auth import CurrentUser
 from ghg_tool.api.dependencies.db import get_db
+from ghg_tool.api.dependencies.pagination import encode_cursor
 from ghg_tool.api.middleware.correlation_id import get_correlation_id
 from ghg_tool.api.middleware.rbac import require_permission
 from ghg_tool.api.schemas.common import CursorPage
@@ -68,22 +69,27 @@ async def list_go_certificates(
         stmt = stmt.where(GoCertificate.site_id == filters.site_id)
     if filters.anno is not None:
         stmt = stmt.where(GoCertificate.anno == filters.anno)
+    # REV-022: push all_qc_passed filter to DB instead of Python post-filter
+    if filters.all_qc_passed is not None:
+        all_qc_expr = and_(
+            GoCertificate.qc1_conveyed_claim_passed == filters.all_qc_passed,
+            GoCertificate.qc2_unique_passed == filters.all_qc_passed,
+            GoCertificate.qc3_redeemed_passed == filters.all_qc_passed,
+            GoCertificate.qc4_vintage_passed == filters.all_qc_passed,
+            GoCertificate.qc5_geographic_passed == filters.all_qc_passed,
+            GoCertificate.qc6_scope_passed == filters.all_qc_passed,
+            GoCertificate.qc7_exclusivity_passed == filters.all_qc_passed,
+            GoCertificate.qc8_residual_mix_disclosed == filters.all_qc_passed,
+        )
+        stmt = stmt.where(all_qc_expr)
     stmt = stmt.limit(filters.limit + 1)
 
     result = await session.execute(stmt)
     rows = result.scalars().all()
 
-    # Filter all_qc_passed in Python (computed property)
-    if filters.all_qc_passed is not None:
-        rows = [
-            r for r in rows
-            if _all_qc(r) == filters.all_qc_passed
-        ]
-
     items = [GoCertificateResponse.model_validate(r) for r in rows[: filters.limit]]
     next_cursor: str | None = None
     if len(rows) > filters.limit:
-        from ghg_tool.api.dependencies.pagination import encode_cursor
         next_cursor = encode_cursor(rows[filters.limit - 1].id)
 
     return CursorPage(items=items, next_cursor=next_cursor)
@@ -155,8 +161,8 @@ async def create_go_certificate(
     return GoCertificateResponse.model_validate(new_cert)
 
 
-@router.patch(
-    "/{go_id}/validate",
+@router.post(
+    "/{go_id}/validations",
     response_model=GoCertificateResponse,
     status_code=status.HTTP_201_CREATED,
     summary="Add a new validation version for a GO certificate (append-only)",
@@ -260,24 +266,3 @@ async def validate_go_certificate(
     await session.flush()
     log.info("GO certificate validation version created", cert_id=str(new_cert.id))
     return GoCertificateResponse.model_validate(new_cert)
-
-
-def _all_qc(cert: GoCertificate) -> bool:
-    """Return True if all 8 QC booleans are True on the given DB row.
-
-    Args:
-        cert: The ORM ``GoCertificate`` instance.
-
-    Returns:
-        Boolean AND of all 8 QC fields.
-    """
-    return all([
-        cert.qc1_conveyed_claim_passed,
-        cert.qc2_unique_passed,
-        cert.qc3_redeemed_passed,
-        cert.qc4_vintage_passed,
-        cert.qc5_geographic_passed,
-        cert.qc6_scope_passed,
-        cert.qc7_exclusivity_passed,
-        cert.qc8_residual_mix_disclosed,
-    ])

@@ -11,8 +11,13 @@ from ghg_tool.domain.exceptions.calc_errors import (
     FactorUnitMismatchError,
     GOValidationError,
     GWPSetMismatchError,
+    InvalidGWPSetError,
+    InvalidIntensityDenominatorError,
+    InvalidMethodologyError,
+    InvalidRegulatoryStreamError,
     InvalidSubScopeError,
     MissingFactorError,
+    NaiveTimestampError,
     NegativeEmissionError,
 )
 from ghg_tool.domain.ports.factor_catalog import FactorRecord
@@ -80,6 +85,12 @@ def test_calc_error_is_base() -> None:
     assert issubclass(NegativeEmissionError, CalcError)
     assert issubclass(GOValidationError, CalcError)
     assert issubclass(FactorUnitMismatchError, CalcError)
+    # REV-019 / REV-020 — new exception types added pre-wave-3
+    assert issubclass(InvalidGWPSetError, CalcError)
+    assert issubclass(InvalidMethodologyError, CalcError)
+    assert issubclass(InvalidRegulatoryStreamError, CalcError)
+    assert issubclass(NaiveTimestampError, CalcError)
+    assert issubclass(InvalidIntensityDenominatorError, CalcError)
 
 
 def test_missing_factor_carries_message() -> None:

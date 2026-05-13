@@ -84,7 +84,8 @@ class TestAuditTrail:
         _teardown()
         assert resp.status_code == 200
         data = resp.json()
-        assert "rows" in data
+        # REV-016: response is now AuditTrailResponse with 'entries' key
+        assert "entries" in data
         assert "correlation_id" in data
 
     def test_auditor_can_read(self) -> None:
@@ -121,23 +122,28 @@ class TestAuditTrail:
         _teardown()
         assert resp.status_code == 200
 
-    def test_db_error_returns_empty_rows(self) -> None:
-        """If the DB raises, the endpoint returns empty rows rather than 500."""
+    def test_db_error_returns_500(self) -> None:
+        """REV-009: SQLAlchemyError raises 500; RuntimeError (non-SQLAlchemy) propagates."""
+        from sqlalchemy.exc import OperationalError
+
         app.dependency_overrides[get_current_user] = _auth("auditor")
 
         async def _failing_db() -> Any:
             session = AsyncMock()
-            session.execute = AsyncMock(side_effect=RuntimeError("DB down"))
+            session.execute = AsyncMock(
+                side_effect=OperationalError("DB down", None, None)
+            )
             yield session
 
         app.dependency_overrides[get_db] = _failing_db
         with TestClient(app, raise_server_exceptions=False) as client:
             resp = client.get("/api/v1/audit-trail/")
         _teardown()
-        # Should degrade gracefully (returns rows=[] with _error key)
-        assert resp.status_code == 200
+        # REV-009: SQLAlchemyError → 500; no internal detail leaked to client
+        assert resp.status_code == 500
         data = resp.json()
-        assert data["rows"] == []
+        assert "_error" not in data
+        assert "Internal error" in str(data)
 
 
 # ---------------------------------------------------------------------------
@@ -165,12 +171,16 @@ class TestKPIs:
         assert resp.status_code == 401
 
     def test_mv_unavailable_returns_stub(self) -> None:
-        """If MV query fails, stub payload with _note key is returned."""
+        """If MV query raises ProgrammingError/OperationalError, stub payload returned."""
+        from sqlalchemy.exc import ProgrammingError
+
         app.dependency_overrides[get_current_user] = _auth("auditor")
 
         async def _failing_db() -> Any:
             session = AsyncMock()
-            session.execute = AsyncMock(side_effect=Exception("relation does not exist"))
+            session.execute = AsyncMock(
+                side_effect=ProgrammingError("relation does not exist", None, None)
+            )
             yield session
 
         app.dependency_overrides[get_db] = _failing_db
@@ -180,7 +190,8 @@ class TestKPIs:
         assert resp.status_code == 200
         data = resp.json()
         assert data["kpis"] == []
-        assert "_note" in data
+        # Note is serialised as "_note" via model_dump override
+        assert "_note" in data or "note" in data
 
     def test_gwp_set_param_accepted(self) -> None:
         """gwp_set and anno query params are accepted without error."""
@@ -242,7 +253,8 @@ class TestDQFindings:
             with patch(
                 "ghg_tool.api.routers.dq_findings.DQFindingsRepository"
             ) as mock_repo:
-                mock_repo.return_value.get_open_findings = AsyncMock(return_value=[])
+                # REV-023: router now calls get_findings instead of get_open_findings
+                mock_repo.return_value.get_findings = AsyncMock(return_value=[])
                 _setup(role)
                 with TestClient(app, raise_server_exceptions=False) as client:
                     resp = client.get("/api/v1/dq-findings/")
@@ -259,7 +271,8 @@ class TestDQFindings:
     def test_list_with_filters(self) -> None:
         """Severity and anno filters are accepted and applied."""
         with patch("ghg_tool.api.routers.dq_findings.DQFindingsRepository") as mock_repo:
-            mock_repo.return_value.get_open_findings = AsyncMock(return_value=[])
+            # REV-023: router now calls get_findings instead of get_open_findings
+            mock_repo.return_value.get_findings = AsyncMock(return_value=[])
             _setup("auditor")
             with TestClient(app, raise_server_exceptions=False) as client:
                 resp = client.get(
@@ -655,7 +668,7 @@ class TestGoCertificates:
         assert resp.status_code == 201
 
     def test_validate_not_found_returns_404(self) -> None:
-        """PATCH /go-certificates/{go_id}/validate on unknown go_id → 404."""
+        """POST /go-certificates/{go_id}/validations on unknown go_id → 404 (REV-015)."""
         app.dependency_overrides[get_current_user] = _auth("data_steward")
 
         async def _db_not_found() -> Any:
@@ -667,15 +680,16 @@ class TestGoCertificates:
 
         app.dependency_overrides[get_db] = _db_not_found
         with TestClient(app, raise_server_exceptions=False) as client:
-            resp = client.patch(
-                "/api/v1/go-certificates/NONEXISTENT-GO-ID/validate",
+            # REV-015: endpoint changed from PATCH …/validate to POST …/validations
+            resp = client.post(
+                "/api/v1/go-certificates/NONEXISTENT-GO-ID/validations",
                 json={"qc1_conveyed_claim_passed": True},
             )
         _teardown()
         assert resp.status_code == 404
 
     def test_validate_success_creates_new_version(self) -> None:
-        """PATCH /go-certificates/{go_id}/validate creates a new row (append-only)."""
+        """POST /go-certificates/{go_id}/validations creates a new row (append-only, REV-015)."""
         existing = _go_cert_mock()
 
         app.dependency_overrides[get_current_user] = _auth("data_steward")
@@ -710,8 +724,9 @@ class TestGoCertificates:
                 chained = mock_select.return_value
                 chained.where.return_value.order_by.return_value.limit.return_value = MagicMock()
                 with TestClient(app, raise_server_exceptions=False) as client:
-                    resp = client.patch(
-                        "/api/v1/go-certificates/GO-2024-001/validate",
+                    # REV-015: changed from PATCH …/validate to POST …/validations
+                    resp = client.post(
+                        "/api/v1/go-certificates/GO-2024-001/validations",
                         json={"qc1_conveyed_claim_passed": False},
                     )
         _teardown()
@@ -727,3 +742,56 @@ class TestGoCertificates:
             )
         _teardown()
         assert resp.status_code == 200
+
+
+# ---------------------------------------------------------------------------
+# REV-023 regression: GET /dq-findings/?resolution_status=RESOLVED
+# ---------------------------------------------------------------------------
+
+
+class TestDQFindingsResolutionStatusRegression:
+    """REV-023: RESOLVED findings must pass through — not silently return []."""
+
+    def test_resolved_status_returns_waived_rows(self) -> None:
+        """GET /dq-findings/?resolution_status=WAIVED returns WAIVED rows (regression REV-023).
+
+        Before REV-023, get_open_findings only returned OPEN rows, then the
+        in-Python filter discarded them all, leaving an empty list.  Now
+        get_findings builds a dynamic predicate and the rows pass through.
+        """
+        waived_finding = _dq_finding_mock(resolution_status="WAIVED")
+
+        with patch("ghg_tool.api.routers.dq_findings.DQFindingsRepository") as mock_repo:
+            mock_repo.return_value.get_findings = AsyncMock(return_value=[waived_finding])
+            _setup("auditor")
+            with TestClient(app, raise_server_exceptions=False) as client:
+                resp = client.get(
+                    "/api/v1/dq-findings/",
+                    params={"resolution_status": "WAIVED"},
+                )
+            _teardown()
+
+        assert resp.status_code == 200
+        data = resp.json()
+        # Items must not be empty — WAIVED row passed through from get_findings
+        assert len(data["items"]) == 1
+        assert data["items"][0]["resolution_status"] == "WAIVED"
+
+    def test_resolved_status_passes_correct_param_to_repo(self) -> None:
+        """Router passes resolution_status filter to get_findings (not silently ignored)."""
+        with patch("ghg_tool.api.routers.dq_findings.DQFindingsRepository") as mock_repo:
+            mock_get_findings = AsyncMock(return_value=[])
+            mock_repo.return_value.get_findings = mock_get_findings
+            _setup("auditor")
+            with TestClient(app, raise_server_exceptions=False) as client:
+                resp = client.get(
+                    "/api/v1/dq-findings/",
+                    params={"resolution_status": "WAIVED"},
+                )
+            _teardown()
+
+        assert resp.status_code == 200
+        # Verify get_findings was called with resolution_status="WAIVED"
+        call_kwargs = mock_get_findings.call_args
+        assert call_kwargs is not None
+        assert call_kwargs.kwargs.get("resolution_status") == "WAIVED"
