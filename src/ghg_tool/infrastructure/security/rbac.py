@@ -56,6 +56,9 @@ PERMISSION_MATRIX: Final[dict[str, dict[str, frozenset[str]]]] = {
         "write": frozenset({ROLE_DATA_STEWARD}),
         "validate": frozenset({ROLE_DATA_STEWARD}),
     },
+    "intensity": {
+        "read": frozenset({ROLE_DATA_STEWARD, ROLE_ESG_MANAGER, ROLE_AUDITOR}),
+    },
     "reports": {
         "pdf": frozenset({ROLE_ESG_MANAGER}),
         "excel": frozenset({ROLE_DATA_STEWARD, ROLE_ESG_MANAGER}),

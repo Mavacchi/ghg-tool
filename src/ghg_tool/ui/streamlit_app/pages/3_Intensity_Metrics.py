@@ -1,11 +1,19 @@
 """Intensity Metrics page (FR-25, FR-26).
 
-PRE-FLIGHT GATE FAILURE: ``GET /api/v1/intensity`` endpoint is MISSING.
-This page displays a prominent notice and static placeholder charts.
-BackendAgent must implement the endpoint before live data can be shown here.
+Displays ESRS E1-6 §45 intensity ratios (KPI-09 / KPI-10 / KPI-11) fetched
+from ``GET /api/v1/intensity``.
 
-When the endpoint becomes available, the STUB_MODE flag should be set to False
-and the live fetch uncommented.
+Controls:
+  - Denominator selector (4 FR-26 types)
+  - Year range slider
+  - Site multi-select (optional)
+  - GWP set selector
+
+Visualisations:
+  - Plotly line chart (one series per scope_label)
+  - Tabular view with CSV download
+  - Provenance tooltips (factor_source, factor_version, gwp_set, methodology)
+  - VIANO 2025 banner when applicable
 """
 
 from __future__ import annotations
@@ -14,10 +22,23 @@ import streamlit as st
 
 st.set_page_config(page_title="Intensity Metrics — GHG", layout="wide")
 
+import os  # noqa: E402
+
+import pandas as pd  # noqa: E402
+import plotly.express as px  # noqa: E402
+
 from ghg_tool.ui.streamlit_app.Home import DASHBOARD_ID, DASHBOARD_VERSION  # noqa: E402
+from ghg_tool.ui.streamlit_app.lib.api_client import fetch_intensity  # noqa: E402
 from ghg_tool.ui.streamlit_app.lib.auth import get_lang, require_auth  # noqa: E402
+from ghg_tool.ui.streamlit_app.lib.banner import render_viano_banner, should_show_viano_banner  # noqa: E402
 from ghg_tool.ui.streamlit_app.lib.i18n import _  # noqa: E402
-from ghg_tool.ui.streamlit_app.lib.palette import BLUE, ORANGE, BLUISH_GREEN, VERMILION  # noqa: E402
+from ghg_tool.ui.streamlit_app.lib.palette import (  # noqa: E402
+    BLUE,
+    BLUISH_GREEN,
+    ORANGE,
+    VERMILION,
+)
+from ghg_tool.ui.streamlit_app.lib.tooltips import build_emission_hovertemplate  # noqa: E402
 
 require_auth()
 lang = get_lang()
@@ -25,96 +46,195 @@ lang = get_lang()
 st.title(_("nav_intensity", lang))
 
 # ---------------------------------------------------------------------------
-# PRE-FLIGHT GATE FAILURE NOTICE
+# Sidebar controls
 # ---------------------------------------------------------------------------
-st.error(
-    "PRE-FLIGHT GATE #1 FAILURE\n\n"
-    + _("intensity_endpoint_missing", lang)
-    + "\n\nEndpoint required: GET /api/v1/intensity\n"
-    "Wire the intensity_service (application/services/intensity_service.py) "
-    "into a FastAPI router and register it in api/main.py.",
-    icon="🚫",
-)
 
-st.divider()
+# Denominator type → API value mapping (FR-26)
+_DENOM_LABELS: dict[str, str] = {
+    _("intensity_eur_revenue", lang): "EUR_revenue",
+    _("intensity_m2_production", lang): "m2_production",
+    _("intensity_fte", lang): "FTE",
+    _("intensity_kg_product", lang): "kg_product",
+}
 
-# ---------------------------------------------------------------------------
-# Sidebar (still rendered so UI is navigable)
-# ---------------------------------------------------------------------------
+_DENOM_UNIT_LABEL: dict[str, str] = {
+    "EUR_revenue": "tCO2e / EUR",
+    "m2_production": "tCO2e / m²",
+    "FTE": "tCO2e / FTE",
+    "kg_product": "tCO2e / kg",
+}
+
+_CURRENT_YEAR: int = 2026  # pinned to dashboard release year; update annually
+
 with st.sidebar:
-    gwp_set = st.selectbox("GWP Set", ["AR6", "AR5"])
-    denominator = st.selectbox(
+    gwp_set = st.selectbox("GWP Set", ["AR6", "AR5"], key="intensity_gwp")
+
+    denom_label = st.selectbox(
         _("intensity_denominator", lang),
-        [
-            _("intensity_eur_revenue", lang),
-            _("intensity_m2_production", lang),
-            _("intensity_fte", lang),
-            _("intensity_kg_product", lang),
-        ],
+        list(_DENOM_LABELS.keys()),
+        key="intensity_denom",
+    )
+    denominator_type = _DENOM_LABELS[denom_label]  # type: ignore[index]
+
+    year_range = st.slider(
+        "Anno (da / a)",
+        min_value=2020,
+        max_value=_CURRENT_YEAR,
+        value=(_CURRENT_YEAR - 4, _CURRENT_YEAR),
+        key="intensity_years",
+    )
+    anno_from, anno_to = year_range
+
+    # Known sites — kept in sync with requirements.md §5.2
+    _ALL_SITES: list[str] = [
+        "IANO", "VIANO", "VIANO_GARGOLA",
+        "CASALGRANDE", "FIORANO", "SASSUOLO", "FRASSINORO",
+    ]
+    selected_sites: list[str] = st.multiselect(
+        "Siti (vuoto = tutti)",
+        _ALL_SITES,
+        default=[],
+        key="intensity_sites",
     )
 
 # ---------------------------------------------------------------------------
-# Static placeholder — shows the page layout for future wiring
+# Fetch data from API
 # ---------------------------------------------------------------------------
-st.subheader("Esempio layout (dati placeholder — non usare per reporting)")
 
-import pandas as pd
-import plotly.express as px
+tenant_id: str = st.session_state.get("tenant_id", os.environ.get("GHG_TENANT_ID", ""))
+# When site filter is used, fetch per-site (first site only in single-select mode).
+# For multi-site aggregate, pass codice_sito=None.
+fetch_site: str | None = selected_sites[0] if len(selected_sites) == 1 else None
 
-placeholder_data = pd.DataFrame({
-    "anno": [2024, 2025, 2024, 2025],
-    "scope2_variant": ["LB", "LB", "MB", "MB"],
-    "intensity": [0.82, 0.78, 0.61, 0.59],
-    "kpi_code": ["KPI-09", "KPI-09", "KPI-09", "KPI-09"],
-    "factor_source": ["PLACEHOLDER", "PLACEHOLDER", "PLACEHOLDER", "PLACEHOLDER"],
-    "factor_version": ["N/A", "N/A", "N/A", "N/A"],
-    "gwp_set": [gwp_set] * 4,
-    "methodology": ["activity-based"] * 4,
-})
+with st.spinner(_("loading", lang)):
+    raw = fetch_intensity(
+        tenant_id=tenant_id,
+        denominator_type=denominator_type,
+        anno_from=anno_from,
+        anno_to=anno_to,
+        codice_sito=fetch_site,
+        gwp_set=gwp_set,
+    )
+
+rows: list[dict] = raw.get("rows", [])
+df = pd.DataFrame(rows) if rows else pd.DataFrame()
+
+# ---------------------------------------------------------------------------
+# VIANO 2025 banner
+# ---------------------------------------------------------------------------
+
+visible_sites: list[str] | None = selected_sites if selected_sites else None
+# Show banner for any year in the selected range that equals 2025
+for _yr in range(anno_from, anno_to + 1):
+    if should_show_viano_banner(_yr, visible_sites):
+        render_viano_banner(lang)
+        break
+
+# ---------------------------------------------------------------------------
+# Empty-state / note display
+# ---------------------------------------------------------------------------
+
+note: str | None = raw.get("_note") or raw.get("note")
+if note:
+    st.info(note)
+
+if df.empty:
+    st.warning(
+        "Nessun dato disponibile per i filtri selezionati. "
+        "Verificare che la pipeline di calcolo (wave 3) sia stata eseguita.",
+        icon="ℹ️",
+    )
+    st.divider()
+    st.caption(
+        f"Dashboard ID: {DASHBOARD_ID} | v{DASHBOARD_VERSION} | "
+        f"GWP set: {gwp_set} | {_('footer_factor_source', lang)} | "
+        f"{_('footer_methodology', lang)}"
+    )
+    st.stop()
+
+# ---------------------------------------------------------------------------
+# Line chart — one series per scope_label
+# ---------------------------------------------------------------------------
+
+# Okabe-Ito palette cycled across scope_labels
+_SCOPE_COLORS: dict[str, str] = {
+    "Scope1": BLUE,
+    "Scope2_LB": ORANGE,
+    "Scope2_MB": BLUISH_GREEN,
+    "Scope3": VERMILION,
+    "Total": "#000000",
+}
+
+y_label: str = _DENOM_UNIT_LABEL.get(denominator_type, "tCO2e / unit")
+chart_title: str = f"{_('chart_title_intensity', lang)} — {denom_label} ({gwp_set})"
 
 fig = px.line(
-    placeholder_data,
+    df,
     x="anno",
-    y="intensity",
-    color="scope2_variant",
-    title=f"{_('chart_title_intensity', lang)} — KPI-09 (PLACEHOLDER)",
-    labels={"intensity": "tCO2e / t produced", "anno": "Anno"},
-    color_discrete_sequence=[BLUE, ORANGE],
-    custom_data=["factor_source", "factor_version", "gwp_set", "methodology"],
+    y="intensity_value",
+    color="scope_label",
+    title=chart_title,
+    labels={"intensity_value": y_label, "anno": "Anno", "scope_label": "Scope"},
+    color_discrete_map=_SCOPE_COLORS,
+    custom_data=[
+        "factor_source",
+        "factor_version",
+        "gwp_set",
+        "methodology",
+        "denominator_value",
+        "denominator_unit",
+        "hr_confirmation_date",
+    ],
     markers=True,
 )
-fig.update_traces(
-    hovertemplate=(
-        "<b>Anno: %{x}</b><br>"
-        "Intensità: %{y:.4f}<br>"
-        "Fonte fattore: %{customdata[0]}<br>"
-        "Versione: %{customdata[1]}<br>"
-        "GWP set: %{customdata[2]}<br>"
-        "Metodologia: %{customdata[3]}<extra></extra>"
-    )
+
+# Build provenance tooltip (FR-23) with CI when available
+_has_ci: bool = (
+    "confidence_interval_lower" in df.columns
+    and df["confidence_interval_lower"].notna().any()
 )
+
+hover_template = build_emission_hovertemplate(
+    value_label=y_label,
+    include_ci=_has_ci,
+    mode="line",
+)
+fig.update_traces(hovertemplate=hover_template)
+
 st.plotly_chart(fig, use_container_width=True)
 
-st.info(
-    "Quando il BackendAgent implementa GET /api/v1/intensity, "
-    "rimuovere il blocco di errore sopra e decommentare il fetch live. "
-    "Passare hr_confirmation_date dall'input HR reference table (REV-017)."
-)
+# ---------------------------------------------------------------------------
+# Tabular view + CSV download
+# ---------------------------------------------------------------------------
 
-# ---------------------------------------------------------------------------
-# Commented-out live implementation (enable once endpoint exists)
-# ---------------------------------------------------------------------------
-# with st.spinner(_("loading", lang)):
-#     params = {"gwp_set": gwp_set, "denominator": denominator}
-#     raw = _safe_get(f"{_get_base_url()}/api/v1/intensity/", params=params)
-#     # hr_confirmation_date must be passed from HR reference table per REV-017
-#     intensity_rows = raw.get("items", [])
-#     df = pd.DataFrame(intensity_rows)
-# ... (render line plot from df)
+st.subheader("Dati tabellari")
+
+display_cols: list[str] = [
+    c for c in [
+        "anno", "codice_sito", "scope_label",
+        "intensity_value", "denominator_value", "denominator_unit",
+        "gwp_set", "factor_source", "factor_version", "methodology",
+        "hr_confirmation_date",
+        "confidence_interval_lower", "confidence_interval_upper",
+        "correlation_id",
+    ]
+    if c in df.columns
+]
+
+st.dataframe(df[display_cols], use_container_width=True)
+
+csv_bytes: bytes = df[display_cols].to_csv(index=False).encode("utf-8")
+st.download_button(
+    label="Scarica CSV",
+    data=csv_bytes,
+    file_name=f"intensity_{denominator_type}_{anno_from}_{anno_to}_{gwp_set}.csv",
+    mime="text/csv",
+)
 
 # ---------------------------------------------------------------------------
 # Footer
 # ---------------------------------------------------------------------------
+
 st.divider()
 st.caption(
     f"Dashboard ID: {DASHBOARD_ID} | v{DASHBOARD_VERSION} | "

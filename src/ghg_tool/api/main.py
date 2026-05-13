@@ -5,7 +5,7 @@ Constructs the ``FastAPI`` app with:
 - RFC 7807 error handler middleware
 - Correlation-ID middleware (FR-22)
 - Rate-limit middleware (SG-10, NFR-11)
-- 9 routers + health endpoints
+- 10 routers + health endpoints
 - OpenAPI 3.1 metadata; Swagger UI available only in non-production
 
 Environment variables consumed:
@@ -40,6 +40,7 @@ from ghg_tool.api.routers import (
     factor_catalog,
     go_certificates,
     health,
+    intensity,
     kpis,
     reports,
 )
@@ -161,6 +162,7 @@ def _create_app() -> FastAPI:
     app.include_router(auth.router)
     app.include_router(emissions.router)
     app.include_router(kpis.router)
+    app.include_router(intensity.router)
     app.include_router(audit_trail.router)
     app.include_router(factor_catalog.router)
     app.include_router(dq_findings.router)

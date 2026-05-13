@@ -299,6 +299,42 @@ def trigger_excel_report(anno: int, gwp_set: str = "AR6") -> dict[str, Any]:
     )
 
 
+@st.cache_data(ttl=300, show_spinner=False)
+def fetch_intensity(
+    tenant_id: str,
+    denominator_type: str,
+    anno_from: int | None = None,
+    anno_to: int | None = None,
+    codice_sito: str | None = None,
+    gwp_set: str = "AR6",
+) -> dict[str, Any]:
+    """Fetch intensity metrics from ``GET /api/v1/intensity``.
+
+    Args:
+        tenant_id: Tenant UUID string.
+        denominator_type: One of 'EUR_revenue', 'm2_production', 'FTE', 'kg_product'.
+        anno_from: First reporting year (inclusive).
+        anno_to: Last reporting year (inclusive).
+        codice_sito: Optional site code filter; omit for multi-site aggregate.
+        gwp_set: GWP characterisation set (default 'AR6').
+
+    Returns:
+        IntensityResponse JSON dict.  Returns empty dict on network/auth error.
+    """
+    params: dict[str, Any] = {
+        "tenant_id": tenant_id,
+        "denominator_type": denominator_type,
+        "gwp_set": gwp_set,
+    }
+    if anno_from is not None:
+        params["anno_from"] = anno_from
+    if anno_to is not None:
+        params["anno_to"] = anno_to
+    if codice_sito:
+        params["codice_sito"] = codice_sito
+    return _safe_get(f"{_get_base_url()}/api/v1/intensity/", params=params)
+
+
 def fetch_job_status(job_id: str) -> dict[str, Any]:
     """Poll job status from ``GET /api/v1/reports/status/{job_id}``.
 
