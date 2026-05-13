@@ -6,10 +6,10 @@
 
 | Field | Value |
 |---|---|
-| Version | 1.0.0 |
+| Version | 1.1.0 |
 | Date | 2026-05-13 |
-| Author | requirements-agent |
-| Review Status | DRAFT — awaiting user approval before Phase 2 |
+| Author | requirements-agent (v1.0.0); user clarifications (v1.1.0) |
+| Review Status | APPROVED — Phase 1 closed; v1.1.0 incorporates: (a) Cat 3 WTT fuel quantities derived from Σ Scope 1 (not CSV column), (b) FTE 506/484 confirmed as official HR headcount, (c) SASSUOLO 2025 EE_Acquistata_Grid = 0 confirmed (100% GO contract) |
 | Task ID | ghg-tool-phase-1 |
 | Base Year | 2024 |
 | Reporting Years | 2024 (consolidated), 2025 (partial — see OI-2) |
@@ -132,9 +132,9 @@ Dual reporting is **mandatory** and non-negotiable per GHG Protocol Scope 2 Guid
 | Voice | Status | Notes |
 |---|---|---|
 | EE_Acquistata_GO (kWh, with Guarantees of Origin) | **IN — MB instrument** | All 7 sites both years; GO certificates must satisfy GHG Protocol Scope 2 Quality Criteria (see OI-4) |
-| EE_Acquistata_Grid (kWh, no GO) | **IN — LB and MB residual mix** | SASSUOLO 2024 only: 46,786 kWh; absent in 2025 data (verify completeness) |
+| EE_Acquistata_Grid (kWh, no GO) | **IN — LB and MB residual mix** | SASSUOLO: 46,786 kWh in 2024; 0 kWh confirmed in 2025 (full switch to 100% GO contract, user-confirmed 2026-05-13). ETL inserts explicit zero row. |
 
-**Scope 2 raw record count**: 16 data rows across 2024 and 2025 in `scope2_elettricita.csv` (header excluded). 2024: 8 rows (7 sites GO + 1 SASSUOLO Grid). 2025: 7 rows (7 sites GO only — SASSUOLO Grid absent, to be confirmed as zero or missing).
+**Scope 2 raw record count**: 15 native data rows in `scope2_elettricita.csv` (header excluded) + 1 ETL-synthesised zero row = 16 total in staging. 2024: 8 rows (7 sites GO + 1 SASSUOLO Grid). 2025: 7 native rows (7 sites GO only) + 1 ETL-synthesised explicit `EE_Acquistata_Grid = 0 kWh` row for SASSUOLO with provenance flag `auto_zero_user_confirmed` (per user confirmation of 100% GO contract switch). Synthesised row neutralises DQ-CRIT-05 (temporal gap) while preserving auditability.
 
 **Known risk — 2025 VIANO electricity**: VIANO EE_Acquistata_GO 2025 = 3,268,364 kWh vs 2024 = 6,551,604 kWh, representing approximately 50% reduction. Flagged as suspected incomplete data. Investigation deferred to Phase 3 / data-quality-agent (OI-2).
 
@@ -193,7 +193,7 @@ Default proposal for Phase 2: omit Cat 8/10/13/14/15 pending materiality assessm
 | KPI-08 | Total Gross Emissions (Scope 1 + 2 MB + 3) | tCO2e | E1-6 §44 aggregate (MB variant) | Computed | By year |
 | KPI-09 | Intensity: tCO2e per tonne produced | tCO2e / t product | E1-6 §45 — Intensity ratios | Computed | By year; numerator = KPI-07 (LB) and KPI-08 (MB) |
 | KPI-10 | Intensity: tCO2e per M€ revenue | tCO2e / M€ | E1-6 §45 | Computed | By year |
-| KPI-11 | Intensity: tCO2e per FTE | tCO2e / FTE | E1-6 §45 | Computed | By year; FTE from HR data (2024: 506, 2025: 484 from commuting data) |
+| KPI-11 | Intensity: tCO2e per FTE | tCO2e / FTE (headcount) | E1-6 §45 | Computed | By year; FTE = employee headcount confirmed by user (2024: 506, 2025: 484; official HR figure 2026-05-13). "FTE" here = total headcount; if a future strict FTE (part-time-weighted) value differs, a correction row will be inserted. |
 | KPI-12 | Scope 2 GO Coverage | % kWh covered by GO | Disclosure — GHG Protocol Scope 2 Quality | Reference | By site, by year |
 | KPI-13 | Facility Coverage Rate | % of sites with complete data | Data quality disclosure | Reference | By scope, by year |
 | KPI-14 | Scope 3 Cat 3 — WTT + T&D emissions | tCO2e | E1-6 §44(c) Cat 3 | Computed | By energy carrier, by year |
@@ -201,7 +201,7 @@ Default proposal for Phase 2: omit Cat 8/10/13/14/15 pending materiality assessm
 
 **Notes**:
 - Revenue (EUR) and production tonnage must be provided as reference inputs by the data steward; they are not derived from the CSV files.
-- FTE count is currently proxy-derived from commuting distance data (506 in 2024, 484 in 2025); a confirmed HR figure should replace this for official reporting.
+- FTE count (506 in 2024, 484 in 2025) confirmed by user 2026-05-13 as official HR employee headcount, not proxy-derived. The commuting-distance-derived figure used in earlier drafts is consistent with the HR figure (cross-check: 4,452,800 km ÷ 8,800 km/FTE/yr ≈ 506; 4,259,200 km ÷ 8,800 km/FTE/yr ≈ 484). Treat as primary input, not estimate.
 - GWP set used in all computations must be stated in every KPI output header.
 
 ---
@@ -211,7 +211,7 @@ Default proposal for Phase 2: omit Cat 8/10/13/14/15 pending materiality assessm
 | ID | Title | Description | Acceptance Criteria | Priority | Owner Agent |
 |---|---|---|---|---|---|
 | FR-01 | Raw data ingestion — Scope 1 | Ingest `scope1_combustione.csv`; validate schema (columns, data types, allowed Codice_Sito values, allowed Categoria_S1/Combustibile pairs, non-negative Quantità) using pandera schema; reject invalid rows to DLQ with error code. | All 32 data rows loaded or DLQ-ed with reason; no silent data loss; idempotent on re-run. | MUST | data-engineer |
-| FR-02 | Raw data ingestion — Scope 2 | Ingest `scope2_elettricita.csv`; validate schema; enforce allowed Voce_S2 values; flag SASSUOLO 2025 absence of EE_Acquistata_Grid as DQ warning (not block). | All 16 data rows loaded or DLQ-ed; VIANO 2025 ~50% kWh anomaly triggers DQ warning. | MUST | data-engineer |
+| FR-02 | Raw data ingestion — Scope 2 | Ingest `scope2_elettricita.csv`; validate schema; enforce allowed Voce_S2 values; ETL auto-inserts an explicit `EE_Acquistata_Grid = 0 kWh` row for SASSUOLO 2025 (user-confirmed 100% GO contract switch) with provenance flag `auto_zero_user_confirmed`, so DQ-CRIT-05 temporal-gap does not fire; flag VIANO 2025 ~50% kWh reduction as DQ-WARN-01 (OI-2). | All 15 native data rows loaded; 1 ETL-synthesised zero-row inserted with provenance tag; VIANO 2025 anomaly triggers DQ-WARN-01; idempotent on re-run. | MUST | data-engineer |
 | FR-03 | Raw data ingestion — Scope 3 | Ingest `scope3_categorie.csv`; validate schema; allow zero-quantity rows (Cat 4 rail entries) as valid explicit disclosures; enforce allowed Categoria_S3 values (1–15). | All 101 data rows loaded or DLQ-ed; zero-tkm records retained, not filtered. | MUST | data-engineer |
 | FR-04 | Versioned emission factor catalog | Maintain a versioned, read-only (post-publish) factor catalog table with columns: factor_id, substance, scope, category, source (DEFRA/ISPRA/IEA/ecoinvent/EXIOBASE/IPCC/EPD), version, gwp_set, value, unit, valid_from, valid_to, created_by, notes. Source cascade enforced per Section methodology constraints. | Catalog entries are immutable after publish; updates create new version; every factor has a unique (factor_id, version, gwp_set) key. | MUST | data-engineer |
 | FR-05 | Scope 1 combustion calculation | Calculate tCO2e for Gas_Naturale, Gasolio_Auto, and Benzina_Auto using DEFRA factors, AR6 GWP. Output includes CO2, CH4, N2O components. Link each output row to raw row ID and factor_id + version. | Calculation reproducible to 6 significant figures; all output rows carry factor_source, factor_version, gwp_set, methodology, calc_timestamp, created_by, correlation_id. | MUST | data-analyst |
@@ -220,11 +220,11 @@ Default proposal for Phase 2: omit Cat 8/10/13/14/15 pending materiality assessm
 | FR-08 | Scope 2 market-based (MB) calculation | Calculate Scope 2 MB tCO2e: apply 0 tCO2e/MWh for EE_Acquistata_GO volumes (pending GO Quality Criteria validation — OI-4); apply ISPRA residual mix for EE_Acquistata_Grid volumes (SASSUOLO 2024). | MB calculation blocked if GO Quality Criteria not validated (Phase 2 gate); residual mix factor sourced from ISPRA; no LB/MB mixing. | MUST | data-analyst |
 | FR-09 | Scope 3 Cat 1 calculation | Calculate tCO2e for purchased goods (mass-based: ecoinvent v3.10 primary, superseded by supplier EPD where available) and services (spend-based: EXIOBASE/CDP sector ratios). | All mass-based subcategories use ecoinvent; all spend-based subcategories use EXIOBASE; EPD override documented per supplier in factor catalog. | MUST | data-analyst |
 | FR-10 | Scope 3 Cat 2 calculation | Calculate tCO2e for capital goods (Impiantistica, Materiali di consumo) using spend-based method with EXIOBASE/CDP sector ratios. | Factor source and sector classification documented for each spend line. | MUST | data-analyst |
-| FR-11 | Scope 3 Cat 3 calculation | Calculate WTT and T&D loss emissions for Gas Naturale, Gasolio, Benzina (DEFRA WTT factors) and Electricity (DEFRA/IEA WTT + T&D factors). Input quantities mirror Scope 1 fuel data and Scope 2 electricity data. | WTT factors from DEFRA current year; T&D loss factor from ISPRA/IEA; WTT Electricity calculated on total kWh consumed (LB basis); methodology documented. | MUST | data-analyst |
+| FR-11 | Scope 3 Cat 3 calculation | Calculate WTT and T&D loss emissions for Gas Naturale, Gasolio, Benzina (DEFRA WTT factors) and Electricity (DEFRA/IEA WTT + T&D factors). **Fuel input quantities are derived from Σ Scope 1 fuel data per facility/year (NOT from the Cat 3 CSV `Quantità` column).** Electricity input = Σ kWh consumed per Scope 2 (LB basis). Discrepancy between CSV-provided Cat 3 quantity and Σ Scope 1 fuel is logged as DQ finding for audit trail (e.g. GAS_NAT 2024: CSV Cat 3 = 33,149,422 Sm³ vs Σ Scope 1 = 28,149,392 Sm³, delta +18% — Scope 1 is source of truth). | WTT factors from DEFRA current year; T&D loss factor from ISPRA/IEA; WTT fuel calculated on Σ Scope 1 fuel quantity per facility/year; WTT Electricity calculated on total kWh consumed (LB basis); source-of-truth reconciliation rule documented in methodology.md; CSV Cat 3 fuel quantity column retained as informational + DQ delta logged. | MUST | data-analyst |
 | FR-12 | Scope 3 Cat 4 calculation | Calculate tCO2e for upstream transport using distance-based method (tkm × DEFRA mode-specific freight factors). Handle road, rail, and sea modes. Zero-tkm rows produce 0 tCO2e (not NULL). | DEFRA freight factors by mode; zero-tkm rows produce explicit 0.0 tCO2e; all tkm and mode documented. | MUST | data-analyst |
 | FR-13 | Scope 3 Cat 5 calculation | Calculate tCO2e for waste generated in operations using mass-based method. Separate factors for landfill (pericolosi/non-pericolosi) and recycling. | Waste type × disposal route matrix; factors sourced from DEFRA or ecoinvent; recycling credit methodology documented (avoided emissions vs allocation). | MUST | data-analyst |
 | FR-14 | Scope 3 Cat 6 calculation | Calculate tCO2e for business travel (Voli spend-based, Auto noleggio spend-based, Hotel spend-based) using DEFRA spend-based factors. | DEFRA factors for each travel type; currency denomination (EUR) documented; spend-based methodology noted as lower accuracy. | MUST | data-analyst |
-| FR-15 | Scope 3 Cat 7 calculation | Calculate tCO2e for employee commuting (Commuting_Auto distance-based) using DEFRA car factors. FTE count (506 in 2024, 484 in 2025) and km/FTE/year (8,800) documented as estimation inputs. | Factor = DEFRA average car; estimation basis documented; any change to FTE count requires recalculation and new row with superseded_by. | MUST | data-analyst |
+| FR-15 | Scope 3 Cat 7 calculation | Calculate tCO2e for employee commuting (Commuting_Auto distance-based) using DEFRA car factors. FTE count (506 in 2024, 484 in 2025) is the official HR employee headcount (user-confirmed 2026-05-13). km/FTE/year (8,800) remains an estimation input. | Factor = DEFRA average car; FTE from HR (confirmed 2026-05-13); km/FTE estimation basis documented; any change to FTE requires recalculation and new row with superseded_by. | MUST | data-analyst |
 | FR-16 | Scope 3 Cat 9 calculation | Calculate tCO2e for downstream transport (Italia_Strada, Europa_Strada, Export_Nave) using distance-based method and DEFRA freight factors by mode (HGV road, transoceanic sea). | Mode-specific DEFRA factors; tkm source methodology (proxy sectorial, load factor 27t) documented; market share percentages stored as metadata. | MUST | data-analyst |
 | FR-17 | Scope 3 Cat 12 calculation | Calculate tCO2e for end-of-life treatment using mass-based method. Discarica 30% / Riciclo 70% split from proxy sectoral data. Factor source: ecoinvent v3.10. | Split percentages stored as assumptions in metadata; ecoinvent v3.10 factor referenced; zero credit for recycling unless recycled content method explicitly chosen. | MUST | data-analyst |
 | FR-18 | Cat 11 zero-line disclosure | Scope 3 Cat 11 must appear in all ESRS E1-6 outputs as an explicit disclosed line with value 0 and rationale: "Omitted — Immaterial: ceramic tiles are passive products with no operational energy consumption during use phase." | Cat 11 line present in every ESRS E1-6 table; rationale text stored in disclosure_notes field; auditor-visible. | MUST | data-analyst |
@@ -347,7 +347,7 @@ Gates executed as pre-insert validation in the batch ETL pipeline. CRIT = pipeli
 | DQ-WARN-02 | WARN | Process emission data quality = "E" (Estimated). IANO Processo_Decarb uses internal estimate via LOI 3.5%. | Qualità_Dato = "E" | Annotate row with quality flag; disclose estimation methodology in PDF report |
 | DQ-WARN-03 | WARN | Spend-based Scope 3 subcategories (services, Cat 2, Cat 6) carry higher inherent uncertainty. | Metodo = "Spend-based" | Annotate rows; disclose uncertainty level in ESRS E1-6 |
 | DQ-WARN-04 | WARN | Proxy-based Scope 3 subcategories (Cat 7 commuting, Cat 9, Cat 12) use sector estimates. | Qualità_Dato = "E" or Fonte_Dato = "Proxy settoriale" or "Stima interna" | Annotate rows; disclose proxy methodology and assumptions |
-| DQ-WARN-05 | WARN | SASSUOLO EE_Acquistata_Grid absent from 2025 data. Either confirmed zero consumption or missing record. | SASSUOLO 2025 Grid record count = 0 | Flag for data_steward confirmation; if confirmed zero, insert explicit 0 kWh record |
+| DQ-WARN-05 | RESOLVED | SASSUOLO EE_Acquistata_Grid 2025 confirmed = 0 kWh by user 2026-05-13 (full GO contract). ETL inserts explicit 0-row with provenance `auto_zero_user_confirmed`. Rule retained in catalog for future analogous cases. | N/A | No runtime alert; audit history preserved |
 
 **Reference to Phase 3**: Full data quality audit (completeness, accuracy, consistency, timeliness) is delegated to data-quality-agent in Phase 3. DQ gates in this section represent the minimum blocking conditions for Phase 2 calculation work to proceed.
 
@@ -440,7 +440,7 @@ Before Phase 2 (methodology validation and factor assignment) begins, the user m
 | AC-08 | The 4-deliverable scope (dashboard, Excel, PDF, API) is confirmed with the relative priorities stated. | Confirmed in brief |
 | AC-09 | Tech stack (Python 3.11+, FastAPI, Streamlit, PostgreSQL, pandera, pytest, Docker, GitHub Actions) is approved by IT Operations. | Pending IT Operations sign-off |
 | AC-10 | Revenue (EUR) and production tonnage reference data for intensity metrics will be provided by the data steward before intensity KPI calculation in Phase 3. | Pending data steward commitment |
-| AC-11 | FTE count (506 in 2024, 484 in 2025 — currently proxy-derived from commuting data) is confirmed as accurate or a corrected figure will be provided. | Pending HR confirmation |
+| AC-11 | FTE count (506 in 2024, 484 in 2025) is confirmed by user as official HR employee headcount; not proxy-derived. | Confirmed by user 2026-05-13 |
 | AC-12 | OI-4 (GO Quality Criteria) will be resolved in Phase 2 before Scope 2 MB values are published. | Accepted as Phase 2 gate |
 
 ---
@@ -481,4 +481,4 @@ Before Phase 2 (methodology validation and factor assignment) begins, the user m
 
 ---
 
-*End of Document — Version 1.0.0 — 2026-05-13 — DRAFT*
+*End of Document — Version 1.1.0 — 2026-05-13 — APPROVED (Phase 1 closed)*
