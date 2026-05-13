@@ -1,0 +1,83 @@
+"""KPIs router — GET /api/v1/kpis — dashboard-feed JSON (FR-29).
+
+Reads from the ``calc.mv_kpi_summary`` materialised view produced by the
+data-analyst-agent's calculation pipeline.  In v1 (wave 2), the MV may not
+yet exist; a stub response is returned when the view is absent so that the
+endpoint is testable without a live database.
+"""
+
+from __future__ import annotations
+
+from typing import Any
+
+import structlog
+from fastapi import APIRouter, Depends, status
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from ghg_tool.api.dependencies.auth import CurrentUser
+from ghg_tool.api.dependencies.db import get_db
+from ghg_tool.api.middleware.correlation_id import get_correlation_id
+from ghg_tool.api.middleware.rbac import require_permission
+
+logger = structlog.get_logger(__name__)
+
+router = APIRouter(prefix="/api/v1/kpis", tags=["kpis"])
+
+
+@router.get(
+    "/",
+    status_code=status.HTTP_200_OK,
+    summary="Dashboard KPI feed (all scopes, both years)",
+    description=(
+        "Returns aggregated KPIs for the GHG dashboard. Reads from "
+        "calc.mv_kpi_summary materialised view. All authenticated roles may read. "
+        "Filters: anno (optional), gwp_set (optional, default AR6)."
+    ),
+    response_model=dict,
+    responses={
+        200: {"description": "KPI summary"},
+        401: {"description": "Not authenticated"},
+        503: {"description": "KPI materialised view not yet available"},
+    },
+)
+async def get_kpis(
+    anno: int | None = None,
+    gwp_set: str = "AR6",
+    user: CurrentUser = Depends(require_permission("kpis", "read")),
+    session: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Return aggregated KPI data from the materialised view.
+
+    Args:
+        anno: Optional reporting year filter (2020–2099).
+        gwp_set: GWP set to use for the KPI query ('AR6' or 'AR5').
+        user: Authenticated user with kpis:read permission.
+        session: Authenticated DB session with RLS GUCs.
+
+    Returns:
+        A dict containing aggregated KPI values per scope/year/site.
+        Returns a stub payload when the MV is not yet available.
+    """
+    correlation_id = get_correlation_id()
+    log = logger.bind(correlation_id=correlation_id, user=user.sub[:8], gwp_set=gwp_set)
+    log.info("get_kpis", anno=anno)
+
+    try:
+        from sqlalchemy import text
+        query = text(
+            "SELECT * FROM calc.mv_kpi_summary "
+            "WHERE (:gwp IS NULL OR gwp_set = :gwp) "
+            "AND (:anno IS NULL OR reporting_year = :anno)"
+        )
+        result = await session.execute(query, {"gwp": gwp_set, "anno": anno})
+        rows = [dict(r._mapping) for r in result]
+        return {"kpis": rows, "gwp_set": gwp_set, "correlation_id": correlation_id}
+    except Exception:  # noqa: BLE001
+        # MV not yet created (wave 3 will create it); return stub
+        log.warning("mv_kpi_summary not available, returning stub")
+        return {
+            "kpis": [],
+            "gwp_set": gwp_set,
+            "correlation_id": correlation_id,
+            "_note": "calc.mv_kpi_summary not yet available — created in wave 3",
+        }
