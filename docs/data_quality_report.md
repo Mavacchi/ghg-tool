@@ -789,3 +789,47 @@ The `provenance` field must be a first-class column in the `raw_ingestion_stagin
 
 The blank Fonte_Dato / Qualita_Dato / Stato_Dato fields across all 10 Cat 3 rows are a structural CSV deficiency. The ETL pipeline should enforce non-null on these columns for all ingested rows and reject Cat 3 rows with blank metadata to DLQ with rule_id = DQ-CRIT-02. After data-steward remediation, the corrected values should flow through the same ingestion path with a new batch_id.
 
+---
+
+## 14. Resolution Addendum (2026-05-13)
+
+User responses 2026-05-13 closed all 4 DQ-CRIT triggers without modifying the native CSVs. Remediation is implemented as deterministic ETL transforms (FR-01 / FR-02 / FR-37) consistent with the append-only / source-immutability principle (FR-20, NFR-21).
+
+### 14.1 DQ-CRIT closure log
+
+| Finding | User decision | ETL remediation | Status |
+|---|---|---|---|
+| **DQ-CRIT-01** (VIANO_GARGOLA GAS_NAT 2024 absent) | "2024 = 0 reale (no gas connection)" | FR-01 ETL synthesises explicit `VIANO_GARGOLA GAS_NAT 2024 = 0 Sm³` row with provenance `auto_zero_user_confirmed`. Native CSV unchanged. | **CLOSED** |
+| **DQ-CRIT-02** (10 Cat 3 rows blank Fonte_Dato/Qualità_Dato/Stato_Dato) | "Accetta fix DQ agent" | FR-37 ETL defaulting: `Fonte_Dato = "Derivato da Scope 1/2 per FR-11"`, `Qualità_Dato = "D"`, `Stato_Dato = "Definitivo"`. INFO-level entry in `dq_findings` per defaulted row. Native CSV unchanged. | **CLOSED** |
+| **DQ-CRIT-04** (VIANO_GARGOLA GAS_NAT 2025 = 11 Sm³ outlier) | "11 Sm³ reale (commissioning value)" | Annotation only — ETL keeps the value, dashboard/PDF display "VIANO_GARGOLA — gas commissioned 2025" tooltip. No ETL transform required. | **CLOSED** |
+| **DQ-CRIT-05** (VIANO_GARGOLA GAS_NAT temporal gap) | (co-dependent with CRIT-01) | Resolved by the FR-01 synthesised 2024 zero row. | **CLOSED** |
+
+### 14.2 DQ-WARN reclassifications
+
+| Finding | User decision | Reclassification |
+|---|---|---|
+| **DQ-WARN-01** (VIANO EE_GO 2025 −50.1%) | "Fermo parziale reale" | Reclassified from anomaly to **operational annotation**. Dashboard banner: "VIANO — reduced operation 2025". |
+| **DQ-WARN-06** (VIANO GAS_NAT 2025 −57.9%) | "Fermo parziale reale" | Same as WARN-01. |
+| **DQ-WARN-07** (VIANO GASOLIO 2025 −50.7%) | "Fermo parziale reale" | Same as WARN-01. |
+| **DQ-WARN-08** (SASSUOLO BENZINA 2025 +578%) | "Aumento reale flotta benzina" | Confirmed real. WTT Cat 3 BENZINA 2025 calculation includes annotation "Fleet expansion 2025" in disclosure_notes. |
+
+### 14.3 OI-2 closure
+
+OI-2 (suspected VIANO 2025 data incompleteness) is now **CLOSED** in `requirements.md` v1.2.1. The −50% pattern is real partial production halt; 2025 YoY can be consolidated and published without reimport.
+
+### 14.4 Phase 5 unblock status
+
+**Phase 5 is UNBLOCKED.** All 4 DQ-CRIT remediations are implemented as ETL transforms specified in FR-01 / FR-02 / FR-37. Native CSV files in `/data/raw/` remain untouched. Architect-agent (Phase 4) and data-engineer-agent (Phase 5) can proceed.
+
+### 14.5 Outstanding DQ-WARN for Phase 5 display
+
+These do not block Phase 5 but must be exposed to dashboard / PDF users:
+
+- WARN-02 (Processo_Decarb LOI-3.5% method) — annotate IANO rows
+- WARN-03 (spend-based Cat 1 services, Cat 2, Cat 6) — uncertainty disclosure in ESRS E1-6
+- WARN-04 (proxy-based Cat 7, Cat 9, Cat 12) — proxy methodology disclosure
+
+---
+
+*Addendum end — 2026-05-13 — closes all DQ-CRIT triggers raised in §11.*
+
