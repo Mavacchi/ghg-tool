@@ -6,7 +6,7 @@
 
 | Field | Value |
 |---|---|
-| Version | 1.2.1 |
+| Version | 1.2.2 |
 | Date | 2026-05-13 |
 | Author | requirements-agent (v1.0.0); user clarifications (v1.1.0); Phase 2 integration + OI-7/8/10 (v1.2.0); Phase 3 DQ remediation + Phase 1 row-count corrections (v1.2.1) |
 | Review Status | APPROVED — Phase 1 + Phase 2 + Phase 3 closed; v1.2.1 patches: (a) VIANO_GARGOLA GAS_NAT 2024 = 0 reale + 2025 = 11 Sm³ commissioning confirmed (CRIT-01/04/05 closed via ETL zero-row), (b) Cat 3 metadata defaulting rule (CRIT-02 closed via ETL), (c) VIANO 2025 fermo parziale = dati reali, OI-2 closed, (d) SASSUOLO BENZINA 2025 fleet expansion confirmed, (e) row counts corrected: scope1 = 31 native (32 with VIANO_GARGOLA synthesised zero), scope3 = 100 native, Cat 1 2024 = 14 records (not 15), (f) Cat 3 vs Σ Scope 1 delta = 0 (Phase 1 arithmetic error corrected), (g) richer CSV schema documented (Fonte_Dato/Qualità_Dato/Stato_Dato/Note + Strumento_MB) |
@@ -349,7 +349,7 @@ Gates executed as pre-insert validation in the batch ETL pipeline. CRIT = pipeli
 | DQ-CRIT-01 | CRIT | Facility coverage: all 7 sites must have at least one record for each in-scope scope per reporting year. | Coverage < 7/7 sites (< 100% for Scope 1 and Scope 2 per year) | Block pipeline; notify esg_manager |
 | DQ-CRIT-02 | CRIT | Missing values: mandatory columns (Quantità, Unità, Codice_Sito, Anno) must not be NULL or empty. | Any NULL in mandatory column | Block row; write to DLQ |
 | DQ-CRIT-03 | CRIT | Negative physical values: Quantità < 0 for any fuel, electricity, or mass quantity. | Quantità < 0 | Block row; write to DLQ |
-| DQ-CRIT-04 | CRIT | Outlier detection: z-score > 4 on site × fuel × year quantity vs. population of same site × fuel across known years. | \|z\| > 4 | Block row; write to DLQ with z-score value; flag VIANO_GARGOLA GAS_NAT 2025 = 11 Sm³ as known candidate |
+| DQ-CRIT-04 | CRIT | Outlier detection. **Hybrid rule** (Phase 5 wave 1 implementation note): with n=7 sites the maximum reachable z-score is (n-1)/√n ≈ 2.27, so a strict \|z\|>4 threshold is unreachable. Implementation uses **\|z\|>2.0 z-score check + complementary ratio test** (YoY ratio < 0.6 or > 1.67 on non-zero series). Either triggers the gate. | \|z\|>2.0 OR YoY ratio < 0.6 / > 1.67 | Block row; write to DLQ with both z-score and ratio_yoy values; flag VIANO_GARGOLA GAS_NAT 2025 = 11 Sm³ as known candidate (now resolved real-commissioning per AC-16) |
 | DQ-CRIT-05 | CRIT | Temporal gap: site is present in 2024 but absent in 2025 (or vice versa) without explicit zero-quantity record. | Site × scope present in year T but missing in year T+1 (no zero record) | Block pipeline; require explicit zero record or DQ waiver by esg_manager |
 | DQ-WARN-01 | WARN | VIANO electricity 2025 approximately 50% of 2024 value (3,268,364 vs 6,551,604 kWh). | Ratio VIANO EE 2025 / VIANO EE 2024 < 0.6 | Annotate row; banner warning in dashboard; referenced in OI-2 |
 | DQ-WARN-02 | WARN | Process emission data quality = "E" (Estimated). IANO Processo_Decarb uses internal estimate via LOI 3.5%. | Qualità_Dato = "E" | Annotate row with quality flag; disclose estimation methodology in PDF report |
@@ -504,4 +504,4 @@ Before Phase 2 (methodology validation and factor assignment) begins, the user m
 
 ---
 
-*End of Document — Version 1.2.1 — 2026-05-13 — APPROVED (Phase 1 + Phase 2 + Phase 3 closed; Phase 4 ready to start)*
+*End of Document — Version 1.2.2 — 2026-05-13 — APPROVED (Phase 1-4 + Phase 5 wave 1 closed; DQ-CRIT-04 threshold hybridised z+ratio per wave 1 impl)*
