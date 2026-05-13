@@ -4,20 +4,19 @@ from __future__ import annotations
 
 import os
 
-import pytest
 from fastapi.testclient import TestClient
 
 os.environ.setdefault("GHG_JWT_ALGORITHM", "HS256")
 os.environ.setdefault("GHG_JWT_SECRET", "test-secret-key-for-unit-tests-only")
 os.environ.setdefault("GHG_ENVIRONMENT", "development")
 
-from ghg_tool.api.main import app  # noqa: E402
 from ghg_tool.api.dependencies.db import get_db_no_auth  # noqa: E402
+from ghg_tool.api.main import app  # noqa: E402
 
 
 async def _db_ok():  # type: ignore[return]
     """Mock DB session that passes the SELECT 1 probe."""
-    from unittest.mock import AsyncMock, MagicMock
+    from unittest.mock import AsyncMock
     session = AsyncMock()
     session.execute = AsyncMock()
     yield session

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Annotated
 
 import structlog
@@ -147,7 +147,7 @@ async def create_go_certificate(
         qc8_residual_mix_disclosed=body.qc8_residual_mix_disclosed,
         pdf_evidence_uri=body.pdf_evidence_uri,
         validated_by=user.sub,
-        validated_at=datetime.now(tz=timezone.utc),
+        validated_at=datetime.now(tz=UTC),
     )
     session.add(new_cert)
     await session.flush()
@@ -236,17 +236,25 @@ async def validate_go_certificate(
         beneficiary_legal_entity=existing.beneficiary_legal_entity,
         country_of_issuance=existing.country_of_issuance,
         technology=existing.technology,
-        qc1_conveyed_claim_passed=_pick(body.qc1_conveyed_claim_passed, existing.qc1_conveyed_claim_passed),
+        qc1_conveyed_claim_passed=_pick(
+            body.qc1_conveyed_claim_passed, existing.qc1_conveyed_claim_passed
+        ),
         qc2_unique_passed=_pick(body.qc2_unique_passed, existing.qc2_unique_passed),
         qc3_redeemed_passed=_pick(body.qc3_redeemed_passed, existing.qc3_redeemed_passed),
         qc4_vintage_passed=_pick(body.qc4_vintage_passed, existing.qc4_vintage_passed),
-        qc5_geographic_passed=_pick(body.qc5_geographic_passed, existing.qc5_geographic_passed),
+        qc5_geographic_passed=_pick(
+            body.qc5_geographic_passed, existing.qc5_geographic_passed
+        ),
         qc6_scope_passed=_pick(body.qc6_scope_passed, existing.qc6_scope_passed),
-        qc7_exclusivity_passed=_pick(body.qc7_exclusivity_passed, existing.qc7_exclusivity_passed),
-        qc8_residual_mix_disclosed=_pick(body.qc8_residual_mix_disclosed, existing.qc8_residual_mix_disclosed),
+        qc7_exclusivity_passed=_pick(
+            body.qc7_exclusivity_passed, existing.qc7_exclusivity_passed
+        ),
+        qc8_residual_mix_disclosed=_pick(
+            body.qc8_residual_mix_disclosed, existing.qc8_residual_mix_disclosed
+        ),
         pdf_evidence_uri=body.pdf_evidence_uri or existing.pdf_evidence_uri,
         validated_by=user.sub,
-        validated_at=datetime.now(tz=timezone.utc),
+        validated_at=datetime.now(tz=UTC),
     )
     session.add(new_cert)
     await session.flush()

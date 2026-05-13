@@ -13,7 +13,7 @@ from typing import Literal
 import structlog
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from jose.exceptions import ExpiredSignatureError, JWTError
+from jose.exceptions import ExpiredSignatureError, JWTError  # type: ignore[import-untyped]
 from pydantic import BaseModel, ConfigDict, Field
 
 from ghg_tool.api.middleware.correlation_id import get_correlation_id
@@ -72,15 +72,15 @@ async def get_current_user(
     token = credentials.credentials
     try:
         claims = jwt_module.decode_token(token)
-    except ExpiredSignatureError:
+    except ExpiredSignatureError as exc:
         log.warning("JWT token expired", jti=_safe_jti(token))
-        raise _unauthorized("Token has expired")
+        raise _unauthorized("Token has expired") from exc
     except ValueError as exc:
         log.warning("Forbidden JWT algorithm", detail=str(exc))
-        raise _unauthorized(str(exc))
+        raise _unauthorized(str(exc)) from exc
     except JWTError as exc:
         log.warning("JWT validation failed", detail=str(exc))
-        raise _unauthorized("Invalid token")
+        raise _unauthorized("Invalid token") from exc
 
     role = claims.get("role", "")
     if role not in {"data_steward", "esg_manager", "auditor"}:
@@ -89,7 +89,7 @@ async def get_current_user(
 
     user = CurrentUser(
         sub=claims.get("sub", ""),
-        role=role,  # type: ignore[arg-type]
+        role=role,  # noqa: PGH003  # narrowed by guard above; mypy can't track dict lookup
         tenant_id=claims.get("tenant_id", ""),
         jti=claims.get("jti", ""),
     )

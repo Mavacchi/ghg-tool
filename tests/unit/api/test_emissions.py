@@ -4,11 +4,9 @@ from __future__ import annotations
 
 import os
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
-
-import pytest
 
 os.environ.setdefault("GHG_JWT_ALGORITHM", "HS256")
 os.environ.setdefault("GHG_JWT_SECRET", "test-secret-key-for-unit-tests-only")
@@ -86,9 +84,9 @@ def _emission_orm_row(**kwargs: Any) -> MagicMock:
         "gwp_set": "AR6",
         "methodology": "activity-based",
         "regulatory_stream": "CSRD_ESRS_E1",
-        "calc_timestamp": datetime.now(tz=timezone.utc),
+        "calc_timestamp": datetime.now(tz=UTC),
         "created_by": "test-user",
-        "valid_from": datetime.now(tz=timezone.utc),
+        "valid_from": datetime.now(tz=UTC),
         "valid_to": None,
         "superseded_by": None,
         "reason_code": None,

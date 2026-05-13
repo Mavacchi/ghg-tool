@@ -99,7 +99,7 @@ async def refresh(body: RefreshRequest) -> TokenResponse:
 
     try:
         claims = jwt_module.decode_token(body.refresh_token)
-    except Exception:  # noqa: BLE001
+    except Exception as exc:  # noqa: BLE001
         log.warning("Refresh token validation failed")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -111,7 +111,7 @@ async def refresh(body: RefreshRequest) -> TokenResponse:
                 "correlation_id": correlation_id,
             },
             headers={"WWW-Authenticate": "Bearer"},
-        )
+        ) from exc
 
     if claims.get("token_type") != "refresh":
         raise HTTPException(
@@ -145,6 +145,7 @@ async def refresh(body: RefreshRequest) -> TokenResponse:
 @router.post(
     "/logout",
     status_code=status.HTTP_204_NO_CONTENT,
+    response_model=None,
     summary="Logout (optional token blacklist placeholder)",
     description=(
         "In v1, logout is a no-op that returns 204. Token blacklisting via Redis "

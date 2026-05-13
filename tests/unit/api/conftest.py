@@ -11,22 +11,20 @@ import os
 import uuid
 from collections.abc import AsyncGenerator
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import MagicMock
 
 import pytest
 from fastapi.testclient import TestClient
-from httpx import AsyncClient
 
 # Ensure HS256 fallback for tests (no real key files needed)
 os.environ.setdefault("GHG_JWT_ALGORITHM", "HS256")
 os.environ.setdefault("GHG_JWT_SECRET", "test-secret-key-for-unit-tests-only")
 os.environ.setdefault("GHG_ENVIRONMENT", "development")
 
-from ghg_tool.api.main import app  # noqa: E402 — must come after env setup
 from ghg_tool.api.dependencies.auth import CurrentUser, get_current_user
 from ghg_tool.api.dependencies.db import get_db
+from ghg_tool.api.main import app  # noqa: E402 — must come after env setup
 from ghg_tool.infrastructure.security.jwt import create_access_token
-
 
 # ---------------------------------------------------------------------------
 # Canonical tenant and user UUIDs for tests (no real PII)

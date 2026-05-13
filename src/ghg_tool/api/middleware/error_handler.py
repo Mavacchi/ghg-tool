@@ -8,7 +8,6 @@ exposed to the client.
 from __future__ import annotations
 
 import uuid
-from http import HTTPStatus
 
 import structlog
 from fastapi import Request

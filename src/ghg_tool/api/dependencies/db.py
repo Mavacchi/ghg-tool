@@ -67,14 +67,14 @@ def get_repositories(session: AsyncSession) -> dict[str, Any]:
     Returns:
         A dict mapping repository names to instances.
     """
+    from ghg_tool.infrastructure.db.repositories.dq_findings_repository import (
+        DQFindingsRepository,
+    )
     from ghg_tool.infrastructure.db.repositories.emissions_repository import (
         EmissionsRepository,
     )
     from ghg_tool.infrastructure.db.repositories.factor_catalog_repository import (
         FactorCatalogRepository,
-    )
-    from ghg_tool.infrastructure.db.repositories.dq_findings_repository import (
-        DQFindingsRepository,
     )
 
     return {

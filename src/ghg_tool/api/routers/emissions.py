@@ -12,13 +12,14 @@ Key invariants (FR-20, FR-30, FR-31):
 from __future__ import annotations
 
 import uuid
+from datetime import UTC
 from typing import Annotated
 
 import structlog
 from fastapi import APIRouter, Depends, Header, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ghg_tool.api.dependencies.auth import CurrentUser, get_current_user
+from ghg_tool.api.dependencies.auth import CurrentUser
 from ghg_tool.api.dependencies.db import get_db
 from ghg_tool.api.middleware.correlation_id import get_correlation_id
 from ghg_tool.api.middleware.rbac import require_permission, require_role
@@ -153,8 +154,8 @@ async def create_emission(
         codice_sito=body.codice_sito,
     )
 
-    from datetime import datetime, timezone
-    now = datetime.now(tz=timezone.utc)
+    from datetime import datetime
+    now = datetime.now(tz=UTC)
     new_row = Emission(
         id=uuid.uuid4(),
         tenant_id=uuid.UUID(user.tenant_id),
@@ -233,8 +234,8 @@ async def correct_emission(
     )
     log.info("correct_emission", reason_code=body.reason_code)
 
-    from datetime import datetime, timezone
-    now = datetime.now(tz=timezone.utc)
+    from datetime import datetime
+    now = datetime.now(tz=UTC)
     repo = EmissionsRepository(session)
 
     # Verify predecessor exists and is active
@@ -345,3 +346,69 @@ async def get_corrections(
         )
     # For v1: return just this row; wave 3 implements full chain traversal
     return [EmissionResponse.model_validate(row)]
+
+
+# ---------------------------------------------------------------------------
+# Explicit 405 guards for methods that MUST be blocked on emission records
+# ---------------------------------------------------------------------------
+
+
+@router.delete(
+    "/{emission_id}",
+    status_code=status.HTTP_405_METHOD_NOT_ALLOWED,
+    response_model=None,
+    summary="DELETE is not allowed on consolidated emissions (FR-20, append-only)",
+    description="Emissions are immutable. Use POST /correction for amendments.",
+    responses={405: {"description": "Method Not Allowed — append-only enforcement"}},
+    include_in_schema=True,
+)
+async def delete_emission_blocked(emission_id: uuid.UUID) -> None:  # noqa: B008
+    """Return 405 Method Not Allowed for DELETE requests on emissions.
+
+    Args:
+        emission_id: The emission UUID (present in path for route matching only).
+
+    Raises:
+        HTTPException: Always raises 405 (FR-20 append-only enforcement).
+    """
+    raise HTTPException(
+        status_code=status.HTTP_405_METHOD_NOT_ALLOWED,
+        detail={
+            "type": "about:blank",
+            "title": "Method Not Allowed",
+            "status": 405,
+            "detail": (
+                "Emissions are immutable (FR-20). "
+                "Use POST /api/v1/emissions/correction to amend."
+            ),
+        },
+    )
+
+
+@router.put(
+    "/{emission_id}",
+    status_code=status.HTTP_405_METHOD_NOT_ALLOWED,
+    response_model=None,
+    summary="PUT is not allowed on consolidated emissions (FR-20, append-only)",
+    description="Emissions are immutable. Use POST /correction for amendments.",
+    responses={405: {"description": "Method Not Allowed"}},
+    include_in_schema=True,
+)
+async def put_emission_blocked(emission_id: uuid.UUID) -> None:
+    """Return 405 Method Not Allowed for PUT requests on emissions.
+
+    Args:
+        emission_id: The emission UUID (present in path for route matching only).
+
+    Raises:
+        HTTPException: Always raises 405 (FR-20 append-only enforcement).
+    """
+    raise HTTPException(
+        status_code=status.HTTP_405_METHOD_NOT_ALLOWED,
+        detail={
+            "type": "about:blank",
+            "title": "Method Not Allowed",
+            "status": 405,
+            "detail": "Emissions are immutable (FR-20).",
+        },
+    )

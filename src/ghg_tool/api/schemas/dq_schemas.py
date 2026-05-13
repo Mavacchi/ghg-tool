@@ -8,7 +8,6 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
-
 SeverityLiteral = Literal["CRIT", "WARN", "INFO"]
 ResolutionLiteral = Literal["OPEN", "WAIVED", "REMEDIATED"]
 

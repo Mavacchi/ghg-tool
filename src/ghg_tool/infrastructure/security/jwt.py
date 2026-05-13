@@ -19,11 +19,11 @@ from __future__ import annotations
 
 import os
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
-from jose import JWTError, jwt
-from jose.exceptions import ExpiredSignatureError
+from jose import JWTError, jwt  # type: ignore[import-untyped]
+from jose.exceptions import ExpiredSignatureError  # type: ignore[import-untyped]
 
 # ---------------------------------------------------------------------------
 # Configuration from environment
@@ -110,7 +110,7 @@ def create_access_token(
     Returns:
         Signed JWT string.
     """
-    now = datetime.now(tz=timezone.utc)
+    now = datetime.now(tz=UTC)
     payload: dict[str, Any] = {
         "sub": sub,
         "role": role,
@@ -118,7 +118,7 @@ def create_access_token(
         "jti": str(uuid.uuid4()),
         "iat": now,
         "exp": datetime.fromtimestamp(
-            now.timestamp() + ACCESS_TOKEN_TTL_S, tz=timezone.utc
+            now.timestamp() + ACCESS_TOKEN_TTL_S, tz=UTC
         ),
         "token_type": "access",
     }
@@ -128,7 +128,7 @@ def create_access_token(
         payload["aud"] = _JWT_AUDIENCE
     if extra_claims:
         payload.update(extra_claims)
-    return jwt.encode(payload, _signing_key(), algorithm=_JWT_ALGORITHM)
+    return str(jwt.encode(payload, _signing_key(), algorithm=_JWT_ALGORITHM))
 
 
 def create_refresh_token(sub: str, tenant_id: str) -> str:
@@ -141,20 +141,20 @@ def create_refresh_token(sub: str, tenant_id: str) -> str:
     Returns:
         Signed JWT string for the refresh flow.
     """
-    now = datetime.now(tz=timezone.utc)
+    now = datetime.now(tz=UTC)
     payload: dict[str, Any] = {
         "sub": sub,
         "tenant_id": tenant_id,
         "jti": str(uuid.uuid4()),
         "iat": now,
         "exp": datetime.fromtimestamp(
-            now.timestamp() + REFRESH_TOKEN_TTL_S, tz=timezone.utc
+            now.timestamp() + REFRESH_TOKEN_TTL_S, tz=UTC
         ),
         "token_type": "refresh",
     }
     if _JWT_ISSUER:
         payload["iss"] = _JWT_ISSUER
-    return jwt.encode(payload, _signing_key(), algorithm=_JWT_ALGORITHM)
+    return str(jwt.encode(payload, _signing_key(), algorithm=_JWT_ALGORITHM))
 
 
 def decode_token(token: str) -> dict[str, Any]:
@@ -187,7 +187,7 @@ def decode_token(token: str) -> dict[str, Any]:
     audiences = [_JWT_AUDIENCE] if _JWT_AUDIENCE else None
 
     try:
-        return jwt.decode(  # type: ignore[no-any-return]
+        return jwt.decode(  # type: ignore[no-any-return]  # jose has no stubs
             token,
             _verification_key(),
             algorithms=[_JWT_ALGORITHM],

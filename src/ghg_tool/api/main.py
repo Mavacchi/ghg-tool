@@ -118,11 +118,28 @@ def _create_app() -> FastAPI:
         """
         from ghg_tool.api.middleware.correlation_id import get_correlation_id
         cid = get_correlation_id()
-        # Sanitise errors — remove any password values from error detail
-        errors = [
-            {k: v for k, v in err.items() if k != "input"}
-            for err in exc.errors()
-        ]
+
+        def _safe_error(err: dict) -> dict:  # type: ignore[type-arg]
+            """Strip non-serialisable / PII fields from a Pydantic error dict.
+
+            Pydantic v2 ``exc.errors()`` may embed ``ValueError`` objects inside
+            the ``ctx`` mapping and raw input values inside ``input``.  Both must
+            be stripped before JSON serialisation (NFR-09 — no stack trace; NFR-08
+            — no PII in responses).
+            """
+            out: dict = {}  # type: ignore[type-arg]
+            for k, v in err.items():
+                if k in ("input", "url"):
+                    # Never echo request input back (may contain passwords/PII)
+                    continue
+                if k == "ctx":
+                    # ctx values may be non-serialisable exception objects
+                    out[k] = {ck: str(cv) for ck, cv in v.items()}
+                else:
+                    out[k] = v
+            return out
+
+        errors = [_safe_error(err) for err in exc.errors()]
         return JSONResponse(
             status_code=422,
             content={

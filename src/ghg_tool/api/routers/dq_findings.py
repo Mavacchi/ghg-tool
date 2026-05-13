@@ -7,7 +7,7 @@ Only esg_manager can create waiver resolutions (append-only new row pattern).
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Annotated
 
 import structlog
@@ -152,7 +152,7 @@ async def waive_finding(
             },
         )
 
-    now = datetime.now(tz=timezone.utc)
+    now = datetime.now(tz=UTC)
     waiver_row = DqFinding(
         id=uuid.uuid4(),
         tenant_id=uuid.UUID(user.tenant_id),

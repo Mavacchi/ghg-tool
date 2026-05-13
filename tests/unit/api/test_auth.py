@@ -46,17 +46,29 @@ class TestJWT:
         assert claims["token_type"] == "refresh"
 
     def test_alg_none_rejected(self) -> None:
-        """Tokens claiming alg=none must be rejected (SG-01)."""
-        import jose.jwt as jose_jwt
-        # Forge a token with alg=none — jose signs it without signature
-        raw = jose_jwt.encode({"sub": "x", "exp": 9999999999}, "", algorithm="none")
-        with pytest.raises((ValueError, Exception)):
+        """Tokens claiming alg=none must be rejected (SG-01).
+
+        jose library raises JWSError for algorithm=none; our decode_token
+        either raises ValueError (our explicit check) or JWSError/JWTError
+        (jose internal rejection).  Both indicate the token was correctly denied.
+        """
+        # Construct a JWT-like string with alg=none in the header manually
+        import base64
+        import json
+        header = base64.urlsafe_b64encode(
+            json.dumps({"alg": "none", "typ": "JWT"}).encode()
+        ).rstrip(b"=").decode()
+        payload = base64.urlsafe_b64encode(
+            json.dumps({"sub": "x", "exp": 9999999999}).encode()
+        ).rstrip(b"=").decode()
+        raw = f"{header}.{payload}."
+        with pytest.raises(Exception):  # noqa: B017 — intentional broad catch
             decode_token(raw)
 
     def test_expired_token_raises(self) -> None:
         """Expired tokens must raise ExpiredSignatureError."""
-        from jose.exceptions import ExpiredSignatureError as JOSE_ESE
         import jose.jwt as jose_jwt
+        from jose.exceptions import ExpiredSignatureError as JOSE_ESE
         token = jose_jwt.encode(
             {"sub": "x", "exp": int(time.time()) - 10},
             "test-secret-key-for-unit-tests-only",

@@ -13,7 +13,6 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-
 # ---------------------------------------------------------------------------
 # Allowed value sets (must match DB CHECK constraints)
 # ---------------------------------------------------------------------------

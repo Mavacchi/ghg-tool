@@ -1,18 +1,21 @@
-"""Password hashing with bcrypt via passlib — SG-04.
+"""Password hashing with bcrypt — SG-04.
 
-Uses ``CryptContext`` with bcrypt scheme; deprecated schemes are omitted so
-that any legacy hash triggers an automatic re-hash on next login.
+Uses the ``bcrypt`` library directly to avoid passlib's version-detection
+incompatibility with bcrypt >= 4.x (passlib 1.7.4 inspects ``__about__``
+which was removed in newer bcrypt releases).
 
 Passwords MUST NEVER be logged, stored in plaintext, or echoed in API
 responses.  Only the hash is persisted in ``ref.users.password_hash``.
+
+The work factor ``_ROUNDS = 12`` balances security and latency; adjust via
+the ``GHG_BCRYPT_ROUNDS`` env var in future if required (NFR-06).
 """
 
 from __future__ import annotations
 
-from passlib.context import CryptContext
+import bcrypt
 
-# Single global context — bcrypt with auto-upgrade on verify
-_pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+_ROUNDS: int = 12
 
 
 def hash_password(plain: str) -> str:
@@ -24,7 +27,8 @@ def hash_password(plain: str) -> str:
     Returns:
         A bcrypt hash string suitable for storage in ``ref.users.password_hash``.
     """
-    return _pwd_context.hash(plain)
+    salt = bcrypt.gensalt(rounds=_ROUNDS)
+    return bcrypt.hashpw(plain.encode(), salt).decode()
 
 
 def verify_password(plain: str, hashed: str) -> bool:
@@ -37,4 +41,7 @@ def verify_password(plain: str, hashed: str) -> bool:
     Returns:
         True if the password matches; False otherwise.
     """
-    return _pwd_context.verify(plain, hashed)
+    try:
+        return bcrypt.checkpw(plain.encode(), hashed.encode())
+    except Exception:  # noqa: BLE001 — invalid hash format → treat as wrong password
+        return False
