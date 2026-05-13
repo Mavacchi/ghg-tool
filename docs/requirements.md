@@ -6,10 +6,10 @@
 
 | Field | Value |
 |---|---|
-| Version | 1.1.0 |
+| Version | 1.2.0 |
 | Date | 2026-05-13 |
-| Author | requirements-agent (v1.0.0); user clarifications (v1.1.0) |
-| Review Status | APPROVED — Phase 1 closed; v1.1.0 incorporates: (a) Cat 3 WTT fuel quantities derived from Σ Scope 1 (not CSV column), (b) FTE 506/484 confirmed as official HR headcount, (c) SASSUOLO 2025 EE_Acquistata_Grid = 0 confirmed (100% GO contract) |
+| Author | requirements-agent (v1.0.0); user clarifications (v1.1.0); Phase 2 methodology integration + user OI-7/8/10 answers (v1.2.0) |
+| Review Status | APPROVED — Phase 1 + Phase 2 closed; v1.2.0 incorporates: (a) IANO confirmed EU ETS Annex I Activity 17 → AR5 dual-track production-ready required (OI-7 closed YES), (b) no Cat 15 financial instruments → Cat 15 OMIT confirmed (OI-8 closed), (c) refrigerant top-ups negligible → Scope 1 Fugitive HFC zero-line with rationale (OI-10 closed) |
 | Task ID | ghg-tool-phase-1 |
 | Base Year | 2024 |
 | Reporting Years | 2024 (consolidated), 2025 (partial — see OI-2) |
@@ -70,6 +70,7 @@ Primary deliverables for v1:
 | GRI 305: Emissions 2016 | **SECONDARY — voluntary disclosure** | Supplemental KPI alignment; GRI 305-1/305-2/305-3/305-4 |
 | IPCC Sixth Assessment Report (AR6) GWP100 | **PRIMARY — GWP values** | CH4 = 27.9, N2O = 273; AR5 retained for legacy regeneration only |
 | ISO 14064-1:2018 | **REFERENCE** | Aligns with GHG Protocol; referenced for assurance documentation |
+| EU ETS Phase IV (Directive 2003/87/EC; MRR Regulation 2018/2066 as amended by 2023/2122) | **PRIMARY for IANO — mandatory** | IANO confirmed Annex I Activity 17 installation (manufacture of ceramic products by firing). Annual verified GHG report obligation. **AR5 dual-track production output required from this tool**; ETS MRR XML submission format itself is out of v1 scope but underlying tCO2e values must be reproducible (see FR-34) |
 | EU Taxonomy (Delegated Regulation 2021/2139) | **OUT OF SCOPE v1 — flagged** | Alignment assessment to be scheduled post-v1 |
 | SBTi Corporate Standard | **OPEN QUESTION — OI-1** | Target pathway undecided; requirements deferred |
 | SFDR PAI indicators | **OUT OF SCOPE v1** | Not applicable for issuer-level tool; investor-facing only |
@@ -118,8 +119,11 @@ Primary deliverables for v1:
 | Gasolio_Auto (GASOLIO, litres) — mobile combustion | **IN** | All 7 | 7 records / 7 records |
 | Benzina_Auto (BENZINA, litres) — mobile combustion | **IN** | SASSUOLO only | 1 record / 1 record |
 | Processo_Decarb (PROCESSO_DECARB, kg CaCO3) — process emissions | **IN** | IANO only | 1 record (9,363,616 kg CaCO3) / 1 record (9,061,067 kg CaCO3) |
+| Fugitive HFC (refrigerants) — fugitive emissions | **IN as ZERO-LINE** | All 7 (declarative zero) | Auto-emitted 0 row; rationale: closed-loop refrigeration systems; refrigerant top-ups across all 7 sites declared negligible by user 2026-05-13 (OI-10 closed). See FR-35 |
 
-**Process emissions methodology**: stoichiometric factor 0.4397 tCO2 / t CaCO3, classified as "Scope 1 — Process emissions", reported separately from combustion in all outputs. Source data quality: `E` (Estimated, via LOI 3.5% method) — flagged for assurance review.
+**Process emissions methodology**: stoichiometric factor 0.4397 tCO2 / t CaCO3, classified as "Scope 1 — Process emissions", reported separately from combustion in all outputs. Source data quality: `E` (Estimated, via LOI 3.5% method) — flagged for assurance review with ±10-20% uncertainty disclosed (per methodology_validation.md §6).
+
+**Fugitive emissions sub-category**: Scope 1 Fugitive HFC zero-line is auto-emitted in every ESRS E1-6 output for transparency, even though no refrigerant top-up activity data is collected. If a future inventory reveals material top-ups, the zero-line is superseded via the correction workflow (FR-21).
 
 **Scope 1 raw record count**: 32 data rows across 2024 and 2025 in `scope1_combustione.csv` (header excluded). 2024: 16 rows covering all 7 sites. 2025: 16 rows covering all 7 sites.
 
@@ -165,17 +169,17 @@ Dual reporting is **mandatory** and non-negotiable per GHG Protocol Scope 2 Guid
 
 Omitted with documented immateriality rationale: ceramic tiles (gres porcellanato) are passive products with no operational energy consumption during use phase. Cat 11 must appear as a disclosed line in ESRS E1-6 output with status "Omitted — Immaterial" and the above rationale. Zero value reported.
 
-**Pending materiality assessment (Phase 2 — sustainability-expert-agent)**:
+**Materiality assessment (closed in Phase 2 by sustainability-expert-agent + user OI-8 answer)**:
 
-| Category | Rationale for Pending Status |
-|---|---|
-| Cat 8 — Upstream leased assets | No upstream leased assets identified; pending confirmation |
-| Cat 10 — Processing of sold products | Tiles sold to distributors/customers; downstream processing undetermined |
-| Cat 13 — Downstream leased assets | No downstream leased assets identified; pending confirmation |
-| Cat 14 — Franchises | No franchise operations identified; pending confirmation |
-| Cat 15 — Financed emissions | No financial instruments held; pending confirmation |
+| Category | Status | Rationale |
+|---|---|---|
+| Cat 8 — Upstream leased assets | **OMIT — Immaterial** | No upstream leased assets identified for ceramic-tile manufacturer; CDP sectoral guidance supports omission |
+| Cat 10 — Processing of sold products | **OMIT — Not applicable** | Finished tiles sold to distributors/end-users; no further processing required before use |
+| Cat 13 — Downstream leased assets | **OMIT — Immaterial** | No downstream leased assets identified |
+| Cat 14 — Franchises | **OMIT — Not applicable** | Company does not operate franchise model |
+| Cat 15 — Financed emissions | **OMIT — Confirmed by user 2026-05-13 (OI-8)** | No equity stakes, no pension-fund assets, no project finance, no treasury investment portfolio material to Cat 15 |
 
-Default proposal for Phase 2: omit Cat 8/10/13/14/15 pending materiality assessment. Each omission must be disclosed in ESRS E1-6 with reason code.
+Each omission produces an explicit zero-line in every ESRS E1-6 output with reason code, analogous to FR-18 for Cat 11 (see FR-36).
 
 ---
 
@@ -228,7 +232,7 @@ Default proposal for Phase 2: omit Cat 8/10/13/14/15 pending materiality assessm
 | FR-16 | Scope 3 Cat 9 calculation | Calculate tCO2e for downstream transport (Italia_Strada, Europa_Strada, Export_Nave) using distance-based method and DEFRA freight factors by mode (HGV road, transoceanic sea). | Mode-specific DEFRA factors; tkm source methodology (proxy sectorial, load factor 27t) documented; market share percentages stored as metadata. | MUST | data-analyst |
 | FR-17 | Scope 3 Cat 12 calculation | Calculate tCO2e for end-of-life treatment using mass-based method. Discarica 30% / Riciclo 70% split from proxy sectoral data. Factor source: ecoinvent v3.10. | Split percentages stored as assumptions in metadata; ecoinvent v3.10 factor referenced; zero credit for recycling unless recycled content method explicitly chosen. | MUST | data-analyst |
 | FR-18 | Cat 11 zero-line disclosure | Scope 3 Cat 11 must appear in all ESRS E1-6 outputs as an explicit disclosed line with value 0 and rationale: "Omitted — Immaterial: ceramic tiles are passive products with no operational energy consumption during use phase." | Cat 11 line present in every ESRS E1-6 table; rationale text stored in disclosure_notes field; auditor-visible. | MUST | data-analyst |
-| FR-19 | GWP set enforcement | System enforces a single GWP set (AR6 default: CH4=27.9, N2O=273) per report run. AR5 regeneration (CH4=25, N2O=298) supported as a separate, explicitly labelled run. Mixed GWP sets within a single report are a hard block. | Run metadata includes gwp_set field; validation rejects mixed sets; AR5 runs produce output clearly labelled "AR5 — legacy comparison only". | MUST | data-engineer |
+| FR-19 | GWP set enforcement | System enforces a single GWP set per report run. AR6 (CH4=27.9, N2O=273) is default for CSRD ESRS E1-6 disclosures. **AR5 (CH4=28, N2O=265, no climate-carbon feedback)** supported as production-ready dual-track for EU ETS reporting (per OI-7 closure, IANO Annex I Activity 17) and for legacy comparison. Mixed GWP sets within a single report are a hard block. AR4 values (CH4=25, N2O=298) NOT used by this tool — historical only. | Run metadata includes gwp_set field; validation rejects mixed sets; AR5 runs produce ETS-fit output clearly labelled "AR5 — EU ETS dual-track or legacy comparison"; AR6 is the primary CSRD output. | MUST | data-engineer |
 | FR-20 | Append-only emission storage | All calculated emissions stored in `emissions_consolidated` table per schema in Section 10. Insert only; UPDATE and DELETE blocked by DB trigger. | Trigger verified by test (attempt UPDATE → exception); DQ checks pass pre-insert; no orphan rows. | MUST | data-engineer |
 | FR-21 | Restatement / correction workflow | Corrections to prior-year data create a new row with updated values; the superseded row receives superseded_by = new row's ID and valid_to = correction timestamp. | Old row accessible in full history; new row identifiable as correction; API endpoint /corrections returns full chain; reason_code is mandatory. | MUST | data-engineer |
 | FR-22 | Audit trail traceability | Every emission row in `emissions_consolidated` carries: raw_row_id (FK to ingestion table), factor_id + factor_version, gwp_set, methodology, calc_timestamp, created_by, correlation_id (UUID linking batch run). | Auditor can trace any tCO2e value back to the original CSV row and the factor applied; no unlinked rows permitted. | MUST | data-engineer |
@@ -243,6 +247,9 @@ Default proposal for Phase 2: omit Cat 8/10/13/14/15 pending materiality assessm
 | FR-31 | RBAC enforcement | Three roles enforced at application and DB levels: `auditor` (read-only all), `esg_manager` (read + export + approve), `data_steward` (read + ingest + manage factor catalog). PostgreSQL Row-Level Security (RLS) enforces tenant isolation. | Penetration test scenario: auditor attempts to insert emission row → blocked at API (403) and DB (RLS deny); data_steward cannot approve/sign off PDF (esg_manager only). | MUST | backend |
 | FR-32 | Data quality gate execution | DQ gates listed in Section 11 execute as pre-insert validation in the batch ETL pipeline. CRIT-level failures block the pipeline and write to DLQ with structured error payload. WARN-level failures annotate rows but allow processing. | All DQ-CRIT conditions block insertion; DLQ entries include: rule_id, row_id, value, threshold, timestamp; esg_manager and data_steward notified. | MUST | data-engineer |
 | FR-33 | Internationalization — IT/EN labels | All user-facing labels, report headers, and dashboard text support both Italian and English. Domain-standard Italian terms (Codice_Sito, Sm³, Gasolio, etc.) retained in Italian in both modes. | Language toggle in dashboard; PDF report generated in selected language; EN is default for API responses. | SHOULD | visualization |
+| FR-34 | EU ETS dual-track (AR5) production output | Produce a parallel AR5-based emission output for IANO (and any other Annex I site if added) suitable for internal EU ETS reporting workflows. Output covers Scope 1 combustion + Scope 1 process emissions (decarbonation); CO2 only with AR5 GWPs for incidental CH4/N2O combustion components. Dual-track is data, not format: the MRR XML / verified-report assembly remains out of v1 scope. | AR5 run reproduces the same input data with `gwp_set=AR5`; output table tagged `regulatory_stream=EU_ETS_PHASE_IV`; results auditable against the AR6 CSRD output (CO2 values must be identical, only CH4/N2O CO2e differ by GWP). | MUST | data-engineer + data-analyst |
+| FR-35 | Scope 1 Fugitive HFC zero-line | Auto-emit a Scope 1 Fugitive HFC sub-category row with tco2e=0 in every ESRS E1-6 output for all 7 sites. Rationale field populated with: "Closed-loop refrigeration systems; refrigerant top-ups across all 7 sites declared negligible by user 2026-05-13 (OI-10 closed). Zero-line is a disclosure of completeness, not an absence of accounting." | Zero-row present in PDF, Excel, dashboard, API; `disclosure_notes` contains the rationale text; supersedable via FR-21 correction workflow if future inventory data emerges. | MUST | data-analyst |
+| FR-36 | Scope 3 Cat 8/10/13/14/15 zero-line disclosures | Auto-emit explicit zero-line rows for Scope 3 Cat 8, 10, 13, 14, 15 in every ESRS E1-6 output, each with category-specific rationale per §6.3 closure table. | All 5 categorical zero-lines present in PDF, Excel, dashboard, API; `disclosure_notes` carries the rationale; auditable as completeness evidence for ISAE 3000 Limited. | MUST | data-analyst |
 
 ---
 
@@ -417,7 +424,11 @@ Issues that remain unresolved and must not be closed by any agent without explic
 |---|---|---|---|---|
 | OI-1 | SBTi alignment: does the company intend to commit to a 1.5°C pathway? Target year 2030/2035/2050? This determines whether SBTi-specific data models (sectoral decarbonization approach for ceramics) are needed in future versions. | sustainability-expert-agent + user | Post-v1 / Phase 9 documentation | No — v1 unblocked |
 | OI-2 | 2025 data completeness: VIANO EE_Acquistata_GO 2025 = 3,268,364 kWh vs 2024 = 6,551,604 kWh (~50% reduction). Suspected incomplete data ingestion rather than genuine operational change. 2025 report cannot be consolidated until this is resolved. Also: VIANO_GARGOLA GAS_NAT 2025 = 11 Sm³ (anomalous near-zero). | data-quality-agent | Phase 3 | Yes — blocks 2025 YoY report sign-off |
-| OI-3 | Scope 3 Cat 8 (upstream leased assets), Cat 10 (processing of sold products), Cat 13 (downstream leased assets), Cat 14 (franchises), Cat 15 (financed emissions): materiality assessment required. Default proposal: omit with rationale. Each omitted category must be disclosed in ESRS E1-6. | sustainability-expert-agent | Phase 2 | No — 2024 report can proceed with omission disclosures |
+| OI-3 | **CLOSED 2026-05-13** — Phase 2 + OI-8 user confirmation: all 5 categories (Cat 8/10/13/14/15) OMIT-with-rationale. Disclosure handled by FR-36 (auto zero-line). | sustainability-expert-agent | Closed | No |
+| OI-7 | **CLOSED 2026-05-13** — User confirmed YES: IANO is EU ETS Annex I Activity 17 installation. AR5 dual-track production output required (FR-34). MG-12 elevated from conditional to mandatory. | user + sustainability-expert | Closed | Active in Phase 5 (FR-34 implementation) |
+| OI-8 | **CLOSED 2026-05-13** — User confirmed: no equity stakes, no pension assets, no project finance, no treasury investment portfolio material to Cat 15. Folds into OI-3 closure. | user + sustainability-expert | Closed | No |
+| OI-9 | Biogenic CO2 accounting for cardboard packaging and wooden pallets: adopt explicit biogenic-CO2 disclosure policy per GHG Protocol Land Sector and Removals Guidance / ISO 14067. | sustainability-expert + data-engineer | Phase 5 | No — non-blocking improvement |
+| OI-10 | **CLOSED 2026-05-13** — User confirmed refrigerant top-ups negligible. Scope 1 Fugitive HFC zero-line auto-emitted with rationale (FR-35, MG-18). | user + data steward | Closed | No |
 | OI-4 | Scope 2 GO Quality Criteria validation: existing GO certificates must be reviewed against GHG Protocol Scope 2 Guidance criteria (contract instrument type, no double counting, vintage matching ≤ 1 year, geographic matching Italy). Until validated, MB calculation with 0 tCO2e/MWh for GO volumes is blocked; residual mix applies. | sustainability-expert-agent | Phase 2 | Yes — blocks Scope 2 MB = 0 claim |
 | OI-5 | Emission factor source cascade adequacy for the ceramic sector: confirm DEFRA factors are appropriate for Italian-context transport and fuel; confirm ecoinvent v3.10 ceramic material datasets (argille, feldspati) are sector-representative; identify available supplier EPDs to supersede generic factors. | sustainability-expert-agent | Phase 2 | No — calculations can proceed with cascade; EPD supersession updates factors catalog post-Phase 2 |
 | OI-6 | GWP set confirmation: AR6 is the default per IPCC and aligns with CSRD/ESRS E1. Confirm whether the sector regulator (Confindustria Ceramica, EU ETS authority for IANO if applicable) or any sectoral reporting protocol mandates AR5 for specific reporting streams. Clarify AR5 regeneration retention period (10 years? Indefinite?). | sustainability-expert-agent | Phase 2 | No — AR6 is the working assumption; AR5 regeneration is available |
@@ -441,7 +452,10 @@ Before Phase 2 (methodology validation and factor assignment) begins, the user m
 | AC-09 | Tech stack (Python 3.11+, FastAPI, Streamlit, PostgreSQL, pandera, pytest, Docker, GitHub Actions) is approved by IT Operations. | Pending IT Operations sign-off |
 | AC-10 | Revenue (EUR) and production tonnage reference data for intensity metrics will be provided by the data steward before intensity KPI calculation in Phase 3. | Pending data steward commitment |
 | AC-11 | FTE count (506 in 2024, 484 in 2025) is confirmed by user as official HR employee headcount; not proxy-derived. | Confirmed by user 2026-05-13 |
-| AC-12 | OI-4 (GO Quality Criteria) will be resolved in Phase 2 before Scope 2 MB values are published. | Accepted as Phase 2 gate |
+| AC-12 | OI-4 (GO Quality Criteria) — Phase 2 validated 8 criteria; per-certificate evidence checklist QC1-QC8 (methodology_validation.md §2.4) must be completed by data steward before MB=0 publication. | Methodology APPROVED Phase 2; certificate evidence pending Phase 5 |
+| AC-13 | OI-7 — IANO is EU ETS Annex I Activity 17 installation; AR5 dual-track output (FR-34) is required and Phase 5 must deliver production-ready capability. | Confirmed by user 2026-05-13 |
+| AC-14 | OI-8 — no Cat 15 financial-instrument scope exists; Cat 15 OMIT-with-rationale confirmed; FR-36 emits zero-line. | Confirmed by user 2026-05-13 |
+| AC-15 | OI-10 — refrigerant top-ups across all 7 sites negligible; Scope 1 Fugitive HFC zero-line (FR-35) auto-emitted with rationale. | Confirmed by user 2026-05-13 |
 
 ---
 
@@ -478,7 +492,10 @@ Before Phase 2 (methodology validation and factor assignment) begins, the user m
 | FR-31 | RBAC enforcement | — | Assurance basis — access control | MUST |
 | FR-32 | DQ gate execution | KPI-13 | Data quality disclosure | MUST |
 | FR-33 | IT/EN internationalization | — | Accessibility / stakeholder usability | SHOULD |
+| FR-34 | EU ETS AR5 dual-track output | KPI-01..KPI-03 | EU ETS MRR (Regulation 2018/2066) — internal data feed | MUST |
+| FR-35 | Scope 1 Fugitive HFC zero-line | — | E1-6 §44(a) Scope 1 Fugitive — Zero / Immaterial | MUST |
+| FR-36 | Scope 3 Cat 8/10/13/14/15 zero-line disclosures | — | E1-6 §44(c) Scope 3 — Categories Omitted | MUST |
 
 ---
 
-*End of Document — Version 1.1.0 — 2026-05-13 — APPROVED (Phase 1 closed)*
+*End of Document — Version 1.2.0 — 2026-05-13 — APPROVED (Phase 1 + Phase 2 closed; Phase 3 ready to start)*
