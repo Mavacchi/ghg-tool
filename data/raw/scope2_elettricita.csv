@@ -1,0 +1,16 @@
+﻿Scope;Anno;Codice_Sito;Voce_S2;Quantità;Unità;Strumento_MB;Fonte_Dato;Qualità_Dato;Stato_Dato;Note
+2;2024;IANO;EE_Acquistata_GO;3193698;kWh;GO;Fattura fornitore;P;Definitivo;
+2;2024;VIANO;EE_Acquistata_GO;6551604;kWh;GO;Fattura fornitore;P;Definitivo;
+2;2024;CASALGRANDE;EE_Acquistata_GO;358307;kWh;GO;Fattura fornitore;P;Definitivo;
+2;2024;VIANO_GARGOLA;EE_Acquistata_GO;159518;kWh;GO;Fattura fornitore;P;Definitivo;
+2;2024;FIORANO;EE_Acquistata_GO;344808;kWh;GO;Fattura fornitore;P;Definitivo;
+2;2024;SASSUOLO;EE_Acquistata_GO;377358;kWh;GO;Fattura fornitore;P;Definitivo;
+2;2024;FRASSINORO;EE_Acquistata_GO;8716707;kWh;GO;Fattura fornitore;P;Definitivo;
+2;2024;SASSUOLO;EE_Acquistata_Grid;46786;kWh;Grid_Residual;Fattura fornitore;P;Definitivo;
+2;2025;IANO;EE_Acquistata_GO;3195741;kWh;GO;Fattura fornitore;P;Definitivo;
+2;2025;VIANO;EE_Acquistata_GO;3268364;kWh;GO;Fattura fornitore;P;Definitivo;
+2;2025;CASALGRANDE;EE_Acquistata_GO;336654;kWh;GO;Fattura fornitore;P;Definitivo;
+2;2025;VIANO_GARGOLA;EE_Acquistata_GO;154856;kWh;GO;Fattura fornitore;P;Definitivo;
+2;2025;FIORANO;EE_Acquistata_GO;375142;kWh;GO;Fattura fornitore;P;Definitivo;
+2;2025;SASSUOLO;EE_Acquistata_GO;421065;kWh;GO;Fattura fornitore;P;Definitivo;
+2;2025;FRASSINORO;EE_Acquistata_GO;9472090;kWh;GO;Fattura fornitore;P;Definitivo;

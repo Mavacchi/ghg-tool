@@ -1,0 +1,32 @@
+﻿Scope;Anno;Codice_Sito;Categoria_S1;Combustibile;Quantità;Unità;Fonte_Dato;Qualità_Dato;Stato_Dato;Note
+1;2024;SASSUOLO;Benzina_Auto;BENZINA;1349;litri;SAP;P;Definitivo;
+1;2024;SASSUOLO;Gasolio_Auto;GASOLIO;95268;litri;SAP;P;Definitivo;
+1;2024;FIORANO;Gasolio_Auto;GASOLIO;58000;litri;SAP;P;Definitivo;
+1;2024;VIANO;Gasolio_Auto;GASOLIO;44600;litri;SAP;P;Definitivo;
+1;2024;VIANO_GARGOLA;Gasolio_Auto;GASOLIO;2400;litri;SAP;P;Definitivo;
+1;2024;CASALGRANDE;Gasolio_Auto;GASOLIO;13000;litri;SAP;P;Definitivo;
+1;2024;IANO;Gasolio_Auto;GASOLIO;110000;litri;SAP;P;Definitivo;
+1;2024;FRASSINORO;Gasolio_Auto;GASOLIO;18000;litri;SAP;P;Definitivo;
+1;2024;IANO;Processo_Decarb;PROCESSO_DECARB;9363616;kg CaCO₃;Stima interna;E;Stimato;LOI 3,5%
+1;2025;IANO;Gas_Naturale;GAS_NAT;23556856;Sm³;Fattura fornitore;P;Definitivo;
+1;2025;VIANO;Gas_Naturale;GAS_NAT;1925606;Sm³;Fattura fornitore;P;Definitivo;
+1;2025;VIANO_GARGOLA;Gas_Naturale;GAS_NAT;11;Sm³;Fattura fornitore;P;Definitivo;
+1;2025;FRASSINORO;Gas_Naturale;GAS_NAT;6336992;Sm³;Fattura fornitore;P;Definitivo;
+1;2025;CASALGRANDE;Gas_Naturale;GAS_NAT;3901;Sm³;Fattura fornitore;P;Definitivo;
+1;2025;FIORANO;Gas_Naturale;GAS_NAT;18388;Sm³;Fattura fornitore;P;Definitivo;
+1;2025;SASSUOLO;Gas_Naturale;GAS_NAT;11464;Sm³;Fattura fornitore;P;Definitivo;
+1;2025;SASSUOLO;Benzina_Auto;BENZINA;9151;litri;SAP;P;Definitivo;
+1;2025;SASSUOLO;Gasolio_Auto;GASOLIO;95056;litri;SAP;P;Definitivo;
+1;2025;FIORANO;Gasolio_Auto;GASOLIO;74400;litri;SAP;P;Definitivo;
+1;2025;VIANO;Gasolio_Auto;GASOLIO;22000;litri;SAP;P;Definitivo;
+1;2025;VIANO_GARGOLA;Gasolio_Auto;GASOLIO;2400;litri;SAP;P;Definitivo;
+1;2025;CASALGRANDE;Gasolio_Auto;GASOLIO;11000;litri;SAP;P;Definitivo;
+1;2025;IANO;Gasolio_Auto;GASOLIO;109992;litri;SAP;P;Definitivo;
+1;2025;FRASSINORO;Gasolio_Auto;GASOLIO;20000;litri;SAP;P;Definitivo;
+1;2025;IANO;Processo_Decarb;PROCESSO_DECARB;9061067;kg CaCO₃;Stima interna;E;Stimato;LOI 3,5%
+1;2024;CASALGRANDE;Gas_Naturale;GAS_NAT;2738;Sm³;Fattura fornitore;P;Definitivo;
+1;2024;FIORANO;Gas_Naturale;GAS_NAT;15211;Sm³;Fattura fornitore;P;Definitivo;
+1;2024;FRASSINORO;Gas_Naturale;GAS_NAT;5634446;Sm³;Fattura fornitore;P;Definitivo;
+1;2024;IANO;Gas_Naturale;GAS_NAT;22916841;Sm³;Fattura fornitore;P;Definitivo;
+1;2024;SASSUOLO;Gas_Naturale;GAS_NAT;10632;Sm³;Fattura fornitore;P;Definitivo;
+1;2024;VIANO;Gas_Naturale;GAS_NAT;4569554;Sm³;Fattura fornitore;P;Definitivo;

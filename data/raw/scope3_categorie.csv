@@ -1,0 +1,101 @@
+﻿Scope;Anno;Categoria_S3;Sottocategoria;Metodo;Combustibile;Quantità;Unità;Fonte_Dato;Qualità_Dato;Stato_Dato;Note
+3;2024;4;Feldspati_Treno;Distance-based;;0;tkm;Dichiarazione fornitore;S;Definitivo;0 km
+3;2024;4;Sabbie silicee_Treno;Distance-based;;0;tkm;Dichiarazione fornitore;S;Definitivo;0 km
+3;2025;4;Feldspati_Treno;Distance-based;;0;tkm;Dichiarazione fornitore;S;Definitivo;0 km
+3;2025;4;Sabbie silicee_Treno;Distance-based;;0;tkm;Dichiarazione fornitore;S;Definitivo;0 km
+3;2024;1;Argille;Mass-based;;122965;t;SAP;P;Definitivo;
+3;2024;1;Feldspati;Mass-based;;82159;t;SAP;P;Definitivo;
+3;2024;1;Sabbie silicee;Mass-based;;62407;t;SAP;P;Definitivo;
+3;2024;1;Fritte e smalti;Mass-based;;7777;t;SAP;P;Definitivo;"MAT PRIME PER SMALTI; SMALTI; M.P. GRANIGLIE DDG; MAT. PRIME GRANIGLIE"
+3;2024;1;Pigmenti;Mass-based;;112;t;SAP;P;Definitivo;"COLORANTI IMPASTO; COLORANTI TINTOMETRO; PIGMENTI PER SMALTI"
+3;2024;1;Additivi chimici;Mass-based;;2208;t;SAP;P;Definitivo;"ADDITIVI IMPASTO; INCH COLLE SOLV DIG; ADDITIVI PER SMALTI; COLLA"
+3;2024;1;Imballaggi cartone;Mass-based;;1507;t;SAP;P;Definitivo;CARTONE PER IMBALLI
+3;2025;6;Voli;Spend-based;;121177;EUR;Note spese;P;Definitivo;
+3;2024;1;Pallet legno;Mass-based;;6086;t;SAP;P;Definitivo;PALETTE
+3;2024;1;Film plastico;Mass-based;;440;t;SAP;P;Definitivo;BOBINE-CAPPUCCI-FOGL
+3;2024;1;Reggette PP;Mass-based;;117;t;SAP;P;Definitivo;REGGETTA
+3;2024;1;Servizi vari (Agenti);Spend-based;;6095640;EUR;SAP;P;Definitivo;
+3;2024;1;Servizi vari (Lav.est./Acq.prd.fin);Spend-based;;6243738;EUR;SAP;P;Definitivo;
+3;2024;1;Servizi vari (Servizi);Spend-based;;30551788;EUR;SAP;P;Definitivo;
+3;2024;1;Servizi vari (Altro);Spend-based;;10716685;EUR;SAP;P;Definitivo;
+3;2024;2;Impiantistica;Spend-based;;13103478;EUR;SAP;P;Definitivo;
+3;2024;2;Materiali di consumo;Spend-based;;2062710;EUR;SAP;P;Definitivo;
+3;2024;4;Argille_Strada;Distance-based;;18813695;tkm;Dichiarazione fornitore;S;Definitivo;153 km
+3;2024;4;Argille_Treno;Distance-based;;55457363;tkm;Dichiarazione fornitore;S;Definitivo;451 km
+3;2024;4;Argille_Nave;Distance-based;;76115538;tkm;Dichiarazione fornitore;S;Definitivo;619 km
+3;2024;4;Feldspati_Strada;Distance-based;;18075077;tkm;Dichiarazione fornitore;S;Definitivo;220 km
+3;2024;4;Feldspati_Nave;Distance-based;;18650193;tkm;Dichiarazione fornitore;S;Definitivo;227 km
+3;2024;4;Sabbie silicee_Strada;Distance-based;;10609212;tkm;Dichiarazione fornitore;S;Definitivo;170 km
+3;2024;4;Sabbie silicee_Nave;Distance-based;;6739970;tkm;Dichiarazione fornitore;S;Definitivo;108 km
+3;2024;4;Fritte e smalti_Strada;Distance-based;;10739438;tkm;Dichiarazione fornitore;S;Definitivo;1381 km
+3;2024;4;Pigmenti_Strada;Distance-based;;154550;tkm;Dichiarazione fornitore;S;Definitivo;1381 km
+3;2024;4;Additivi chimici_Strada;Distance-based;;287032;tkm;Dichiarazione fornitore;S;Definitivo;130 km
+3;2024;4;Imballaggi cartone_Strada;Distance-based;;69299;tkm;Dichiarazione fornitore;S;Definitivo;46 km
+3;2024;4;Pallet legno_Strada;Distance-based;;304316;tkm;Dichiarazione fornitore;S;Definitivo;50 km
+3;2024;4;Film plastico_Strada;Distance-based;;100790;tkm;Dichiarazione fornitore;S;Definitivo;229 km
+3;2024;4;Reggette PP_Strada;Distance-based;;19676;tkm;Dichiarazione fornitore;S;Definitivo;168 km
+3;2024;5;Rifiuti pericolosi a discarica;Mass-based;;244;t;SAP;P;Definitivo;
+3;2024;5;Rifiuti non pericolosi a discarica;Mass-based;;98;t;SAP;P;Definitivo;
+3;2024;5;Rifiuti pericolosi da riciclo;Mass-based;;41;t;SAP;P;Definitivo;
+3;2024;5;Rifiuti non pericolosi da riciclo;Mass-based;;5990;t;SAP;P;Definitivo;
+3;2024;6;Voli;Spend-based;;111203;EUR;Note spese;P;Definitivo;
+3;2024;6;Auto noleggio;Spend-based;;22440;EUR;Note spese;P;Definitivo;
+3;2024;6;Hotel;Spend-based;;222845;EUR;Note spese;P;Definitivo;
+3;2024;7;Commuting_Auto;Distance-based;;4452800;km;Stima interna;E;Definitivo;40 km/giorno × 220 giorni/anno = 8.800 km/anno * 506 dipendenti
+3;2024;9;Italia_Strada;Distance-based;;26006138;tkm;Proxy settoriale;E;Definitivo;Truck with domestic destination having a capacity of 27 tons (34,75% of tiles sold) | 300 km
+3;2024;9;Europa_Strada;Distance-based;;202258406;tkm;Proxy settoriale;E;Definitivo;Truck with European destination having a capacity of 27 tons (58,33% of tiles sold) | 1390 km
+3;2024;9;Export_Nave;Distance-based;;112552072;tkm;Proxy settoriale;E;Definitivo;Transoceanic transport shipment (6,92% of tiles  sold) | 6520 km
+3;2024;12;Piastrelle_Discarica;Mass-based;;79013;t;Proxy settoriale;E;Definitivo;30% delle piastrelle prodotte
+3;2024;12;Piastrelle_Riciclo;Mass-based;;184363;t;Proxy settoriale;E;Definitivo;70% delle piastrelle prodotte
+3;2025;1;Argille;Mass-based;;119082;t;SAP;P;Definitivo;
+3;2025;1;Feldspati;Mass-based;;82393;t;SAP;P;Definitivo;
+3;2025;1;Sabbie silicee;Mass-based;;57413;t;SAP;P;Definitivo;
+3;2025;1;Fritte e smalti;Mass-based;;7298;t;SAP;P;Definitivo;"MAT PRIME PER SMALTI; SMALTI; M.P. GRANIGLIE DDG; MAT. PRIME GRANIGLIE"
+3;2025;1;Pigmenti;Mass-based;;107;t;SAP;P;Definitivo;"COLORANTI IMPASTO; COLORANTI TINTOMETRO; PIGMENTI PER SMALTI"
+3;2025;1;Additivi chimici;Mass-based;;2155;t;SAP;P;Definitivo;"ADDITIVI IMPASTO; INCH COLLE SOLV DIG; ADDITIVI PER SMALTI; COLLA"
+3;2025;1;Imballaggi cartone;Mass-based;;1483;t;SAP;P;Definitivo;CARTONE PER IMBALLI
+3;2025;1;Pallet legno;Mass-based;;5808;t;SAP;P;Definitivo;PALETTE
+3;2025;1;Film plastico;Mass-based;;461;t;SAP;P;Definitivo;BOBINE-CAPPUCCI-FOGL
+3;2025;1;Reggette PP;Mass-based;;118;t;SAP;P;Definitivo;REGGETTA
+3;2025;1;Servizi vari (Agenti);Spend-based;;5717659;EUR;SAP;P;Definitivo;
+3;2025;1;Servizi vari (Lav.est./Acq.prd.fin);Spend-based;;6060789;EUR;SAP;P;Definitivo;
+3;2025;1;Servizi vari (Servizi);Spend-based;;25030294;EUR;SAP;P;Definitivo;
+3;2025;1;Servizi vari (Altro);Spend-based;;12336485;EUR;SAP;P;Definitivo;
+3;2025;2;Impiantistica;Spend-based;;3903979;EUR;SAP;P;Definitivo;
+3;2025;2;Materiali di consumo;Spend-based;;2051186;EUR;SAP;P;Definitivo;
+3;2025;4;Argille_Strada;Distance-based;;18219472;tkm;Dichiarazione fornitore;S;Definitivo;153 km
+3;2025;4;Argille_Treno;Distance-based;;60255246;tkm;Dichiarazione fornitore;S;Definitivo;506 km
+3;2025;4;Argille_Nave;Distance-based;;54182089;tkm;Dichiarazione fornitore;S;Definitivo;455 km
+3;2025;4;Feldspati_Strada;Distance-based;;18373582;tkm;Dichiarazione fornitore;S;Definitivo;223 km
+3;2025;4;Feldspati_Nave;Distance-based;;33369061;tkm;Dichiarazione fornitore;S;Definitivo;405 km
+3;2025;4;Sabbie silicee_Strada;Distance-based;;9243551;tkm;Dichiarazione fornitore;S;Definitivo;161 km
+3;2025;4;Sabbie silicee_Nave;Distance-based;;5569096;tkm;Dichiarazione fornitore;S;Definitivo;97 km
+3;2025;4;Fritte e smalti_Strada;Distance-based;;10077934;tkm;Dichiarazione fornitore;S;Definitivo;1381 km
+3;2025;4;Pigmenti_Strada;Distance-based;;148273;tkm;Dichiarazione fornitore;S;Definitivo;1381 km
+3;2025;4;Additivi chimici_Strada;Distance-based;;280113;tkm;Dichiarazione fornitore;S;Definitivo;130 km
+3;2025;4;Imballaggi cartone_Strada;Distance-based;;68207;tkm;Dichiarazione fornitore;S;Definitivo;46 km
+3;2025;4;Pallet legno_Strada;Distance-based;;290395;tkm;Dichiarazione fornitore;S;Definitivo;50 km
+3;2025;4;Film plastico_Strada;Distance-based;;105626;tkm;Dichiarazione fornitore;S;Definitivo;229 km
+3;2025;4;Reggette PP_Strada;Distance-based;;19833;tkm;Dichiarazione fornitore;S;Definitivo;168 km
+3;2025;5;Rifiuti pericolosi a discarica;Mass-based;;247;t;SAP;P;Definitivo;
+3;2025;5;Rifiuti non pericolosi a discarica;Mass-based;;166;t;SAP;P;Definitivo;
+3;2025;5;Rifiuti pericolosi da riciclo;Mass-based;;53;t;SAP;P;Definitivo;
+3;2025;5;Rifiuti non pericolosi da riciclo;Mass-based;;4313;t;SAP;P;Definitivo;
+3;2025;6;Auto noleggio;Spend-based;;24126;EUR;Note spese;P;Definitivo;
+3;2025;6;Hotel;Spend-based;;237473;EUR;Note spese;P;Definitivo;
+3;2025;7;Commuting_Auto;Distance-based;;4259200;km;Stima interna;E;Definitivo;40 km/giorno × 220 giorni/anno = 8.800 km/anno * 484 dipendenti
+3;2025;9;Italia_Strada;Distance-based;;25439036;tkm;Proxy settoriale;E;Definitivo;Truck with domestic destination having a capacity of 27 tons (33,58% of tiles sold) | 300 km
+3;2025;9;Europa_Strada;Distance-based;;207514252;tkm;Proxy settoriale;E;Definitivo;Truck with European destination having a capacity of 27 tons (59,12% of tiles sold) | 1390 km
+3;2025;9;Export_Nave;Distance-based;;120190228;tkm;Proxy settoriale;E;Definitivo;Transoceanic transport shipment (7,30% of tiles  sold) | 6520 km
+3;2025;12;Piastrelle_Discarica;Mass-based;;74772;t;Proxy settoriale;E;Definitivo;30% delle piastrelle prodotte
+3;2025;12;Piastrelle_Riciclo;Mass-based;;174468;t;Proxy settoriale;E;Definitivo;70% delle piastrelle prodotte
+3;2024;3;WTT Gas Naturale;Activity-based;GAS_NAT;33149422;Sm³;;;;
+3;2024;3;WTT Gasolio;Activity-based;GASOLIO;341268;litri;;;;
+3;2024;3;WTT Benzina;Activity-based;BENZINA;1349;litri;;;;
+3;2025;3;WTT Gas Naturale;Activity-based;GAS_NAT;31853218;Sm³;;;;
+3;2025;3;WTT Gasolio;Activity-based;GASOLIO;334848;litri;;;;
+3;2025;3;WTT Benzina;Activity-based;BENZINA;9151;litri;;;;
+3;2024;3;WTT Elettricità (generazione);Activity-based;;19748786;kWh;;;;
+3;2024;3;T&D Losses Elettricità;Activity-based;;19748786;kWh;;;;
+3;2025;3;WTT Elettricità (generazione);Activity-based;;17223912;kWh;;;;
+3;2025;3;T&D Losses Elettricità;Activity-based;;17223912;kWh;;;;
