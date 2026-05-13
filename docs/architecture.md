@@ -2043,11 +2043,14 @@ These are decisions the architect cannot finalise without implementation experim
 - **Status**: Open — depends on data-engineer's Phase 5 fetch.
 - **Decision rule**: If ISPRA 2024 vintage is published before Phase 5 cut-off, use it; otherwise FY2023 + documented offset (MG-16).
 
-### ADR-007 — Biogenic CO2 disclosure schema (OI-9)
+### ADR-007 — Biogenic CO2 disclosure schema (OI-9) — **CLOSED 2026-05-13**
 
-- **Status**: Open — methodology requires the policy choice (OI-9 in methodology_validation.md §10.2).
-- **Likely shape**: add two nullable columns `co2_biogenic_tonne` and `co2_fossil_tonne` to `calc.emissions_consolidated` and ESRS E1-7 disclosure section in PDF.
-- **Resolution required by**: ESRS E1-6 PDF sign-off for FY2024.
+- **Status**: **RESOLVED by user 2026-05-13**: separate-schema option adopted. OI-9 closed.
+- **Decision**: Two nullable columns added to `calc.emissions_consolidated` in migration **M0**: `co2_biogenic_tonne DECIMAL(14,6)` and `co2_fossil_tonne DECIMAL(14,6)`. `tco2e` remains the headline column carrying fossil + non-CO2 GWP-weighted total per IPCC AR6; `co2_biogenic_tonne` is a separate memo line disclosed in ESRS E1-7 (Removals and Storage) and NEVER netted against `tco2e`.
+- **Population rule**: For Cat 1 cardboard (`ECOINV_CARDBOARD_V3_10`) and wooden pallets (`ECOINV_PALLET_V3_10`), ecoinvent v3.10 biogenic-CO2 flow is read separately at factor-seeding time and stored as `factor_catalog.biogenic_co2_kg_per_unit` companion field. The calc module emits BOTH `co2_fossil_tonne` (the fossil portion → contributes to `tco2e`) and `co2_biogenic_tonne` (memo only). Other Cat 1 substances default both columns to NULL where biogenic content is immaterial.
+- **PDF / Excel impact**: ESRS E1-7 section added to FR-28 PDF template; Excel sheet gains a "Biogenic CO2 memo" column. Dashboard tooltip exposes the biogenic split for affected rows.
+- **Aligned to**: GHG Protocol Land Sector and Removals Guidance (2022), ISO 14067:2018 §6.4.6, ESRS E1 §AR.32.
+- **Phase 5 owner**: data-engineer (M0 schema), data-analyst (Cat 1 calc dual-write), visualization (PDF E1-7 section + dashboard tooltip).
 
 ### ADR-008 — Factor pinning automation (OI-5 closure)
 
