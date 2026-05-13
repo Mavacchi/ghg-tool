@@ -38,6 +38,7 @@ dependencies = [
     "slowapi>=0.1,<0.2",
     # PDF generation
     "weasyprint>=62,<63",
+    "pydyf>=0.10,<0.12",  # WeasyPrint 62.x is incompatible with pydyf 0.12+ (breaking write_pdf API)
     # Dashboard
     "streamlit>=1.35,<1.36",
     "plotly>=5.22,<5.23",
