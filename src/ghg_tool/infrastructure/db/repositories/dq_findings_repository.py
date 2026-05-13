@@ -8,8 +8,8 @@ from collections.abc import Sequence
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ghg_tool.infrastructure.db.models.dq_finding import DqFinding
 from ghg_tool.infrastructure.db.models.dlq import Dlq
+from ghg_tool.infrastructure.db.models.dq_finding import DqFinding
 
 
 class DQFindingsRepository:

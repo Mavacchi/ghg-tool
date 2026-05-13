@@ -14,7 +14,6 @@ from pathlib import Path
 
 import pandas as pd
 
-
 _SCOPE1_REQUIRED = [
     "Scope", "Anno", "Codice_Sito", "Categoria_S1",
     "Combustibile", "Quantità", "Unità",

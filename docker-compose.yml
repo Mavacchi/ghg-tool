@@ -1,0 +1,100 @@
+---
+# GHG Tool — Docker Compose (local development + integration test stack)
+#
+# Services:
+#   db        — PostgreSQL 15 with ghg_tool database
+#   migrate   — one-shot Alembic upgrade (depends on db healthcheck)
+#   app       — FastAPI (uvicorn) [wave 3; placeholder command]
+#   etl       — ETL orchestrator CLI [wave 3; placeholder command]
+#
+# Usage:
+#   docker compose up db migrate      # start DB + apply migrations
+#   docker compose up                 # full stack (requires app image built)
+#   docker compose down -v            # stop + remove volumes
+
+version: "3.9"
+
+services:
+  # ---------------------------------------------------------------------------
+  # PostgreSQL 15
+  # ---------------------------------------------------------------------------
+  db:
+    image: postgres:15-alpine
+    container_name: ghg_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ghg_tool
+      POSTGRES_USER: ghg_app
+      # IMPORTANT: Override with a strong password in production.
+      # Do NOT commit real credentials here.
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-changeme}"
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ghg_app -d ghg_tool"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  # ---------------------------------------------------------------------------
+  # Alembic migrations (run-once on every docker compose up)
+  # ---------------------------------------------------------------------------
+  migrate:
+    build:
+      context: .
+      target: runtime
+    container_name: ghg_migrate
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      SQLALCHEMY_URL: "postgresql+psycopg://ghg_app:${POSTGRES_PASSWORD:-changeme}@db:5432/ghg_tool"
+    command: ["python", "-m", "alembic", "upgrade", "head"]
+    restart: on-failure
+
+  # ---------------------------------------------------------------------------
+  # Application server (wave 3 — placeholder)
+  # ---------------------------------------------------------------------------
+  app:
+    build:
+      context: .
+      target: runtime
+    container_name: ghg_app
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      SQLALCHEMY_URL: "postgresql+asyncpg://ghg_app:${POSTGRES_PASSWORD:-changeme}@db:5432/ghg_tool"
+      GHG_LOG_LEVEL: "${GHG_LOG_LEVEL:-INFO}"
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
+    profiles:
+      - app  # only started when: docker compose --profile app up
+
+  # ---------------------------------------------------------------------------
+  # ETL CLI (wave 3 — placeholder)
+  # ---------------------------------------------------------------------------
+  etl:
+    build:
+      context: .
+      target: runtime
+    container_name: ghg_etl
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      SQLALCHEMY_URL: "postgresql+asyncpg://ghg_app:${POSTGRES_PASSWORD:-changeme}@db:5432/ghg_tool"
+    volumes:
+      - ./data:/app/data:ro
+    # Override this command with the actual ETL entrypoint in wave 3
+    command: ["python", "-m", "ghg_tool.etl.orchestrator", "--help"]
+    profiles:
+      - etl  # only started when: docker compose --profile etl up
+
+volumes:
+  pgdata:
+    name: ghg_pgdata

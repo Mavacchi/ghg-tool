@@ -97,13 +97,12 @@ async def get_db_session(
     Yields:
         An ``AsyncSession`` with RLS GUCs set for the request lifetime.
     """
-    async with AsyncSessionFactory() as session:
-        async with session.begin():
-            if jwt_claims is not None:
-                await set_session_gucs(
-                    session,
-                    tenant_id=jwt_claims["tenant_id"],
-                    role_code=jwt_claims["role"],
-                    user_id=jwt_claims.get("sub"),
-                )
-            yield session
+    async with AsyncSessionFactory() as session, session.begin():
+        if jwt_claims is not None:
+            await set_session_gucs(
+                session,
+                tenant_id=jwt_claims["tenant_id"],
+                role_code=jwt_claims["role"],
+                user_id=jwt_claims.get("sub"),
+            )
+        yield session

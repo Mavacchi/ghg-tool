@@ -1,0 +1,71 @@
+---
+# GHG Tool — pre-commit hooks
+#
+# Install: pre-commit install
+# Run manually: pre-commit run --all-files
+#
+# Hooks are intentionally kept fast (< 10 s on a warm cache) so they do not
+# impede the commit workflow.  Heavy checks (mypy, pytest) run in CI only.
+
+default_language_version:
+  python: python3.11
+
+repos:
+  # --------------------------------------------------------------------------
+  # General file hygiene
+  # --------------------------------------------------------------------------
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+        args: ["--unsafe"]  # allow custom YAML tags in docker-compose
+      - id: check-toml
+      - id: check-json
+      - id: check-merge-conflict
+      - id: check-added-large-files
+        args: ["--maxkb=1024"]
+      - id: no-commit-to-branch
+        args: ["--branch", "main"]
+      # Prevent accidental credential commits
+      - id: detect-private-key
+
+  # --------------------------------------------------------------------------
+  # Ruff: lint + format (replaces black + isort + flake8)
+  # NFR-16: max-complexity = 15 enforced via pyproject.toml [tool.ruff.lint.mccabe]
+  # --------------------------------------------------------------------------
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.4.10
+    hooks:
+      - id: ruff
+        args: ["--fix", "--exit-non-zero-on-fix"]
+        types_or: [python, pyi]
+      - id: ruff-format
+        types_or: [python, pyi]
+
+  # --------------------------------------------------------------------------
+  # Mypy: strict type checking on src only (not tests — per pyproject.toml)
+  # --------------------------------------------------------------------------
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.10.0
+    hooks:
+      - id: mypy
+        args: ["--config-file=pyproject.toml"]
+        # Only check the application source; tests are excluded via pyproject.toml
+        files: "^src/ghg_tool/"
+        additional_dependencies:
+          - "pydantic>=2.7,<2.8"
+          - "sqlalchemy>=2.0,<2.1"
+          - "pandas-stubs>=2.2,<2.3"
+          - "types-passlib>=1.7,<1.8"
+
+  # --------------------------------------------------------------------------
+  # Secrets / credentials scan (complements detect-private-key)
+  # --------------------------------------------------------------------------
+  - repo: https://github.com/Yelp/detect-secrets
+    rev: v1.5.0
+    hooks:
+      - id: detect-secrets
+        args: ["--baseline", ".secrets.baseline"]
+        exclude: "tests/|alembic/versions/|pyproject.toml"

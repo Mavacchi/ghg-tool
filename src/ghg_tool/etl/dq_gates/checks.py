@@ -91,7 +91,10 @@ def check_mandatory_columns(
     scope_cols: dict[int, list[str]] = {
         1: base_cols + ["Codice_Sito", "Combustibile"],
         2: base_cols + ["Codice_Sito", "Voce_S2"],
-        3: base_cols + ["Categoria_S3", "Sottocategoria", "Fonte_Dato", "Qualità_Dato", "Stato_Dato"],
+        3: base_cols + [
+            "Categoria_S3", "Sottocategoria",
+            "Fonte_Dato", "Qualità_Dato", "Stato_Dato",
+        ],
     }
     mandatory = scope_cols.get(scope, base_cols)
 
@@ -155,19 +158,23 @@ def check_negative_quantities(df: pd.DataFrame, scope: int) -> tuple[bool, list[
 
 
 def check_outlier_zscore(df: pd.DataFrame, scope: int) -> tuple[bool, list[FindingDict]]:
-    """DQ-CRIT-04: Z-score > 4 on site × fuel/voce × year quantity.
+    """DQ-CRIT-04: Z-score > 2.0 on site × fuel/voce × year quantity.
 
-    Computes z-score across (Codice_Sito × fuel_col) population.
-    VIANO_GARGOLA GAS_NAT 2025 = 11 Sm³ is a known candidate pre-flagged
-    in requirements.md §11.  Note: with only 2 years of data z-score is
-    computed across the site population for the same year.
+    Computes z-score across (Codice_Sito × fuel_col) within each (fuel, year)
+    group.  For small populations (n ≤ 7 sites) the mathematical maximum
+    achievable z-score is (n-1)/sqrt(n) ≈ 2.27; a threshold of 2.0 provides
+    a single-standard-deviation safety margin below that bound.
+
+    VIANO_GARGOLA GAS_NAT 2025 = 11 Sm³ is a known candidate flagged in
+    requirements.md §11.  Detecting it requires the comparison population to
+    be near-homogeneous (six sites of similar magnitude + one extreme outlier).
 
     Args:
         df: Scope 1 or Scope 2 DataFrame (numeric Quantità).
         scope: Scope number for finding metadata.
 
     Returns:
-        (passes, findings) where passes=False if any |z| > 4.
+        (passes, findings) where passes=False if any |z| > 2.0.
     """
     findings: list[FindingDict] = []
     fuel_col = "Combustibile" if scope == 1 else "Voce_S2"
@@ -184,7 +191,7 @@ def check_outlier_zscore(df: pd.DataFrame, scope: int) -> tuple[bool, list[Findi
             continue
         z_scores = (grp_qty - grp_qty.mean()) / grp_qty.std()
         for idx, z in z_scores.items():
-            if abs(z) > 4:
+            if abs(z) > 2.0:
                 row = df.loc[idx]
                 findings.append(
                     {
@@ -197,7 +204,7 @@ def check_outlier_zscore(df: pd.DataFrame, scope: int) -> tuple[bool, list[Findi
                         "value_observed": float(grp_qty[idx]),
                         "z_score": float(z),
                         "trigger_desc": (
-                            f"DQ-CRIT-04: z-score={z:.2f} > 4 for "
+                            f"DQ-CRIT-04: z-score={z:.2f} > 2.0 for "
                             f"{fuel_col}={fuel!r}, site={row.get('Codice_Sito')!r}, "
                             f"Anno={anno}, Quantità={grp_qty[idx]}."
                         ),

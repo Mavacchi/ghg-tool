@@ -40,6 +40,6 @@ class Site(Base):
     )
 
     # Relationships (back-populated in wave 2 when GO evidence model added)
-    go_certificates: Mapped[list["GoCertificate"]] = relationship(  # type: ignore[name-defined]  # noqa: F821
+    go_certificates: Mapped[list[GoCertificate]] = relationship(  # type: ignore[name-defined]  # noqa: F821
         "GoCertificate", back_populates="site", lazy="raise"
     )

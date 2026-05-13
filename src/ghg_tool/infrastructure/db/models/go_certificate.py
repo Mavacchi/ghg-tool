@@ -53,6 +53,6 @@ class GoCertificate(Base):
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
 
-    site: Mapped["Site"] = relationship(  # type: ignore[name-defined]  # noqa: F821
+    site: Mapped[Site] = relationship(  # type: ignore[name-defined]  # noqa: F821
         "Site", back_populates="go_certificates", lazy="raise"
     )
