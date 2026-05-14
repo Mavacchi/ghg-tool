@@ -86,6 +86,13 @@ PERMISSION_MATRIX: Final[dict[str, dict[str, frozenset[str]]]] = {
         "read": frozenset({ROLE_DATA_STEWARD, ROLE_ESG_MANAGER, ROLE_AUDITOR}),
         "write": frozenset({ROLE_ESG_MANAGER}),
     },
+    "sbti_targets": {
+        # M12 -- SBTi-aligned reduction targets (ESRS E1-4).
+        # All roles may read targets and trajectories.
+        # Only esg_manager may create or deactivate targets.
+        "read": frozenset({ROLE_DATA_STEWARD, ROLE_ESG_MANAGER, ROLE_AUDITOR}),
+        "write": frozenset({ROLE_ESG_MANAGER}),
+    },
 }
 
 

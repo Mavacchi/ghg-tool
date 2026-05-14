@@ -33,11 +33,135 @@ from ghg_tool.ui.streamlit_app.lib.api_client import (  # noqa: E402
     trigger_pdf_report,
     trigger_excel_report,
     fetch_job_status,
+    fetch_kpis,
+    fetch_emissions,
+    fetch_dq_findings,
 )
 
 apply_brand_chrome()
 require_auth()
 lang = get_lang()
+
+# ---------------------------------------------------------------------------
+# Helper — executive PDF generation
+# ---------------------------------------------------------------------------
+
+
+def _compute_top_scope3(rows: list[dict], top_n: int = 5) -> list[dict]:
+    """Aggregate Scope 3 emission rows into top-N categories by tCO2e.
+
+    Args:
+        rows: Raw emission rows for scope 3.
+        top_n: Maximum categories to return.
+
+    Returns:
+        List of dicts with keys sub_scope, category_label, tco2e, pct.
+    """
+    from collections import defaultdict
+    totals: dict[str, float] = defaultdict(float)
+    for r in rows:
+        sub = str(r.get("sub_scope") or "Unknown")
+        totals[sub] += float(r.get("tco2e") or 0)
+
+    grand = sum(totals.values()) or 1.0
+    ranked = sorted(totals.items(), key=lambda x: x[1], reverse=True)[:top_n]
+
+    result = []
+    for sub, val in ranked:
+        result.append({
+            "sub_scope": sub,
+            "category_label": sub,
+            "tco2e": val,
+            "pct": round(val / grand * 100, 1),
+        })
+    return result
+
+
+def _generate_exec_pdf(anno: int, gwp_set: str, report_lang: str) -> None:
+    """Generate the executive one-pager PDF and offer a download button.
+
+    Fetches KPIs for current and prior year, computes Scope 3 hot-spots, and
+    delegates rendering to ExecDashboardBuilder. Gracefully no-ops on any
+    data fetch failure without crashing the page.
+
+    Args:
+        anno: Current reporting year.
+        gwp_set: GWP characterisation set.
+        report_lang: Language code ('it' or 'en').
+    """
+    try:
+        from ghg_tool.ui.pdf.exec_dashboard import ExecDashboardBuilder  # noqa: PLC0415
+    except ImportError:
+        st.error("ExecDashboardBuilder non disponibile.")
+        return
+
+    prior_anno = anno - 1
+
+    with st.spinner("Recupero dati KPI..."):
+        kpis_cur = fetch_kpis(anno=anno, gwp_set=gwp_set)
+        kpis_pri = fetch_kpis(anno=prior_anno, gwp_set=gwp_set)
+
+    # Normalise totals from the KPI response shape
+    def _totals(kpis: dict) -> dict:
+        return {
+            "scope1": kpis.get("scope1_total") or kpis.get("scope1") or 0.0,
+            "scope2_lb": kpis.get("scope2_lb_total") or kpis.get("scope2_lb") or 0.0,
+            "scope2_mb": kpis.get("scope2_mb_total") or kpis.get("scope2_mb") or 0.0,
+            "scope3": kpis.get("scope3_total") or kpis.get("scope3") or 0.0,
+            "biogenic_memo": kpis.get("biogenic_total_co2") or None,
+            "total_lb": None,  # will be computed in ExecDashboardBuilder
+        }
+
+    totals_current = _totals(kpis_cur)
+    totals_prior = _totals(kpis_pri)
+
+    # Scope 3 hot-spots
+    with st.spinner("Recupero Scope 3..."):
+        s3_rows = fetch_emissions(scope=3, anno=anno, gwp_set=gwp_set)
+    top_scope3 = _compute_top_scope3(s3_rows)
+
+    # DQ summary
+    with st.spinner("Recupero DQ findings..."):
+        dq_rows = fetch_dq_findings(resolution_status="OPEN")
+    crit_open = sum(1 for r in dq_rows if r.get("severity") == "CRIT")
+    warn_open = sum(1 for r in dq_rows if r.get("severity") == "WARN")
+    dq_summary = {
+        "crit_open": crit_open,
+        "warn_open": warn_open,
+        "total_findings": len(dq_rows),
+    }
+
+    data = {
+        "anno": anno,
+        "prior_anno": prior_anno,
+        "company_name": kpis_cur.get("company_name", ""),
+        "gwp_set": gwp_set,
+        "language": report_lang,
+        "totals_current": totals_current,
+        "totals_prior": totals_prior,
+        "intensity_revenue": kpis_cur.get("intensity_revenue"),
+        "intensity_m2": kpis_cur.get("intensity_m2"),
+        "intensity_revenue_prior": kpis_pri.get("intensity_revenue"),
+        "intensity_m2_prior": kpis_pri.get("intensity_m2"),
+        "target": kpis_cur.get("sbti_target"),
+        "top_scope3_categories": top_scope3,
+        "dq_summary": dq_summary,
+        "assurance_status": kpis_cur.get("assurance_status", "none"),
+        "signed_by_esg_manager": None,
+    }
+
+    try:
+        pdf_bytes = ExecDashboardBuilder().build(data)
+        st.download_button(
+            label="Scarica PDF Executive" if report_lang == "it" else "Download Executive PDF",
+            data=pdf_bytes,
+            file_name=f"exec_dashboard_{anno}_{gwp_set}.pdf",
+            mime="application/pdf",
+        )
+    except (ImportError, OSError, ValueError, RuntimeError):
+        _logger.exception("exec_pdf_generation_failed", anno=anno, gwp_set=gwp_set)
+        st.error("Errore durante la generazione del PDF executive. Riprovare.")
+
 
 # ---------------------------------------------------------------------------
 # Helper — inline PDF generation (defined before use)
@@ -121,6 +245,36 @@ render_context_bar(
     gwp=gwp_set,
     role=st.session_state.get("role"),
 )
+
+# ---------------------------------------------------------------------------
+# Executive Dashboard (one-pager)
+# ---------------------------------------------------------------------------
+st.subheader("Executive Dashboard (1 pagina)")
+st.caption(
+    "Board pack one-pager: KPI, trend Scope 1/2/3, target SBTi, "
+    "hot-spot Scope 3, metriche di intensita, DQ status."
+)
+
+col_exec_prev, col_exec_gen = st.columns([1, 1])
+
+with col_exec_prev:
+    st.markdown("**Anteprima struttura**")
+    st.markdown(
+        """
+        - Riga 1: 5 KPI card (Totale, S1, S2 LB, S2 MB, S3) con delta YoY
+        - Riga 2: Grafico barre S1/S2/S3 | Tracker target SBTi
+        - Riga 3: Top-5 categorie Scope 3 | Intensita (tCO2e/MEUR, kgCO2e/m2)
+        - Riga 4: DQ status + Assurance + firma ESG Manager
+        - Footer: dashboard ID, GWP set, methodology, disclaimer ADR-007
+        """
+    )
+
+with col_exec_gen:
+    st.markdown("**Genera PDF Executive**")
+    if st.button("Genera PDF Executive", key="btn_exec_pdf"):
+        _generate_exec_pdf(anno, gwp_set, report_lang)
+
+st.divider()
 
 # ---------------------------------------------------------------------------
 # PDF export
