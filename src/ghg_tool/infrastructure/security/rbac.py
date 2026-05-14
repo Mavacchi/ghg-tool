@@ -69,6 +69,14 @@ PERMISSION_MATRIX: Final[dict[str, dict[str, frozenset[str]]]] = {
         "login": frozenset({ROLE_DATA_STEWARD, ROLE_ESG_MANAGER, ROLE_AUDITOR}),
         "refresh": frozenset({ROLE_DATA_STEWARD, ROLE_ESG_MANAGER, ROLE_AUDITOR}),
     },
+    "users": {
+        # User management lives behind esg_manager only - the closest thing
+        # to an "admin" tier in the current three-role hierarchy. Read/write
+        # both require esg_manager so the v1 admin page only exposes user
+        # creation + listing to the same role.
+        "read": frozenset({ROLE_ESG_MANAGER}),
+        "write": frozenset({ROLE_ESG_MANAGER}),
+    },
 }
 
 

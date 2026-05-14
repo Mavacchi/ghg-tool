@@ -44,6 +44,24 @@ class CurrentUser(BaseModel):
     tenant_id: str = Field(min_length=1)
     jti: str = Field(default="")
 
+    @field_validator("sub")
+    @classmethod
+    def _validate_sub_uuid(cls, value: str) -> str:
+        """Reject non-UUID subject claims.
+
+        Documented invariant: the JWT ``sub`` claim is a user UUID, never
+        an email (avoids PII in logs). Enforce it at the Pydantic boundary
+        so a future identity-provider misconfiguration that injects an
+        email surfaces as a 401 at the auth gate rather than leaking PII
+        into every structured log line that binds ``user.sub`` or
+        ``published_by``.
+        """
+        try:
+            uuid.UUID(value)
+        except ValueError as exc:
+            raise ValueError("sub must be a valid UUID") from exc
+        return value
+
     @field_validator("tenant_id")
     @classmethod
     def _validate_tenant_uuid(cls, value: str) -> str:

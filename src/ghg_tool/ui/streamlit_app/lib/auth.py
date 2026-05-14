@@ -215,6 +215,15 @@ def render_login_form(lang: str = "it") -> None:
     The form sits in a narrow centred column so the brand reads as a
     proper sign-in landing page rather than a wide demo layout.
     """
+    # Marker element that the brand stylesheet uses (via :has) to hide
+    # the multipage sidebar nav and toolbar chrome while the login wall
+    # is up. Users must NOT be able to browse page names from the URL
+    # bar or sidebar before authenticating.
+    st.markdown(
+        '<div class="ct-pre-auth-marker" aria-hidden="true"></div>',
+        unsafe_allow_html=True,
+    )
+
     # Centred narrow column: 1 / 2 / 1 ratio gives a comfortable form
     # width on any reasonable viewport.
     _spacer_l, _form_col, _spacer_r = st.columns([1, 2, 1])

@@ -370,8 +370,115 @@ is in scope.
 
 ---
 
-## 13. Methodology Changelog
+## 13. Factor Catalog Lifecycle and Publication
+
+This section documents how emission factor records move from draft to published state, the
+immutability rule applied to published factors (MG-02), and the separation of duties
+between the `data_steward` and `esg_manager` roles. It is required for ESRS 2 BP-2
+(methodologies and significant judgements disclosure).
+
+### Draft state
+
+Factor records are created via `POST /api/v1/factor-catalog/` by users holding the
+`data_steward` role. A newly created record has `is_published=false`, `published_at=NULL`,
+and `published_by=NULL` (the `published_at` / `published_by` columns were split from
+`created_at` in migration MG-03, file `alembic/versions/0010_M9_factor_published_at_split.py`,
+which resolved an ambiguity where the creation timestamp was being misread as the publication
+date). Drafts are fully editable by the `data_steward`: values, units, source references,
+and methodology notes may be corrected at any time before publication.
+
+Drafts are **invisible to the calculation engine**. The calc orchestrator filters
+`ref.factor_catalog` with `WHERE is_published = true`; draft rows are never selected for
+emission calculations.
+
+### Publication workflow
+
+Only the `esg_manager` role may publish a factor. This endpoint is intentionally inaccessible
+to `data_steward` (separation of duties — see §13.5 below).
+
+**Endpoint**: `POST /api/v1/factor-catalog/{factor_uuid}/publish`
+
+**Required field — `reason_code`** (controlled enum):
+
+| Code | When to use |
+|---|---|
+| `INITIAL_PUBLICATION` | First time this `factor_id` / version combination is published |
+| `VERSION_BUMP` | Publishing a new version of an existing `factor_id` |
+| `METHODOLOGY_UPDATE` | New version reflecting a methodology change (e.g. GWP set upgrade) |
+| `SOURCE_REVISION` | New version reflecting an updated source PDF (see ADR-008 for PDF source pinning policy) |
+| `CORRECTION_REPLACEMENT` | Publishing a version that supersedes a withdrawn one |
+
+**Optional field — `publish_notes`** (string, max 2000 characters): used to record a
+CSRD-grade justification including source PDF title, edition year, and page numbers.
+Auditors should expect `publish_notes` to be populated whenever `reason_code` is
+`METHODOLOGY_UPDATE` or `SOURCE_REVISION`.
+
+**Pre-conditions checked by the endpoint**:
+- Row must exist in the caller's tenant (404 if not found).
+- Row must not already be published (409 Conflict if `is_published=true`).
+- `is_tbc` must be `false` (422 if the factor is still marked "to be confirmed").
+- `value IS NOT NULL OR is_licence_only=true` (422 if neither condition holds).
+
+**On success (all in a single transaction)**:
+- `is_published=true`, `published_by` set to the caller's `sub` UUID, `published_at` set to
+  `now()` (UTC).
+- One row inserted into `calc.audit_log` with `action='factor_published'`, `before_state`
+  (the draft snapshot), and `after_state` (the published snapshot including `reason_code`
+  and `publish_notes`).
+
+### Immutability rule MG-02
+
+Once `is_published=true`, the database trigger `trg_factor_immutability` fires BEFORE any
+UPDATE on `ref.factor_catalog` and raises SQLSTATE P0001 unconditionally. There is no GUC
+override path; no application code bypasses this trigger.
+
+Mistakes discovered in a published factor are corrected by creating a **new version** (new
+row with a different `version` string) and publishing it with `reason_code =
+CORRECTION_REPLACEMENT`. The original row is never modified or deleted. This append-only
+pattern mirrors the emissions correction workflow (FR-21 / §5 of this document).
+
+References: MG-02; `alembic/versions/` (migration that installs `trg_factor_immutability`).
+
+### Separation of duties
+
+| Role | Permitted actions | Blocked actions |
+|---|---|---|
+| `data_steward` | Create drafts; edit drafts; view all draft and published factors | Publish; withdraw |
+| `esg_manager` | Publish drafts; view all draft and published factors | Create or edit draft field values (by convention) |
+| `auditor` | SELECT on `calc.audit_log`, `ref.factor_catalog` | INSERT / UPDATE / DELETE on any table |
+
+The `published_by` column records the publisher's UUID for every published factor. The
+`calc.audit_log` row for `factor_published` additionally records the client IP address and
+user-agent string at the time of publication. Together these columns provide a complete
+chain of custody from creation to publication.
+
+This role split satisfies ISAE 3000 §A99 (segregation of duties requirement for evidence of
+review and authorisation).
+
+### Audit-trail surface
+
+The `calc.audit_log` table is queryable by users with the `auditor` role. Row-Level Security
+(M4) grants `auditor` SELECT on all `audit_log` rows within the tenant and blocks
+INSERT / UPDATE / DELETE. Auditors should query using:
+
+```sql
+SELECT * FROM calc.audit_log
+WHERE action = 'factor_published'
+  AND (after_state->>'reason_code') = '<code>'
+ORDER BY created_at DESC;
+```
+
+The `after_state` JSONB column carries the complete published snapshot, including
+`reason_code`, `publish_notes`, `published_by`, and `published_at`. Container logs also
+emit a structured event named `factor_published` with the same fields. Audits must verify
+that both sources (DB row and container log) are consistent; discrepancies must be reported
+to the `esg_manager` and escalated to ComplianceAgent.
+
+---
+
+## 14. Methodology Changelog
 
 | Date | Version | Change | Impact |
 |---|---|---|---|
 | 2026-05-14 | 1.0.0 | Initial publication — incorporates SustainabilityExpertAgent methodology_validation.md v1.0.0 decisions; adds Phase 7/8 security and data-model sections (M7 security-barrier views, SEC-P0-004 refresh role re-fetch, SEC-P0-005 PII hygiene, ADR-007 biogenic column confirmation) | None — first publication; no prior baseline to compare |
+| 2026-05-14 | 1.1.0 | Added §13 Factor catalog lifecycle and publication: draft/publish workflow, MG-02 immutability trigger, MG-03 published_at split, separation of duties (data_steward / esg_manager), audit-trail surface. Required for ESRS 2 BP-2. | No change to emission calculations or GWP values. |

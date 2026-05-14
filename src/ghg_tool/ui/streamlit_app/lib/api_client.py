@@ -266,6 +266,42 @@ def create_emission(payload: dict[str, Any]) -> dict[str, Any]:
     return _safe_post(f"{_get_base_url()}/api/v1/emissions/", body=payload)
 
 
+def list_users() -> list[dict[str, Any]] | dict[str, Any]:
+    """GET /api/v1/users (esg_manager only).
+
+    Returns the list of users in the caller's tenant. Password hashes are
+    never returned by the server. On HTTP error the wrapper returns the
+    usual ``{"error": "...", "status_code": ...}`` shape.
+    """
+    raw = _safe_get(f"{_get_base_url()}/api/v1/users/")
+    return raw if isinstance(raw, list) else raw  # type: ignore[return-value]
+
+
+def create_user(
+    *,
+    username: str,
+    email: str,
+    role_code: str,
+    password: str,
+) -> dict[str, Any]:
+    """POST /api/v1/users (esg_manager only).
+
+    Body fields are validated server-side; the plaintext password is
+    bcrypt-hashed before persistence and never logged. Common HTTP errors:
+    409 (duplicate username/email), 422 (invalid role / bad email),
+    403 (caller is not esg_manager).
+    """
+    return _safe_post(
+        f"{_get_base_url()}/api/v1/users/",
+        body={
+            "username": username,
+            "email": email,
+            "role_code": role_code,
+            "password": password,
+        },
+    )
+
+
 def publish_factor(
     factor_uuid: str,
     reason_code: str,

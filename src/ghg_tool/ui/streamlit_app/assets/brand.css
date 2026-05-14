@@ -702,3 +702,77 @@ html, body,
     padding: 0.85rem 1rem 0.75rem 1rem;
   }
 }
+
+/* ====================================================================
+ * LOGIN GATE: hide sidebar nav and main multipage routing UI before
+ * authentication. The login form sets <body class="ct-pre-auth"> via
+ * a Streamlit hack; while that class is present the multipage nav,
+ * collapse toggle and skip-link are visually suppressed so the user
+ * cannot inspect page names from the URL bar.
+ *
+ * Implementation note: Streamlit does not let us set body classes
+ * cleanly. We rely on a wrapper element rendered by render_login_form
+ * with class .ct-pre-auth-marker; the CSS below uses :has() to walk
+ * up to stApp and hide the nav siblings. :has() ships in all modern
+ * browsers Streamlit targets.
+ * ================================================================ */
+
+[data-testid="stApp"]:has(.ct-pre-auth-marker) [data-testid="stSidebarNav"] {
+  display: none !important;
+}
+[data-testid="stApp"]:has(.ct-pre-auth-marker) [data-testid="stSidebarNavSeparator"] {
+  display: none !important;
+}
+/* The collapse toggle in the toolbar should also disappear pre-auth. */
+[data-testid="stApp"]:has(.ct-pre-auth-marker) [data-testid="stSidebarCollapseButton"] {
+  display: none !important;
+}
+/* Skip-link is meaningless when the only content is the login form. */
+[data-testid="stApp"]:has(.ct-pre-auth-marker) .ct-skip-link {
+  display: none !important;
+}
+
+/* The sidebar itself can stay (it shows the logo + language selector)
+ * but we tighten its appearance pre-auth: no expand-arrow chrome. */
+[data-testid="stApp"]:has(.ct-pre-auth-marker) [data-testid="stSidebar"] {
+  min-width: 280px;
+}
+
+/* ====================================================================
+ * ROLE CHIP: compact badge rendered in the sidebar showing the
+ * authenticated user's role with a friendly label.
+ * ================================================================ */
+
+.ct-role-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.3rem 0.65rem;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  background: rgba(120, 139, 153, 0.12);
+  color: #5d7280;
+  border: 1px solid rgba(120, 139, 153, 0.24);
+  margin: 0.5rem 0;
+}
+.ct-role-chip-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  display: inline-block;
+}
+.ct-role-chip[data-role="viewer"]    { color: #707070; background: rgba(112,112,112,0.08); border-color: rgba(112,112,112,0.2); }
+.ct-role-chip[data-role="editor"]    { color: #5d7280; background: rgba(120,139,153,0.12); border-color: rgba(120,139,153,0.24); }
+.ct-role-chip[data-role="admin"]     { color: #c97a00; background: rgba(201,122,0,0.10);  border-color: rgba(201,122,0,0.28);  }
+
+.ct-role-caption {
+  font-size: 0.7rem;
+  color: #9a9a9a;
+  line-height: 1.4;
+  margin-top: 0.1rem;
+  margin-bottom: 0.5rem;
+}

@@ -99,25 +99,58 @@ def _make_factor_orm(
     factor.valid_to = None
     factor.applicability_note = None
     factor.pdf_source_uri = None
-    factor.published_at = datetime(2024, 1, 1, tzinfo=UTC)
-    factor.published_by = "creator-user"
+    factor.created_at = datetime(2024, 1, 1, tzinfo=UTC)
+    # MG-03: draft rows have published_at/published_by = None; published rows
+    # have both set.  The mock reflects whatever is_published dictates.
+    factor.published_at = datetime(2024, 1, 1, tzinfo=UTC) if is_published else None
+    factor.published_by = "esg-manager-user" if is_published else None
     factor.is_published = is_published
     factor.biogenic_co2_kg_per_unit = None
     return factor
 
 
 def _db_returning(factor: MagicMock | None) -> Any:
-    """Build an async DB session override whose ``get_by_uuid`` returns *factor*."""
+    """Build an async DB session override whose ``get_by_uuid`` returns *factor*.
+
+    The router issues two ``session.execute`` calls for the publish path:
+      1. SELECT (via FactorCatalogRepository.get_by_uuid)
+      2. conditional UPDATE (rowcount must equal 1 for the happy path)
+    ``side_effect`` supplies a distinct result for each call.
+
+    ``session.refresh`` simulates DB reload: when factor is not None and was
+    a draft, flip is_published=True and set published fields to match what
+    the UPDATE wrote, so model_validate sees the post-commit state.
+    """
 
     async def _gen() -> Any:
         session = AsyncMock()
-        # The router calls session.flush() after mutating the ORM object.
         session.flush = AsyncMock(return_value=None)
+        session.add = MagicMock(return_value=None)
 
-        # Build a result mock that scalar_one_or_none returns *factor*
-        result_mock = MagicMock()
-        result_mock.scalar_one_or_none = MagicMock(return_value=factor)
-        session.execute = AsyncMock(return_value=result_mock)
+        # First execute: SELECT -- scalar_one_or_none returns *factor*
+        select_result = MagicMock()
+        select_result.scalar_one_or_none = MagicMock(return_value=factor)
+
+        # Second execute: conditional UPDATE -- rowcount=1 signals success
+        update_result = MagicMock()
+        update_result.rowcount = 1
+
+        session.execute = AsyncMock(side_effect=[select_result, update_result])
+
+        async def _refresh(obj: Any) -> None:
+            # Simulate the DB returning post-UPDATE state on refresh.
+            # The router uses a SQLAlchemy update() statement, not direct ORM
+            # attribute assignment, so we must simulate DB reload here.
+            if obj is factor and factor is not None and not obj.is_published:
+                obj.is_published = True
+                if obj.published_at is None:
+                    obj.published_at = datetime(2026, 5, 14, 0, 0, 0, tzinfo=UTC)
+                # published_by is set by the UPDATE to the caller's sub; the
+                # test _auth_override uses _USER_ESG so we mirror that here.
+                if obj.published_by is None:
+                    obj.published_by = _USER_ESG
+
+        session.refresh = _refresh
         yield session
 
     return _gen

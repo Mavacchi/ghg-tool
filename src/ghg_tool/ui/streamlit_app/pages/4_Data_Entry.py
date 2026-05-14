@@ -42,7 +42,7 @@ st.set_page_config(
 from ghg_tool.ui.streamlit_app.lib.auth import (  # noqa: E402
     get_lang, is_demo_mode, require_auth,
 )
-from ghg_tool.ui.streamlit_app.lib.brand import apply_brand_chrome, render_context_bar  # noqa: E402
+from ghg_tool.ui.streamlit_app.lib.brand import apply_brand_chrome, render_context_bar, render_role_chip  # noqa: E402
 from ghg_tool.ui.streamlit_app.lib.help import _help  # noqa: E402
 from ghg_tool.ui.streamlit_app.lib.i18n import _  # noqa: E402
 from ghg_tool.ui.streamlit_app.lib.api_client import (  # noqa: E402
@@ -61,6 +61,8 @@ lang = get_lang()
 # Page header
 # ---------------------------------------------------------------------------
 st.title(_("nav_data_entry", lang))
+
+render_role_chip(st.session_state.get("role"), lang)
 
 render_context_bar(
     lang=lang,
