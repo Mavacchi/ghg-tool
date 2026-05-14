@@ -7,6 +7,8 @@ correlation_id, year, and site.
 
 from __future__ import annotations
 
+from datetime import date, datetime
+from decimal import Decimal
 from uuid import UUID
 
 import structlog
@@ -123,10 +125,19 @@ async def get_audit_trail(
         )
         rows = [dict(r._mapping) for r in result]
         for r in rows:
-            # Stringify UUID fields for JSON serialisation
+            # Coerce non-JSON-native column types into the str/float the
+            # AuditTrailEntry schema declares. Without this, Pydantic v2
+            # raises ValidationError on `datetime` for the timestamp fields
+            # (which `str | None` does not auto-coerce) and that escapes
+            # the SQLAlchemyError-only except clause below, leaving the
+            # global error middleware to substitute a generic 500.
             for k, v in r.items():
-                if hasattr(v, "hex"):  # UUID-like
+                if isinstance(v, UUID):
                     r[k] = str(v)
+                elif isinstance(v, datetime | date):
+                    r[k] = v.isoformat()
+                elif isinstance(v, Decimal):
+                    r[k] = float(v)
         entries = [AuditTrailEntry(**r) for r in rows]
         return AuditTrailResponse(
             entries=entries,
