@@ -62,7 +62,9 @@ dev = [
     # Type stubs
     "types-passlib>=1.7,<1.8",
     "pandas-stubs>=2.2,<2.3",
-    # import-linter — wave 2 wiring: enforce src/ghg_tool import-direction rules
+    # Integration test tier (wave-4 item #11): real PostgreSQL via testcontainers
+    "testcontainers[postgres]>=4.0,<5.0",
+    # import-linter -- wave 2 wiring: enforce src/ghg_tool import-direction rules
     # "import-linter>=2.0,<2.1",  # uncomment at wave 2 after all modules wired
 ]
 
@@ -171,9 +173,10 @@ asyncio_mode = "auto"
 testpaths = ["tests"]
 markers = [
     "integration: marks tests requiring a real PostgreSQL instance (deferred to wave 3)",
+    "integration: requires real postgres via testcontainers",
     "e2e: marks end-to-end tests requiring the full stack",
 ]
-addopts = "--strict-markers -v"
+addopts = "--strict-markers -v -m 'not integration'"
 
 # ---------------------------------------------------------------------------
 # Coverage
