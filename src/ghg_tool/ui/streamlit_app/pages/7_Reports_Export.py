@@ -1,15 +1,18 @@
 """Reports & Export page (FR-27, FR-28).
 
 Two export flows:
-  1. PDF (ESRS E1-6 + E1-7) — POST /api/v1/reports/pdf → poll → download link
-  2. Excel multi-sheet     — POST /api/v1/reports/excel → poll → download link
+  1. PDF (ESRS E1-6 + E1-7) — POST /api/v1/exports/pdf → poll → download link
+  2. Excel multi-sheet     — POST /api/v1/exports/xlsx → poll → download link
 
 Also provides in-browser Excel generation via XlsxBuilder (bypass API for demo).
 """
 
 from __future__ import annotations
 
+import structlog
 import streamlit as st
+
+_logger = structlog.get_logger(__name__)
 
 st.set_page_config(page_title="Reports Export — GHG", layout="wide")
 
@@ -57,8 +60,14 @@ def _generate_inline_pdf(anno: int, gwp_set: str, report_lang: str) -> None:
             file_name=f"ghg_esrs_e1_{anno}_{gwp_set}.pdf",
             mime="application/pdf",
         )
-    except Exception as exc:  # noqa: BLE001
-        st.error(f"Errore generazione PDF: {exc}")
+    except (ImportError, OSError, ValueError, RuntimeError):
+        # REV-WAVE3-015: narrow catch covers missing WeasyPrint (ImportError),
+        # font/resource I/O errors (OSError), malformed report data (ValueError),
+        # and pydyf/cairo runtime failures (RuntimeError). The raw exception
+        # is logged for diagnosis but NOT shown to the end user (information
+        # disclosure risk).
+        _logger.exception("inline_pdf_generation_failed", anno=anno, gwp_set=gwp_set)
+        st.error(_("pdf_error_msg", report_lang))
 
 
 # ---------------------------------------------------------------------------
@@ -77,8 +86,8 @@ with st.sidebar:
 # ---------------------------------------------------------------------------
 # PDF export
 # ---------------------------------------------------------------------------
-st.subheader(f"Genera PDF — ESRS E1-6 + E1-7")
-st.caption("ESRS E1-6 + E1-7 | WeasyPrint | VIANO 2025 disclosure se applicabile")
+st.subheader(_("generate_pdf", lang))
+st.caption(_("pdf_subtitle", lang))
 
 col_pdf, col_pdf_status = st.columns([1, 2])
 
@@ -90,7 +99,7 @@ with col_pdf:
         else:
             job_id = result.get("job_id", "")
             st.session_state["pdf_job_id"] = job_id
-            st.success(f"Job avviato: {job_id}")
+            st.success(f"{_('job_started', lang)} {job_id}")
 
 with col_pdf_status:
     job_id_pdf = st.session_state.get("pdf_job_id", "")
@@ -106,7 +115,7 @@ with col_pdf_status:
             "FAILED": _("job_failed", lang),
         }.get(status, status)
 
-        st.write(f"Stato: **{status_label}**")
+        st.write(f"{_('status_label', lang)} **{status_label}**")
 
         if status == "COMPLETED":
             download_url = status_data.get("download_url")
@@ -122,8 +131,8 @@ st.divider()
 # ---------------------------------------------------------------------------
 # Excel export
 # ---------------------------------------------------------------------------
-st.subheader(f"Genera Excel — Multi-foglio")
-st.caption("11 fogli | Metadata per cella | Okabe-Ito header fill")
+st.subheader(_("generate_excel", lang))
+st.caption(_("excel_subtitle", lang))
 
 col_xls, col_xls_status = st.columns([1, 2])
 
@@ -135,9 +144,9 @@ with col_xls:
         else:
             job_id = result.get("job_id", "")
             st.session_state["xlsx_job_id"] = job_id
-            st.success(f"Job avviato: {job_id}")
+            st.success(f"{_('job_started', lang)} {job_id}")
 
-    if st.button("Genera Excel in-browser (demo)", key="btn_excel_inline"):
+    if st.button(_("excel_inline_btn", lang), key="btn_excel_inline"):
         from ghg_tool.ui.excel.builder import XlsxBuilder  # noqa: PLC0415
         builder = XlsxBuilder()
         xlsx_bytes = builder.build({
@@ -172,11 +181,11 @@ with col_xls_status:
             "FAILED": _("job_failed", lang),
         }.get(status, status)
 
-        st.write(f"Stato: **{status_label}**")
+        st.write(f"{_('status_label', lang)} **{status_label}**")
         if status == "COMPLETED":
             download_url = status_data.get("download_url")
             if download_url:
-                st.markdown(f"[Scarica Excel]({download_url})")
+                st.markdown(f"[{_('download_excel', lang)}]({download_url})")
 
 # ---------------------------------------------------------------------------
 # Footer

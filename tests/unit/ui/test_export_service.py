@@ -40,6 +40,11 @@ class TestExportService:
         assert status["status"] == "PENDING"
 
     def test_simulate_job_completion(self) -> None:
+        """simulate_job_completion sets internal status DONE (REV-WAVE3-004).
+
+        Internal store uses DONE; the API boundary maps DONE → COMPLETED via
+        _internal_to_wire().  Asserting the internal store value here.
+        """
         cid = str(uuid.uuid4())
         job_id = export_service.create_report_job(
             job_type="pdf",
@@ -50,7 +55,9 @@ class TestExportService:
         export_service.simulate_job_completion(job_id, "https://example.com/report.pdf")
         status = export_service.get_job_status(job_id)
         assert status is not None
-        assert status["status"] == "COMPLETED"
+        # REV-WAVE3-004: internal status is DONE, not COMPLETED.
+        # Use _internal_to_wire() to get the wire value "COMPLETED".
+        assert status["status"] == "DONE"
         assert status["download_url"] == "https://example.com/report.pdf"
 
     def test_get_job_result_none_before_render(self) -> None:

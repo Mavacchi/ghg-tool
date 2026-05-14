@@ -24,6 +24,8 @@ from ghg_tool.api.schemas.report_schemas import (
     ReportJobStatus,
 )
 from ghg_tool.application.services.export_service import (
+    _STATUS_DONE,
+    _internal_to_wire,
     get_job_result,
     get_job_status,
     start_pdf_job,
@@ -173,8 +175,9 @@ async def get_export_job_status(
                 "correlation_id": correlation_id,
             },
         )
-    # Map internal status DONE → COMPLETED for API consumers
-    _raw = "COMPLETED" if job["status"] == "DONE" else job["status"]
+    # Map internal status to wire contract via single authoritative function.
+    # REV-WAVE3-004: no ad-hoc conversions — only _internal_to_wire() is used.
+    _raw = _internal_to_wire(job["status"])
     api_status = cast(Literal["PENDING", "RUNNING", "COMPLETED", "FAILED"], _raw)
     return ReportJobStatus(
         job_id=uuid.UUID(job["job_id"]),
@@ -229,7 +232,10 @@ async def download_export(
                 "correlation_id": correlation_id,
             },
         )
-    if job["status"] not in ("DONE", "COMPLETED"):
+    # REV-WAVE3-004: guard checks the canonical internal status _STATUS_DONE only.
+    # "COMPLETED" must never appear in the internal store; _internal_to_wire()
+    # performs the DONE → COMPLETED translation at the API boundary.
+    if job["status"] != _STATUS_DONE:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail={

@@ -1,8 +1,17 @@
 """Reports router — /api/v1/reports (FR-27, FR-28).
 
-Triggers async PDF and Excel report generation jobs.
-Actual rendering is wave 3 (visualization-agent); this router creates job
-records and returns job_ids for polling.
+DEPRECATED — REV-WAVE3-002.
+This router is a wave-2 stub: it calls create_report_job() which queues a
+job record but does NOT invoke PDFBuilder or XlsxBuilder.  The functional
+rendering pipeline lives in the exports router (/api/v1/exports/*).
+
+New clients MUST use:
+  POST /api/v1/exports/pdf    (instead of /api/v1/reports/pdf)
+  POST /api/v1/exports/xlsx   (instead of /api/v1/reports/excel)
+  GET  /api/v1/exports/jobs/{job_id} (instead of /api/v1/reports/status/{id})
+
+This router is kept to avoid breaking existing integrations during the
+transition period.  It will be removed in the next major API version.
 """
 
 from __future__ import annotations

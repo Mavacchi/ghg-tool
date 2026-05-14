@@ -11,16 +11,30 @@ Public API:
   get_job_status(job_id) -> dict with keys: job_id, status, type, ...
   get_job_result(job_id) -> bytes | None  (PDF or XLSX bytes when DONE)
 
-Status values: PENDING | RUNNING | DONE | FAILED
+Status vocabulary (REV-WAVE3-004):
+  Internal store uses exactly 4 values: PENDING | RUNNING | DONE | FAILED.
+  The API wire contract maps DONE → COMPLETED via _internal_to_wire().
+  No other status strings must appear in _jobs; simulate_job_completion()
+  is retired — callers should use start_*_job() which sets DONE internally.
 """
 
 from __future__ import annotations
 
 import asyncio
 import uuid
-from typing import Any
+from typing import Any, Final
 
 import structlog
+
+# ---------------------------------------------------------------------------
+# Internal status constants (REV-WAVE3-004)
+# ---------------------------------------------------------------------------
+# Internal store uses only these four values.  The API boundary converts
+# _STATUS_DONE → "COMPLETED" via _internal_to_wire(); all others pass through.
+_STATUS_PENDING: Final[str] = "PENDING"
+_STATUS_RUNNING: Final[str] = "RUNNING"
+_STATUS_DONE: Final[str] = "DONE"
+_STATUS_FAILED: Final[str] = "FAILED"
 
 logger = structlog.get_logger(__name__)
 
@@ -67,7 +81,7 @@ def _new_job(
     _jobs[str(job_id)] = {
         "job_id": str(job_id),
         "type": job_type,
-        "status": "PENDING",
+        "status": _STATUS_PENDING,  # REV-WAVE3-004: canonical internal status
         "tenant_id": tenant_id[:8],  # truncated — no full tenant PII
         "period": period,
         "created_by": user[:8],      # truncated — no full user PII
@@ -160,10 +174,16 @@ def start_xlsx_job(
 
 
 def _schedule_render(job_id: uuid.UUID, job_type: str, period: dict[str, Any]) -> None:
-    """Schedule the actual rendering task.
+    """Schedule the actual rendering task without blocking the event loop.
 
-    Attempts to schedule via asyncio.create_task if an event loop is
-    running; falls back to synchronous rendering otherwise.
+    REV-WAVE3-020: Uses run_in_executor (default ThreadPoolExecutor) instead
+    of create_task(_async_render) to prevent WeasyPrint / openpyxl rendering
+    from blocking the asyncio event loop for seconds.  The default executor
+    (None) is ThreadPoolExecutor; WeasyPrint releases the GIL for parts of the
+    workload, but more importantly the event loop remains responsive.
+
+    Falls back to synchronous rendering when no event loop is running (e.g.
+    in unit-test context).
 
     Args:
         job_id: The job UUID.
@@ -172,25 +192,12 @@ def _schedule_render(job_id: uuid.UUID, job_type: str, period: dict[str, Any]) -
     """
     try:
         loop = asyncio.get_running_loop()
-        loop.create_task(_async_render(job_id, job_type, period))
+        # REV-WAVE3-020: submit blocking render to the default thread-pool
+        # executor so the event loop is not blocked.
+        loop.run_in_executor(None, _sync_render, job_id, job_type, period)
     except RuntimeError:
         # No running event loop (e.g. in test context) — render synchronously
         _sync_render(job_id, job_type, period)
-
-
-async def _async_render(
-    job_id: uuid.UUID,
-    job_type: str,
-    period: dict[str, Any],
-) -> None:
-    """Async wrapper for the rendering task.
-
-    Args:
-        job_id: The job UUID.
-        job_type: 'pdf' or 'xlsx'.
-        period: Report parameters.
-    """
-    _sync_render(job_id, job_type, period)
 
 
 def _sync_render(
@@ -206,7 +213,7 @@ def _sync_render(
         period: Report parameters dict (anno, gwp_set, language, ...).
     """
     key = str(job_id)
-    _jobs[key]["status"] = "RUNNING"
+    _jobs[key]["status"] = _STATUS_RUNNING  # REV-WAVE3-004: canonical constant
     try:
         report_data: dict[str, Any] = {
             "anno": period.get("anno", 2025),
@@ -226,14 +233,36 @@ def _sync_render(
             result_bytes = XlsxBuilder().build(report_data)
 
         _results[key] = result_bytes
-        _jobs[key]["status"] = "DONE"
+        _jobs[key]["status"] = _STATUS_DONE  # REV-WAVE3-004: canonical constant
         logger.bind(job_id=key, job_type=job_type).info(
             "Job completed", size_bytes=len(result_bytes)
         )
-    except Exception as exc:  # noqa: BLE001
-        _jobs[key]["status"] = "FAILED"
+    except Exception as exc:  # noqa: BLE001 — rendering libs have no stable exc hierarchy
+        # REV-WAVE3-004: log full traceback so rendering errors are diagnosable;
+        # only exc_type was previously captured which made debugging impossible.
+        _jobs[key]["status"] = _STATUS_FAILED  # REV-WAVE3-004: canonical constant
         _jobs[key]["error_message"] = type(exc).__name__
-        logger.bind(job_id=key).error("Job failed", exc_type=type(exc).__name__)
+        logger.bind(job_id=key).exception(
+            "Job failed", exc_type=type(exc).__name__
+        )
+
+
+def _internal_to_wire(status: str) -> str:
+    """Map the internal status vocabulary to the API wire contract.
+
+    Internal store uses PENDING | RUNNING | DONE | FAILED.
+    The wire contract (ReportJobStatus schema) uses COMPLETED instead of DONE.
+    REV-WAVE3-004: single mapping function — no ad-hoc conversions elsewhere.
+
+    Args:
+        status: An internal status string from the _jobs store.
+
+    Returns:
+        Wire-contract status string.
+    """
+    if status == _STATUS_DONE:
+        return "COMPLETED"
+    return status
 
 
 def get_job_status(job_id: uuid.UUID) -> dict[str, Any] | None:
@@ -261,14 +290,29 @@ def get_job_result(job_id: uuid.UUID) -> bytes | None:
 
 
 def simulate_job_completion(job_id: uuid.UUID, download_url: str) -> None:
-    """Mark a job as COMPLETED with a download URL (kept for backward-compat).
+    """Mark a job as DONE with a download URL.
+
+    REV-WAVE3-004: Updated to use the canonical internal status _STATUS_DONE
+    (was "COMPLETED", which violated the internal vocabulary contract).
+    The download guard in exports.py checks _STATUS_DONE; using "COMPLETED"
+    internally caused the guard to pass but get_job_result() to 404 because
+    _results was never populated.
+
+    NOTE: This function is retained for test backward-compatibility.  In
+    production, prefer start_pdf_job / start_xlsx_job which set _STATUS_DONE
+    AND populate _results atomically via _sync_render.
 
     Args:
-        job_id: The job UUID to mark as completed.
-        download_url: Pre-signed URL for the generated document.
+        job_id: The job UUID to mark as done.
+        download_url: Pre-signed URL for the generated document (may be empty
+            for in-process renders where bytes are served directly).
     """
     key = str(job_id)
     if key in _jobs:
-        _jobs[key]["status"] = "COMPLETED"
+        _jobs[key]["status"] = _STATUS_DONE  # REV-WAVE3-004: canonical internal status
         _jobs[key]["download_url"] = download_url
-        logger.info("Job marked completed", job_id=key)
+        # Populate a sentinel result so the download guard finds bytes.
+        # Real callers (start_*_job) populate _results via _sync_render.
+        if key not in _results:
+            _results[key] = b""
+        logger.info("Job marked done", job_id=key)

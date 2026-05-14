@@ -38,6 +38,7 @@ import jose.jwt as jose_jwt  # noqa: E402
 
 from ghg_tool.api.schemas.auth_schemas import TokenResponse  # noqa: E402
 from ghg_tool.application.services.auth_service import (  # noqa: E402
+    _DUMMY_BCRYPT_HASH,
     authenticate_user,
     refresh_access_token,
 )
@@ -197,7 +198,12 @@ class TestAuthenticateUserFailurePaths:
 
     @pytest.mark.asyncio
     async def test_unknown_username_returns_none(self) -> None:
-        """Unknown username (lookup returns None) → authenticate_user returns None."""
+        """Unknown username (lookup returns None) → authenticate_user returns None.
+
+        REV-WAVE3-001: verify_password MUST be called exactly once against the
+        module-level dummy bcrypt sentinel hash so that timing observers cannot
+        distinguish "user not found" from "wrong password".
+        """
         with patch(
             "ghg_tool.application.services.auth_service.verify_password",
         ) as mock_verify:
@@ -209,12 +215,43 @@ class TestAuthenticateUserFailurePaths:
             )
 
         assert result is None
-        # verify_password must NOT be called when the user does not exist;
-        # the function short-circuits to avoid leaking user existence via timing.
-        # NOTE: auth_service.py short-circuits before verify_password for user-not-found.
-        # This is documented behaviour; no dummy-hash call is present in the current
-        # implementation.  Test documents the actual behaviour.
-        mock_verify.assert_not_called()
+        # verify_password MUST be called once with the sentinel hash to equalise
+        # timing between the user-not-found and wrong-password branches.
+        mock_verify.assert_called_once_with("any_password", _DUMMY_BCRYPT_HASH)
+
+    @pytest.mark.asyncio
+    async def test_verify_password_called_on_unknown_user_for_timing_safety(
+        self,
+    ) -> None:
+        """Invariant: unknown-user branch pays the full bcrypt cost.
+
+        REV-WAVE3-001 — This test makes the timing-safety contract explicit and
+        must never be removed without a security review.  Removing the dummy-hash
+        call creates a user-enumeration timing oracle.
+        """
+        calls: list[tuple[str, str]] = []
+
+        def _spy_verify(plain: str, hashed: str) -> bool:
+            calls.append((plain, hashed))
+            return False  # actual result doesn't matter
+
+        with patch(
+            "ghg_tool.application.services.auth_service.verify_password",
+            side_effect=_spy_verify,
+        ):
+            result = await authenticate_user(
+                username="ghost_user",
+                password="p@ssw0rd!",
+                lookup_user=await _lookup_returns(None),
+            )
+
+        assert result is None
+        assert len(calls) == 1, "verify_password must be called exactly once"
+        plain_arg, hash_arg = calls[0]
+        assert plain_arg == "p@ssw0rd!", "Must pass the actual submitted password"
+        assert hash_arg == _DUMMY_BCRYPT_HASH, (
+            "Must call against the module-level sentinel hash, not the user's hash"
+        )
 
     @pytest.mark.asyncio
     async def test_wrong_password_returns_none(self) -> None:

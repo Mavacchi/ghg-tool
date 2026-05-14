@@ -15,9 +15,10 @@ Endpoints consumed:
   GET  /api/v1/dq-findings
   POST /api/v1/dq-findings/waiver/{finding_id}
   POST /api/v1/emissions/correction
-  GET  /api/v1/reports/status/{job_id}
-  POST /api/v1/reports/pdf
-  POST /api/v1/reports/excel
+  POST /api/v1/exports/pdf        (REV-WAVE3-002: was /api/v1/reports/pdf)
+  POST /api/v1/exports/xlsx       (REV-WAVE3-002: was /api/v1/reports/excel)
+  GET  /api/v1/exports/jobs/{id}  (REV-WAVE3-002: was /api/v1/reports/status/{id})
+  GET  /api/v1/exports/jobs/{id}/download
 """
 
 from __future__ import annotations
@@ -38,7 +39,10 @@ def _get_base_url() -> str:
 
 
 def _get_headers() -> dict[str, str]:
-    token = st.session_state.get("token", "demo-jwt-token")
+    # REV-WAVE3-019: import constant from lib/auth.py (single source of truth).
+    from ghg_tool.ui.streamlit_app.lib.auth import _DEMO_TOKEN
+
+    token = st.session_state.get("token", _DEMO_TOKEN)
     return {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
 
 
@@ -267,7 +271,11 @@ def post_correction(
 
 
 def trigger_pdf_report(anno: int, gwp_set: str = "AR6", language: str = "it") -> dict[str, Any]:
-    """POST to /api/v1/reports/pdf; returns {job_id, status}.
+    """POST to /api/v1/exports/pdf; returns {job_id, status}.
+
+    REV-WAVE3-002: previously pointed at the legacy /api/v1/reports/pdf stub
+    which uses create_report_job() and does NOT invoke PDFBuilder.  Now targets
+    the functional exports router which triggers the full WeasyPrint pipeline.
 
     Args:
         anno: Reporting year.
@@ -278,13 +286,16 @@ def trigger_pdf_report(anno: int, gwp_set: str = "AR6", language: str = "it") ->
         ReportJobStatus dict.
     """
     return _safe_post(
-        f"{_get_base_url()}/api/v1/reports/pdf",
+        f"{_get_base_url()}/api/v1/exports/pdf",
         body={"anno": anno, "gwp_set": gwp_set, "language": language},
     )
 
 
 def trigger_excel_report(anno: int, gwp_set: str = "AR6") -> dict[str, Any]:
-    """POST to /api/v1/reports/excel; returns {job_id, status}.
+    """POST to /api/v1/exports/xlsx; returns {job_id, status}.
+
+    REV-WAVE3-002: previously pointed at the legacy /api/v1/reports/excel stub.
+    Now targets the functional exports router which triggers XlsxBuilder.
 
     Args:
         anno: Reporting year.
@@ -294,7 +305,7 @@ def trigger_excel_report(anno: int, gwp_set: str = "AR6") -> dict[str, Any]:
         ReportJobStatus dict.
     """
     return _safe_post(
-        f"{_get_base_url()}/api/v1/reports/excel",
+        f"{_get_base_url()}/api/v1/exports/xlsx",
         body={"anno": anno, "gwp_set": gwp_set},
     )
 
@@ -336,7 +347,11 @@ def fetch_intensity(
 
 
 def fetch_job_status(job_id: str) -> dict[str, Any]:
-    """Poll job status from ``GET /api/v1/reports/status/{job_id}``.
+    """Poll job status from ``GET /api/v1/exports/jobs/{job_id}``.
+
+    REV-WAVE3-002: previously polled /api/v1/reports/status/{job_id} (legacy
+    stub).  Now targets the exports router which returns the canonical wire
+    status (PENDING | RUNNING | COMPLETED | FAILED).
 
     Args:
         job_id: UUID string of the report job.
@@ -344,7 +359,31 @@ def fetch_job_status(job_id: str) -> dict[str, Any]:
     Returns:
         ReportJobStatus dict.
     """
-    return _safe_get(f"{_get_base_url()}/api/v1/reports/status/{job_id}")
+    return _safe_get(f"{_get_base_url()}/api/v1/exports/jobs/{job_id}")
+
+
+def download_report(job_id: str) -> bytes | None:
+    """Download binary document bytes from a completed export job.
+
+    REV-WAVE3-002: new function targeting GET /api/v1/exports/jobs/{job_id}/download.
+    Returns the raw PDF or XLSX bytes, or None on error.
+
+    Args:
+        job_id: UUID string of the completed report job.
+
+    Returns:
+        PDF or XLSX bytes, or None on network/auth error or job not yet done.
+    """
+    try:
+        resp = httpx.get(
+            f"{_get_base_url()}/api/v1/exports/jobs/{job_id}/download",
+            headers=_get_headers(),
+            timeout=_TIMEOUT,
+        )
+        resp.raise_for_status()
+        return resp.content
+    except (httpx.HTTPStatusError, httpx.RequestError):
+        return None
 
 
 def emissions_to_dataframe(rows: list[dict[str, Any]]) -> pd.DataFrame:

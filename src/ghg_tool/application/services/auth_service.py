@@ -11,8 +11,9 @@ callable for user lookup to support dependency injection.
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
-from typing import Any, Protocol
+from typing import Any, Final, Protocol
 
+import bcrypt
 import structlog
 from jose import JWTError  # type: ignore[import-untyped]
 from jose.exceptions import ExpiredSignatureError  # type: ignore[import-untyped]
@@ -22,6 +23,21 @@ from ghg_tool.infrastructure.security import jwt as jwt_module
 from ghg_tool.infrastructure.security.password import verify_password
 
 logger = structlog.get_logger(__name__)
+
+# ---------------------------------------------------------------------------
+# Timing-attack defence (REV-WAVE3-001)
+# ---------------------------------------------------------------------------
+# A precomputed bcrypt hash of a random sentinel string.  When a username is
+# not found in the DB, we still call verify_password() against this constant
+# so that both the "user not found" and "wrong password" code paths pay the
+# same ~200 ms bcrypt cost.  This prevents timing-oracle username enumeration.
+#
+# The sentinel is generated at import time (single bcrypt round cost, ~200 ms,
+# acceptable for a server start-up); stored as a module-level Final so it is
+# computed only once per process lifetime.
+_DUMMY_BCRYPT_HASH: Final[str] = bcrypt.hashpw(
+    b"ghg-tool-sentinel-dummy-0xDEADBEEF", bcrypt.gensalt(rounds=12)
+).decode()
 
 
 class UserRecord(Protocol):
@@ -73,6 +89,10 @@ async def authenticate_user(
 
     user = await lookup_user(username)
     if user is None:
+        # Constant-time defence: pay the bcrypt cost on the unknown-user branch
+        # so timing observers cannot distinguish "user not found" from "wrong
+        # password".  REV-WAVE3-001.
+        verify_password(password, _DUMMY_BCRYPT_HASH)
         log.info("Login failed: user not found")
         return None
 
@@ -124,11 +144,17 @@ def refresh_access_token(
         A ``TokenResponse`` on success; ``None`` if the refresh token is
         invalid or expired.
     """
+    # REV-WAVE3-005: bind correlation_id for every log line; include probe_attempt
+    # so SIEM filters can aggregate suspicious refresh patterns.
     log = logger.bind(correlation_id=correlation_id)
     try:
         claims = jwt_module.decode_token(refresh_token)
     except (JWTError, ExpiredSignatureError, ValueError) as exc:
-        log.warning("Refresh token validation failed", exc_type=type(exc).__name__)
+        log.warning(
+            "Refresh token validation failed",
+            exc_type=type(exc).__name__,
+            probe_attempt=True,  # REV-WAVE3-005: SIEM filter marker
+        )
         return None
 
     if claims.get("token_type") != "refresh":
