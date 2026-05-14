@@ -20,8 +20,9 @@ st.set_page_config(
 )
 
 from ghg_tool.ui.streamlit_app.lib.auth import get_lang, require_auth  # noqa: E402
-from ghg_tool.ui.streamlit_app.lib.help import _help  # noqa: E402
 from ghg_tool.ui.streamlit_app.lib.brand import apply_brand_chrome  # noqa: E402
+from ghg_tool.ui.streamlit_app.lib.filters import available_years  # noqa: E402
+from ghg_tool.ui.streamlit_app.lib.help import _help  # noqa: E402
 from ghg_tool.ui.streamlit_app.lib.i18n import _  # noqa: E402
 from ghg_tool.ui.streamlit_app.lib.api_client import fetch_audit_trail  # noqa: E402
 
@@ -35,13 +36,14 @@ st.title(_("nav_audit_trail", lang))
 # Sidebar
 # ---------------------------------------------------------------------------
 with st.sidebar:
-    year_opts: list[int | None] = [None, 2024, 2025]
-    year_labels = ["Tutti / All"] + [str(y) for y in year_opts[1:]]
+    _all = _("all_label", lang)
+    _years = available_years()
+    year_labels = [_all] + [str(y) for y in _years]
     year_choice = st.selectbox(
         _("year_filter", lang), year_labels,
         help=_help("audit_correlation_id", lang),
     )
-    anno_filter: int | None = int(year_choice) if year_choice != "Tutti / All" else None
+    anno_filter: int | None = int(year_choice) if year_choice != _all else None
 
     site_opts = ["", "IANO", "VIANO", "VIANO_GARGOLA", "CASALGRANDE",
                  "FIORANO", "SASSUOLO", "FRASSINORO"]
@@ -50,7 +52,7 @@ with st.sidebar:
         help=_help("codice_sito", lang),
     )
 
-    page_size = st.number_input("Righe per pagina", min_value=10, max_value=500,
+    page_size = st.number_input(_("rows_per_page", lang), min_value=10, max_value=500,
                                 value=50, step=10)
 
 # ---------------------------------------------------------------------------

@@ -23,7 +23,11 @@ from typing import Any, Final
 
 import streamlit as st
 
-from ghg_tool.ui.streamlit_app.lib.constants import TENANT_ID
+from ghg_tool.ui.streamlit_app.lib.constants import (
+    COMPANY_NAME,
+    PRODUCT_NAME,
+    TENANT_ID,
+)
 from ghg_tool.ui.streamlit_app.lib.i18n import _
 
 # Session-state keys
@@ -208,31 +212,60 @@ def _do_login(username: str, password: str) -> bool:
 def render_login_form(lang: str = "it") -> None:
     """Render the login form and block execution until authenticated.
 
-    Args:
-        lang: Language code for labels.
+    The form sits in a narrow centred column so the brand reads as a
+    proper sign-in landing page rather than a wide demo layout.
     """
-    st.title(_("login_title", lang))
-    if _DEMO_MODE:
-        st.warning(_("login_demo_warning", lang), icon="⚠️")
-    else:
-        st.caption(_("login_real_hint", lang))
+    # Centred narrow column: 1 / 2 / 1 ratio gives a comfortable form
+    # width on any reasonable viewport.
+    _spacer_l, _form_col, _spacer_r = st.columns([1, 2, 1])
+    with _form_col:
+        # Brand hero. Matches the Home hero block but smaller - this is
+        # an auth wall, not the main page.
+        st.markdown(
+            f"""
+<div class="carbontrace-hero ct-login-hero">
+  <div class="ct-brand-rule"></div>
+  <h1 class="ct-hero-title">{PRODUCT_NAME}</h1>
+  <p class="ct-hero-tagline">{_("hero_tagline", lang)}</p>
+  <p class="ct-hero-company">{COMPANY_NAME}</p>
+</div>
+""",
+            unsafe_allow_html=True,
+        )
 
-    with st.form("login_form"):
-        username = st.text_input(_("login_user", lang))
-        password = st.text_input(_("login_pass", lang), type="password")
-        submitted = st.form_submit_button(_("login_btn", lang))
-
-    if submitted:
-        if not _credentials_valid_shape(username, password):
-            st.error(
-                _("login_error_shape", lang).format(
-                    min_user=_DEMO_MIN_USER_LEN, min_pass=_DEMO_MIN_PASS_LEN
-                )
-            )
-        elif _do_login(username, password):
-            st.rerun()
+        st.markdown(f"#### {_('login_title', lang)}")
+        if _DEMO_MODE:
+            st.warning(_("login_demo_warning", lang), icon="⚠️")
         else:
-            st.error(_("login_error", lang))
+            st.caption(_("login_real_hint", lang))
+
+        with st.form("login_form"):
+            username = st.text_input(
+                _("login_user", lang),
+                autocomplete="username",
+                placeholder="marco.rossi",
+            )
+            password = st.text_input(
+                _("login_pass", lang),
+                type="password",
+                autocomplete="current-password",
+            )
+            submitted = st.form_submit_button(
+                _("login_btn", lang), type="primary",
+                use_container_width=True,
+            )
+
+        if submitted:
+            if not _credentials_valid_shape(username, password):
+                st.error(
+                    _("login_error_shape", lang).format(
+                        min_user=_DEMO_MIN_USER_LEN, min_pass=_DEMO_MIN_PASS_LEN
+                    )
+                )
+            elif _do_login(username, password):
+                st.rerun()
+            else:
+                st.error(_("login_error", lang))
     st.stop()
 
 

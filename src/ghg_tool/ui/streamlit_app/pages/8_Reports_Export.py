@@ -25,8 +25,9 @@ st.set_page_config(
 )
 
 from ghg_tool.ui.streamlit_app.lib.auth import get_lang, require_auth  # noqa: E402
-from ghg_tool.ui.streamlit_app.lib.help import _help  # noqa: E402
 from ghg_tool.ui.streamlit_app.lib.brand import apply_brand_chrome  # noqa: E402
+from ghg_tool.ui.streamlit_app.lib.filters import sidebar_gwp_filter, sidebar_year_filter  # noqa: E402
+from ghg_tool.ui.streamlit_app.lib.help import _help  # noqa: E402
 from ghg_tool.ui.streamlit_app.lib.i18n import _  # noqa: E402
 from ghg_tool.ui.streamlit_app.lib.api_client import (  # noqa: E402
     trigger_pdf_report,
@@ -108,15 +109,9 @@ st.title(_("nav_reports", lang))
 # Sidebar
 # ---------------------------------------------------------------------------
 with st.sidebar:
-    anno = st.selectbox(
-        _("year_filter", lang), [2024, 2025], index=1,
-        help=_help("anno_fiscale", lang),
-    )
-    gwp_set = st.selectbox(
-        "GWP Set", ["AR6", "AR5"],
-        help=_help("gwp", lang),
-    )
-    report_lang = st.selectbox("Report language", ["it", "en"])
+    anno = sidebar_year_filter(lang)
+    gwp_set = sidebar_gwp_filter(lang)
+    report_lang = st.selectbox(_("report_lang_label", lang), ["it", "en"])
 
 # ---------------------------------------------------------------------------
 # PDF export

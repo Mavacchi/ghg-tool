@@ -441,3 +441,86 @@ html, body,
   color: #9a9a9a;
   margin: 0;
 }
+
+/* --------------------------------------------------------------------
+ * Login screen hero. The same .carbontrace-hero block is reused on
+ * the sign-in landing, but the h1 needs to read smaller (the page
+ * has the form right under it, not a 5-up KPI strip).
+ * ------------------------------------------------------------------ */
+.ct-login-hero {
+  padding-top: 2rem;
+  padding-bottom: 0.5rem;
+}
+.ct-login-hero h1.ct-hero-title {
+  font-size: 2.1rem;
+}
+.ct-login-hero .ct-hero-tagline {
+  font-size: 0.95rem;
+}
+.ct-login-hero .ct-hero-company {
+  font-size: 0.72rem;
+}
+
+/* --------------------------------------------------------------------
+ * Tabs: heavier active underline (was 1px brand accent; bump to 2px
+ * solid + 600 weight so the active tab reads at a glance). Hover on
+ * inactive tabs gets a soft tint to telegraph interactivity.
+ * ------------------------------------------------------------------ */
+[data-testid="stTabs"] button {
+  font-weight: 500;
+  font-size: 0.92rem;
+  letter-spacing: 0.005em;
+  padding: 0.55rem 1.1rem;
+  transition: color 180ms ease, border-color 180ms ease,
+              background-color 180ms ease;
+}
+[data-testid="stTabs"] button:hover {
+  background-color: rgba(120, 139, 153, 0.06);
+}
+[data-testid="stTabs"] button[aria-selected="true"] {
+  color: #1a1a1a !important;
+  font-weight: 600 !important;
+  border-bottom: 2px solid #788B99 !important;
+}
+
+/* --------------------------------------------------------------------
+ * Page-link buttons (st.page_link). Lift them off the page so they
+ * read as primary CTAs, not as inline text.
+ * ------------------------------------------------------------------ */
+[data-testid="stPageLink"] {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.5rem 1rem;
+  border-radius: 6px;
+  border: 1px solid #788B99;
+  background-color: #FFFFFF;
+  color: #788B99 !important;
+  font-weight: 500;
+  transition: background-color 180ms ease, color 180ms ease,
+              transform 120ms ease, box-shadow 220ms ease;
+  text-decoration: none !important;
+  margin-top: 0.5rem;
+}
+[data-testid="stPageLink"]:hover {
+  background-color: #788B99;
+  color: #FFFFFF !important;
+  box-shadow: 0 4px 12px rgba(120, 139, 153, 0.2);
+}
+[data-testid="stPageLink"]:active {
+  transform: translateY(1px);
+}
+
+/* --------------------------------------------------------------------
+ * Bordered containers (used for onboarding card and empty state).
+ * Subtle surface with sand border and gentle padding.
+ * ------------------------------------------------------------------ */
+[data-testid="stVerticalBlockBorderWrapper"] {
+  border-radius: 10px;
+  border: 1px solid #ECE5DC !important;
+  background-color: #FFFFFF;
+  padding: 0.5rem;
+  transition: border-color 200ms ease;
+}
+[data-testid="stVerticalBlockBorderWrapper"]:hover {
+  border-color: #DDD3C5 !important;
+}

@@ -1,6 +1,13 @@
 {
   "app_title": "GHG Tool: {company_name}",
   "hero_tagline": "Climate accounting. Audit-ready.",
+  "empty_kpi_title": "No emissions recorded.",
+  "empty_kpi_body": "The ledger is empty for the selected filters. Go to *Data entry* to record the first emission, or change the fiscal year in the sidebar.",
+  "empty_kpi_cta": "Go to Data entry",
+  "onboarding_title": "Welcome to Carbontrace",
+  "onboarding_body": "Three steps to get started:\n\n1. **Record emissions** for the fiscal year from the *Data entry* section.\n2. **Check data quality** in the *DQ Findings* section.\n3. **Export** the ESRS E1 PDF report from the *Export Reports* section.",
+  "onboarding_dismiss": "Got it, hide",
+  "view_in_audit_trail": "Open Audit Trail",
   "nav_home": "Overview",
   "nav_drilldown": "Drill-down",
   "nav_yoy": "YoY Comparison",
@@ -113,5 +120,17 @@
   "select_year_base": "Base Year",
   "select_year_compare": "Compare Year",
   "all_scopes": "All Scopes",
-  "all_sites": "All Sites"
+  "all_sites": "All Sites",
+  "all_label": "All",
+  "search_btn": "Search",
+  "no_results": "No results for the selected filters.",
+  "gwp_filter_label": "GWP Set",
+  "report_lang_label": "Report language",
+  "nav_data_entry": "Data Entry",
+  "no_biogenic_in_period": "No biogenic emissions in the selected period.",
+  "waiver_applied": "Waiver applied.",
+  "justification_too_short": "Justification must be at least 10 characters.",
+  "no_open_findings": "No OPEN findings available.",
+  "sites_filter_hint": "Sites (empty = all)",
+  "rows_per_page": "Rows per page"
 }

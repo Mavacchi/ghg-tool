@@ -1,6 +1,13 @@
 {
   "app_title": "Strumento GHG: {company_name}",
   "hero_tagline": "Contabilità climatica. Pronta per l'audit.",
+  "empty_kpi_title": "Nessuna emissione registrata.",
+  "empty_kpi_body": "Il registro è vuoto per i filtri selezionati. Vai a *Inserimento dati* per registrare la prima emissione, oppure cambia l'anno fiscale nella barra laterale.",
+  "empty_kpi_cta": "Vai a Inserimento dati",
+  "onboarding_title": "Benvenuto in Carbontrace",
+  "onboarding_body": "Tre passi per iniziare:\n\n1. **Registra le emissioni** dell'anno fiscale dalla sezione *Inserimento dati*.\n2. **Verifica la qualità** dei dati nella sezione *DQ Findings*.\n3. **Esporta** il report ESRS E1 in PDF dalla sezione *Esporta Report*.",
+  "onboarding_dismiss": "Ho capito, nascondi",
+  "view_in_audit_trail": "Vai a Audit Trail",
   "nav_home": "Panoramica",
   "nav_drilldown": "Drill-down",
   "nav_yoy": "Confronto YoY",
@@ -113,5 +120,17 @@
   "select_year_base": "Anno Base",
   "select_year_compare": "Anno Confronto",
   "all_scopes": "Tutti gli Scope",
-  "all_sites": "Tutti i Siti"
+  "all_sites": "Tutti i Siti",
+  "all_label": "Tutti",
+  "search_btn": "Cerca",
+  "no_results": "Nessun risultato per i filtri selezionati.",
+  "gwp_filter_label": "Set GWP",
+  "report_lang_label": "Lingua del report",
+  "nav_data_entry": "Inserimento dati",
+  "no_biogenic_in_period": "Nessuna emissione biogenica nel periodo selezionato.",
+  "waiver_applied": "Rinuncia applicata.",
+  "justification_too_short": "La giustificazione deve essere almeno 10 caratteri.",
+  "no_open_findings": "Nessun finding OPEN disponibile.",
+  "sites_filter_hint": "Siti (vuoto = tutti)",
+  "rows_per_page": "Righe per pagina"
 }

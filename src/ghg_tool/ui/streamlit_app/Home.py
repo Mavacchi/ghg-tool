@@ -42,6 +42,7 @@ from ghg_tool.ui.streamlit_app.lib.auth import (  # noqa: E402
 )
 from ghg_tool.ui.streamlit_app.lib.banner import render_viano_banner, should_show_viano_banner  # noqa: E402
 from ghg_tool.ui.streamlit_app.lib.brand import apply_brand_chrome  # noqa: E402
+from ghg_tool.ui.streamlit_app.lib.filters import sidebar_gwp_filter, sidebar_year_filter  # noqa: E402
 from ghg_tool.ui.streamlit_app.lib.help import _help  # noqa: E402
 from ghg_tool.ui.streamlit_app.lib.i18n import _  # noqa: E402
 from ghg_tool.ui.streamlit_app.lib.api_client import fetch_kpis, emissions_to_dataframe  # noqa: E402
@@ -53,41 +54,28 @@ apply_brand_chrome()
 # Sidebar — language toggle + auth
 # ---------------------------------------------------------------------------
 with st.sidebar:
+    # Language selector is rendered BEFORE the auth gate so the login form
+    # can show its own labels in the chosen language.
     lang_options = {"Italiano": "it", "English": "en"}
     lang_label = st.selectbox("Language / Lingua", list(lang_options.keys()), index=0)
     lang = lang_options[lang_label]
     st.session_state["lang"] = lang
 
-    st.divider()
-
-    import datetime as _dt  # noqa: PLC0415
-
-    year_options = list(range(2024, 2027))
-    _current_year = _dt.date.today().year
-    _default_year_index = (
-        year_options.index(_current_year) if _current_year in year_options else len(year_options) - 1
-    )
-    selected_year = st.selectbox(
-        _("year_filter", lang), year_options, index=_default_year_index,
-        help=_help("anno_fiscale", lang),
-    )
-
-    gwp_options = ["AR6", "AR5"]
-    selected_gwp = st.selectbox(
-        "GWP Set", gwp_options, index=0,
-        help=_help("gwp", lang),
-    )
-
-    st.divider()
-    if get_token():
-        if st.button(_("logout_btn", lang)):
-            logout()
-            st.rerun()
-
 # ---------------------------------------------------------------------------
-# Auth gate
+# Auth gate. Year and GWP filters are rendered AFTER auth so unauthenticated
+# users don't see disabled filters they cannot use yet.
 # ---------------------------------------------------------------------------
 require_auth(lang)
+
+with st.sidebar:
+    st.divider()
+    selected_year = sidebar_year_filter(lang)
+    selected_gwp = sidebar_gwp_filter(lang)
+
+    st.divider()
+    if st.button(_("logout_btn", lang)):
+        logout()
+        st.rerun()
 
 # ---------------------------------------------------------------------------
 # Hero header. Product name only, then tagline, then company name as
@@ -112,6 +100,19 @@ st.markdown(
 # bypass with a real authenticated session).
 if is_demo_mode():
     render_demo_mode_banner(lang)
+
+# First-visit onboarding card. The dismiss flag is per-session so the
+# card returns after each fresh login; not stored server-side.
+if not st.session_state.get("home_onboarding_dismissed", False):
+    with st.container(border=True):
+        ob_l, ob_r = st.columns([5, 1])
+        with ob_l:
+            st.markdown(f"### 👋 {_('onboarding_title', lang)}")
+            st.markdown(_("onboarding_body", lang))
+        with ob_r:
+            if st.button(_("onboarding_dismiss", lang), key="dismiss_onboarding"):
+                st.session_state["home_onboarding_dismissed"] = True
+                st.rerun()
 
 # ---------------------------------------------------------------------------
 # VIANO banner check (FR-24)
@@ -150,6 +151,33 @@ for row in kpis:
         biogenic_total += tco2e
 
 total_lb = sum(scope_totals.values())
+
+# ---------------------------------------------------------------------------
+# Empty state. When the ledger has no rows for the selected filters,
+# show a clear guided CTA instead of five "0.0 tCO2e" tiles that read
+# as broken/loading.
+# ---------------------------------------------------------------------------
+if not kpis or (total_lb <= 0.0 and scope2_mb_total <= 0.0):
+    with st.container(border=True):
+        st.subheader(_("empty_kpi_title", lang))
+        st.markdown(_("empty_kpi_body", lang))
+        if hasattr(st, "page_link"):
+            st.page_link(
+                "pages/4_Data_Entry.py",
+                label=_("empty_kpi_cta", lang),
+                icon="➕",
+            )
+    st.divider()
+    st.caption(
+        f"Dashboard ID: {DASHBOARD_ID} | "
+        f"{_('footer_dashboard_version', lang)}{DASHBOARD_VERSION} | "
+        f"{_('footer_api_version', lang)} | "
+        f"{_('footer_gwp_set', lang)}: {selected_gwp} | "
+        f"{_('footer_factor_source', lang)} | "
+        f"{_('footer_methodology', lang)} | "
+        f"as_of: {as_of}"
+    )
+    st.stop()
 
 # ---------------------------------------------------------------------------
 # Metric cards
@@ -202,7 +230,7 @@ with st.expander(f"⚠️ {_('biogenic_memo', lang)}", expanded=False):
             help=_help("biogenic", lang),
         )
     else:
-        st.caption("Nessuna emissione biogenica nel periodo selezionato.")
+        st.caption(_("no_biogenic_in_period", lang))
 
 # ---------------------------------------------------------------------------
 # Scope breakdown bar chart

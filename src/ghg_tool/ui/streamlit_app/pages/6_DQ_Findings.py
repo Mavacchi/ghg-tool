@@ -36,19 +36,20 @@ st.title(_("nav_dq_findings", lang))
 # Sidebar filters
 # ---------------------------------------------------------------------------
 with st.sidebar:
-    severity_opts = ["Tutti / All", "CRIT", "WARN", "INFO"]
+    _all = _("all_label", lang)
+    severity_opts = [_all, "CRIT", "WARN", "INFO"]
     severity_label = st.selectbox(
         _("dq_severity", lang), severity_opts,
         help=_help("dq_crit", lang),
     )
-    severity_filter = None if severity_label.startswith("Tutti") else severity_label
+    severity_filter = None if severity_label == _all else severity_label
 
-    status_opts = ["Tutti / All", "OPEN", "WAIVED", "REMEDIATED"]
+    status_opts = [_all, "OPEN", "WAIVED", "REMEDIATED"]
     status_label = st.selectbox(
         _("dq_status", lang), status_opts,
         help=_help("dq_status_open", lang),
     )
-    status_filter = None if status_label.startswith("Tutti") else status_label
+    status_filter = None if status_label == _all else status_label
 
     rule_id_filter = st.text_input(_("dq_rule", lang), value="")
 
@@ -145,16 +146,16 @@ else:
                         if "error" in result:
                             st.error(f"Errore: {result['error']}")
                         else:
-                            st.success("Rinuncia applicata.")
+                            st.success(_("waiver_applied", lang))
                             # Clear only the affected cache; avoid nuking other pages' data.
                             try:
                                 fetch_dq_findings.clear()  # type: ignore[attr-defined]
                             except AttributeError:
                                 st.cache_data.clear()
                     else:
-                        st.error("Giustificazione deve essere almeno 10 caratteri.")
+                        st.error(_("justification_too_short", lang))
             else:
-                st.info("Nessun finding OPEN disponibile.")
+                st.info(_("no_open_findings", lang))
 
 # ---------------------------------------------------------------------------
 # Footer

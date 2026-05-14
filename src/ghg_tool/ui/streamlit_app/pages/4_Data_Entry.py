@@ -60,7 +60,7 @@ lang = get_lang()
 # ---------------------------------------------------------------------------
 # Page header
 # ---------------------------------------------------------------------------
-st.title("Inserimento dati" if lang == "it" else "Data entry")
+st.title(_("nav_data_entry", lang))
 
 # Append-only explainer (the most important message on this page).
 st.info(
@@ -137,13 +137,18 @@ def _explain_api_error(resp: dict) -> str:
 def _show_success(label: str, payload: dict) -> None:
     """Render a uniform success block with the response payload.
 
-    Also invalidates the read-side caches so the new row is visible on
-    the Audit Trail / Drill-down pages immediately, not after the 5 min
+    Invalidates the read-side caches so the new row is visible on the
+    Audit Trail / Drill-down pages immediately, not after the 5 min
     TTL configured on ``@st.cache_data`` wrappers in ``api_client.py``.
+
+    The "Open Audit Trail" CTA uses ``st.page_link`` so the user moves
+    to the audit page in one click rather than having to spot the
+    sidebar entry.
     """
     st.success(f"{label} eseguita.", icon="✅")
     new_id = payload.get("id") or payload.get("new_id")
     if new_id:
+        st.caption("ID nuova riga")
         st.code(str(new_id), language="text")
     supersedes_id = payload.get("supersedes_id")
     if supersedes_id:
@@ -151,16 +156,27 @@ def _show_success(label: str, payload: dict) -> None:
     corr = payload.get("correlation_id")
     if corr:
         st.caption(f"Correlation ID: `{corr}`")
-    st.caption("Apri 'Audit Trail' per verificare la nuova riga nel registro.")
 
-    # Invalidate any cached GETs that just went stale.
+    # Invalidate any cached GETs that just went stale. clear() can raise
+    # AttributeError if the underlying cache wrapper has been swapped at
+    # runtime (e.g. in tests); a TypeError surfaces when the wrapper does
+    # not actually carry a callable. Both are recoverable - cache
+    # invalidation is best-effort and never blocks the write success path.
     for fn in (fetch_emissions, fetch_factor_catalog):
         clear = getattr(fn, "clear", None)
         if callable(clear):
             try:
                 clear()
-            except Exception:  # noqa: BLE001 - cache invalidation is best-effort
+            except (AttributeError, TypeError):
                 pass
+
+    # Primary CTA: one-click jump to Audit Trail to verify the new row.
+    if hasattr(st, "page_link"):
+        st.page_link(
+            "pages/7_Audit_Trail.py",
+            label=_("view_in_audit_trail", lang),
+            icon="🔍",
+        )
 
 
 def _submit_once(key: str) -> bool:
@@ -330,20 +346,21 @@ with tab_correct:
                 "Anno", min_value=2020, max_value=dt.date.today().year + 1,
                 value=dt.date.today().year - 1, step=1, key="corr_anno",
             )
+        _all = _("all_label", lang)
         with s_col2:
             f_site = st.selectbox(
-                "Sito", ["(tutti)"] + list(KNOWN_SITES), key="corr_site",
+                "Sito", [_all] + list(KNOWN_SITES), key="corr_site",
             )
         with s_col3:
             f_scope = st.selectbox(
-                "Scope", ["(tutti)", 1, 2, 3], key="corr_scope",
+                "Scope", [_all, 1, 2, 3], key="corr_scope",
             )
 
-        if st.button("Cerca", key="search_emissions_btn"):
+        if st.button(_("search_btn", lang), key="search_emissions_btn"):
             raw = fetch_emissions(
                 anno=int(f_anno),
-                codice_sito=None if f_site == "(tutti)" else f_site,
-                scope=None if f_scope == "(tutti)" else int(f_scope),
+                codice_sito=None if f_site == _all else f_site,
+                scope=None if f_scope == _all else int(f_scope),
                 limit=50,
             )
             # The endpoint normally returns a list. If the wrapper hit an
