@@ -43,6 +43,7 @@ from ghg_tool.api.routers import (
     audit_trail,
     auth,
     calc,
+    chart_annotations,
     dq_findings,
     emissions,
     excel_import,
@@ -318,6 +319,7 @@ def _create_app() -> FastAPI:
     app.include_router(users.router)
     app.include_router(reconciliation.router)
     app.include_router(sbti.router)
+    app.include_router(chart_annotations.router)
 
     return app
 

@@ -39,6 +39,11 @@ from ghg_tool.ui.streamlit_app.lib.brand import (  # noqa: E402
 )
 from ghg_tool.ui.streamlit_app.lib.filters import available_years  # noqa: E402
 from ghg_tool.ui.streamlit_app.lib.i18n import _  # noqa: E402
+from ghg_tool.ui.streamlit_app.lib.api_client import (  # noqa: E402
+    list_chart_annotations,
+    create_chart_annotation,
+    toggle_annotation_visibility,
+)
 
 apply_brand_chrome()
 require_auth()
@@ -344,7 +349,76 @@ if diff_result:
                 st.info(_("recon_go_to_data_entry", lang))
 
 # ---------------------------------------------------------------------------
-# Section 4: take new snapshot (esg_manager only)
+# Section 4: chart annotations panel (M17)
+# ---------------------------------------------------------------------------
+_RECON_WRITE_ROLES = {"data_steward", "esg_manager"}
+_RECON_NOTE_SEVERITIES = {
+    "INFO": st.info,
+    "WARNING": st.warning,
+    "CRITICAL": st.error,
+}
+
+with st.expander("Note sul grafico di riconciliazione", expanded=False):
+    _recon_annotations = list_chart_annotations(
+        "trend_scope_total", anchor_year=anno
+    )
+
+    if not _recon_annotations:
+        st.caption("Nessuna nota presente per questo grafico e anno.")
+    else:
+        for _ann in _recon_annotations:
+            _sev = _ann.get("severity", "INFO").upper()
+            _render_fn = _RECON_NOTE_SEVERITIES.get(_sev, st.info)
+            _ts = _ann.get("created_at", "")[:10] if _ann.get("created_at") else ""
+            _lbl = _ann.get("anchor_label") or ""
+            _header = f"{_ann.get('title', '')} ({_ts})"
+            if _lbl:
+                _header = f"{_header} · {_lbl}"
+            _render_fn(f"**{_header}**\n\n{_ann.get('body', '')}")
+
+            if role in _RECON_WRITE_ROLES:
+                _ann_id = _ann.get("id", "")
+                _vis = _ann.get("is_visible", True)
+                _btn_label = "Nascondi nota" if _vis else "Mostra nota"
+                if st.button(_btn_label, key=f"recon_vis_{_ann_id}"):
+                    _result = toggle_annotation_visibility(_ann_id, not _vis)
+                    if "error" in _result:
+                        st.error(f"Errore aggiornamento visibilita: {_result['error']}")
+                    else:
+                        st.success("Visibilita aggiornata.")
+                        st.rerun()
+
+    if role in _RECON_WRITE_ROLES:
+        st.divider()
+        st.markdown("**Aggiungi nota al grafico di riconciliazione**")
+        with st.form(key=f"recon_add_note_{anno}"):
+            _note_title = st.text_input("Titolo nota", max_chars=120)
+            _note_body = st.text_area("Testo nota", max_chars=2000)
+            _note_sev = st.selectbox("Livello", ["INFO", "WARNING", "CRITICAL"])
+            _note_lbl = st.text_input(
+                "Etichetta ancoraggio (opzionale)", max_chars=80
+            )
+            _submitted = st.form_submit_button("Salva nota")
+            if _submitted:
+                if not _note_title.strip() or not _note_body.strip():
+                    st.error("Titolo e testo nota sono obbligatori.")
+                else:
+                    _create_result = create_chart_annotation(
+                        chart_key="trend_scope_total",
+                        title=_note_title.strip(),
+                        body=_note_body.strip(),
+                        severity=_note_sev,
+                        anchor_year=anno,
+                        anchor_label=_note_lbl.strip() or None,
+                    )
+                    if "error" in _create_result:
+                        st.error(f"Errore salvataggio nota: {_create_result['error']}")
+                    else:
+                        st.success("Nota salvata.")
+                        st.rerun()
+
+# ---------------------------------------------------------------------------
+# Section 5: take new snapshot (esg_manager only)
 # ---------------------------------------------------------------------------
 if role == "esg_manager":
     st.divider()
