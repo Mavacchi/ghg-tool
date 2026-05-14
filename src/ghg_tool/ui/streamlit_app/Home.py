@@ -39,6 +39,7 @@ from ghg_tool.ui.streamlit_app.lib.auth import (  # noqa: E402
     require_auth,
 )
 from ghg_tool.ui.streamlit_app.lib.banner import render_viano_banner, should_show_viano_banner  # noqa: E402
+from ghg_tool.ui.streamlit_app.lib.help import _help  # noqa: E402
 from ghg_tool.ui.streamlit_app.lib.i18n import _  # noqa: E402
 from ghg_tool.ui.streamlit_app.lib.api_client import fetch_kpis, emissions_to_dataframe  # noqa: E402
 from ghg_tool.ui.streamlit_app.lib.palette import SCOPE_COLOURS, BLUE, VERMILION, BLUISH_GREEN, ORANGE  # noqa: E402
@@ -61,10 +62,16 @@ with st.sidebar:
     _default_year_index = (
         year_options.index(_current_year) if _current_year in year_options else len(year_options) - 1
     )
-    selected_year = st.selectbox(_("year_filter", lang), year_options, index=_default_year_index)
+    selected_year = st.selectbox(
+        _("year_filter", lang), year_options, index=_default_year_index,
+        help=_help("anno_fiscale", lang),
+    )
 
     gwp_options = ["AR6", "AR5"]
-    selected_gwp = st.selectbox("GWP Set", gwp_options, index=0)
+    selected_gwp = st.selectbox(
+        "GWP Set", gwp_options, index=0,
+        help=_help("gwp", lang),
+    )
 
     st.divider()
     if get_token():
@@ -136,31 +143,35 @@ with col_total:
     st.metric(
         label=_("total_emissions", lang),
         value=f"{total_lb:,.1f} tCO2e",
-        help="Scope 1 + Scope 2 LB + Scope 3. Market-based variant shown separately.",
+        help=_help("tco2e", lang),
     )
 
 with col_s1:
     st.metric(
         label=_("scope1_total", lang),
         value=f"{scope_totals[1]:,.1f}",
+        help=_help("scope1", lang),
     )
 
 with col_s2lb:
     st.metric(
         label=_("scope2_lb", lang),
         value=f"{scope_totals[2]:,.1f}",
+        help=_help("scope2_lb", lang),
     )
 
 with col_s2mb:
     st.metric(
         label=_("scope2_mb", lang),
         value=f"{scope2_mb_total:,.1f}",
+        help=_help("scope2_mb", lang),
     )
 
 with col_s3:
     st.metric(
         label=_("scope3_total", lang),
         value=f"{scope_totals[3]:,.1f}",
+        help=_help("scope3", lang),
     )
 
 # ---------------------------------------------------------------------------
@@ -169,7 +180,10 @@ with col_s3:
 with st.expander(f"⚠️ {_('biogenic_memo', lang)}", expanded=False):
     st.info(_("biogenic_adv007", lang))
     if biogenic_total > 0:
-        st.metric("CO2 Biogenico (tonne)", f"{biogenic_total:,.1f}")
+        st.metric(
+            "CO2 Biogenico (tonne)", f"{biogenic_total:,.1f}",
+            help=_help("biogenic", lang),
+        )
     else:
         st.caption("Nessuna emissione biogenica nel periodo selezionato.")
 

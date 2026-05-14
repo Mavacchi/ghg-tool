@@ -14,6 +14,7 @@ st.set_page_config(page_title="Factor Catalog — GHG", layout="wide")
 
 from ghg_tool.ui.streamlit_app.lib.constants import DASHBOARD_ID, DASHBOARD_VERSION  # noqa: E402
 from ghg_tool.ui.streamlit_app.lib.auth import get_lang, require_auth  # noqa: E402
+from ghg_tool.ui.streamlit_app.lib.help import _help  # noqa: E402
 from ghg_tool.ui.streamlit_app.lib.i18n import _  # noqa: E402
 from ghg_tool.ui.streamlit_app.lib.api_client import fetch_factor_catalog  # noqa: E402
 
@@ -27,17 +28,29 @@ st.title(_("nav_factor_catalog", lang))
 # ---------------------------------------------------------------------------
 with st.sidebar:
     scope_opts = ["Tutti / All", "1", "2", "3"]
-    scope_label = st.selectbox(_("scope_filter", lang), scope_opts)
+    scope_label = st.selectbox(
+        _("scope_filter", lang), scope_opts,
+        help=_help("scope1", lang),
+    )
     scope_filter: int | None = int(scope_label) if scope_label.isdigit() else None
 
     source_opts = ["", "DEFRA", "ISPRA", "IEA", "ecoinvent",
                    "EXIOBASE", "CDP", "IPCC", "AIB", "EPD", "GHGProtocol"]
-    source_filter = st.selectbox(_("factor_source_col", lang), source_opts)
+    source_filter = st.selectbox(
+        _("factor_source_col", lang), source_opts,
+        help=_help("factor_source", lang),
+    )
 
     gwp_opts = ["", "AR6", "AR5", "n/a"]
-    gwp_filter = st.selectbox("GWP Set", gwp_opts)
+    gwp_filter = st.selectbox(
+        "GWP Set", gwp_opts,
+        help=_help("gwp", lang),
+    )
 
-    published_only = st.checkbox("Solo pubblicati / Published only", value=True)
+    published_only = st.checkbox(
+        "Solo pubblicati / Published only", value=True,
+        help=_help("factor_version", lang),
+    )
 
 # ---------------------------------------------------------------------------
 # Data fetch

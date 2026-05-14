@@ -13,6 +13,7 @@ st.set_page_config(page_title="Audit Trail — GHG", layout="wide")
 
 from ghg_tool.ui.streamlit_app.lib.constants import DASHBOARD_ID, DASHBOARD_VERSION  # noqa: E402
 from ghg_tool.ui.streamlit_app.lib.auth import get_lang, require_auth  # noqa: E402
+from ghg_tool.ui.streamlit_app.lib.help import _help  # noqa: E402
 from ghg_tool.ui.streamlit_app.lib.i18n import _  # noqa: E402
 from ghg_tool.ui.streamlit_app.lib.api_client import fetch_audit_trail  # noqa: E402
 
@@ -27,12 +28,18 @@ st.title(_("nav_audit_trail", lang))
 with st.sidebar:
     year_opts: list[int | None] = [None, 2024, 2025]
     year_labels = ["Tutti / All"] + [str(y) for y in year_opts[1:]]
-    year_choice = st.selectbox(_("year_filter", lang), year_labels)
+    year_choice = st.selectbox(
+        _("year_filter", lang), year_labels,
+        help=_help("audit_correlation_id", lang),
+    )
     anno_filter: int | None = int(year_choice) if year_choice != "Tutti / All" else None
 
     site_opts = ["", "IANO", "VIANO", "VIANO_GARGOLA", "CASALGRANDE",
                  "FIORANO", "SASSUOLO", "FRASSINORO"]
-    site_filter = st.selectbox(_("site_filter", lang), site_opts)
+    site_filter = st.selectbox(
+        _("site_filter", lang), site_opts,
+        help=_help("codice_sito", lang),
+    )
 
     page_size = st.number_input("Righe per pagina", min_value=10, max_value=500,
                                 value=50, step=10)
@@ -111,7 +118,10 @@ else:
     # Emission detail modal (selectbox + caption — Streamlit doesn't have true modals)
     if "emission_id" in df.columns:
         emission_ids = df["emission_id"].dropna().astype(str).unique().tolist()
-        selected_id = st.selectbox("Dettaglio emission_id", [""] + emission_ids)
+        selected_id = st.selectbox(
+            "Dettaglio emission_id", [""] + emission_ids,
+            help=_help("audit_predecessor", lang),
+        )
         if selected_id:
             matches = df[df["emission_id"].astype(str) == selected_id]
             if not matches.empty:
