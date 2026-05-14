@@ -2,10 +2,14 @@
 # GHG Tool — Quickstart override (Windows/Mac/Linux double-click launch).
 #
 # Usage:
-#   docker compose -f docker-compose.yml -f docker-compose.quickstart.yml up -d --build
+#   docker compose -f docker-compose.yml -f docker-compose.quickstart.yml \
+#       --profile app up -d --build
+#
+# IMPORTANT: pass `--profile app` so the `app` service from docker-compose.yml
+# is enabled (it is profile-gated in the base file). The `streamlit` service
+# defined here depends on `app` and will fail validation otherwise.
 #
 # This override:
-#   - Enables the `app` service by default (removes the profile gate)
 #   - Adds a `streamlit` service serving the dashboard on port 8501
 #   - Sets development-only env vars (named test-only JWT secret,
 #     demo-mode fallback, permissive CORS for localhost:8501)
@@ -15,7 +19,12 @@
 
 services:
   app:
-    profiles: []  # override the "app" profile gate from docker-compose.yml
+    # NOTE: the `app` service is profile-gated in docker-compose.yml.
+    # Enable it by running compose with `--profile app` (see start.bat).
+    # We deliberately do NOT try to override `profiles` here because an
+    # empty list does not reliably reset the parent profiles across all
+    # Docker Compose versions and would cause:
+    #   service "streamlit" depends on undefined service "app"
     environment:
       SQLALCHEMY_URL: "postgresql+asyncpg://ghg_app:${POSTGRES_PASSWORD:-changeme}@db:5432/ghg_tool"
       SQLALCHEMY_ASYNC_URL: "postgresql+asyncpg://ghg_app:${POSTGRES_PASSWORD:-changeme}@db:5432/ghg_tool"
