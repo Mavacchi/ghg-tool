@@ -190,15 +190,19 @@ class TestEmissionsIntegration:
         """
         token = _data_steward_token(tenant_id)
 
-        # REV-WAVE3-012: UUID-suffixed sub_scope avoids collision with the
-        # partial unique active-row index (ux_emissions_active_natural_key),
-        # so the POST must succeed (201) and the row must be readable.
-        unique_sub_scope = f"combustion_{uuid.uuid4().hex[:8]}"
+        # sub_scope must be one of the enum values enforced by the
+        # EmissionCreate Pydantic validator at the API boundary. The CI
+        # service container provisions a fresh database for every run, so
+        # there is no risk of colliding with a previously inserted row on
+        # the partial unique active-row index — using a fixed enum member
+        # is therefore safe in CI.  Local persistent-DB usage may need a
+        # different uniqueness strategy (vary `anno`, drop+recreate the
+        # DB, etc.) but that is out of scope for this CI-driven test.
         payload = {
             "raw_row_id": str(uuid.uuid4()),
             "raw_scope": 1,
             "scope": 1,
-            "sub_scope": unique_sub_scope,
+            "sub_scope": "combustion",
             "codice_sito": "IANO",
             "anno": 2024,
             "tco2e": 3.141,
@@ -213,7 +217,12 @@ class TestEmissionsIntegration:
             post_resp = await client.post(
                 "/api/v1/emissions/",
                 json=payload,
-                headers={"Authorization": f"Bearer {token}"},
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    # Required by the API write middleware; a fresh UUID
+                    # per call gives single-shot idempotency.
+                    "Idempotency-Key": str(uuid.uuid4()),
+                },
             )
 
         # With a UUID-suffixed sub_scope the insert must succeed (201).
