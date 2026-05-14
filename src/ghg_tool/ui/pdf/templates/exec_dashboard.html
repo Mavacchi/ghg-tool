@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="{{ language }}">
+<head>
+  <meta charset="utf-8">
+  <title>{{ company_name }} - Executive Dashboard {{ anno }}</title>
+  <link rel="stylesheet" href="{{ css_path }}">
+</head>
+<body>
+
+<!-- TOP BAND -->
+<div class="exec-header">
+  <h1>Carbontrace - Executive Dashboard</h1>
+  <div class="header-meta">
+    <span><strong>{{ company_name }}</strong></span>
+    <span>{{ label_reporting_year }}: {{ anno }}</span>
+    <span>{{ label_generated }}: {{ generated_at }}</span>
+  </div>
+</div>
+
+<!-- ROW 1: KPI CARDS -->
+<div class="kpi-row">
+
+  <!-- Total -->
+  <div class="kpi-card total">
+    <div class="kpi-label">{{ label_total }}</div>
+    <div class="kpi-value">{{ totals_current.total_lb | fmt_num }}</div>
+    <span class="kpi-unit">tCO2e (S1+S2 LB+S3)</span>
+    {% set d = deltas.total_lb %}
+    {% if d is not none %}
+      <div class="kpi-delta {{ d.css }}">{{ d.arrow }} {{ d.pct }}% {{ label_vs }} {{ prior_anno }}</div>
+    {% endif %}
+  </div>
+
+  <!-- Scope 1 -->
+  <div class="kpi-card">
+    <div class="kpi-label">Scope 1</div>
+    <div class="kpi-value">{{ totals_current.scope1 | fmt_num }}</div>
+    <span class="kpi-unit">tCO2e</span>
+    {% set d = deltas.scope1 %}
+    {% if d is not none %}
+      <div class="kpi-delta {{ d.css }}">{{ d.arrow }} {{ d.pct }}% {{ label_vs }} {{ prior_anno }}</div>
+    {% endif %}
+  </div>
+
+  <!-- Scope 2 LB -->
+  <div class="kpi-card">
+    <div class="kpi-label">Scope 2 LB</div>
+    <div class="kpi-value">{{ totals_current.scope2_lb | fmt_num }}</div>
+    <span class="kpi-unit">tCO2e</span>
+    {% set d = deltas.scope2_lb %}
+    {% if d is not none %}
+      <div class="kpi-delta {{ d.css }}">{{ d.arrow }} {{ d.pct }}% {{ label_vs }} {{ prior_anno }}</div>
+    {% endif %}
+  </div>
+
+  <!-- Scope 2 MB -->
+  <div class="kpi-card">
+    <div class="kpi-label">Scope 2 MB</div>
+    <div class="kpi-value">{{ totals_current.scope2_mb | fmt_num }}</div>
+    <span class="kpi-unit">tCO2e</span>
+    {% set d = deltas.scope2_mb %}
+    {% if d is not none %}
+      <div class="kpi-delta {{ d.css }}">{{ d.arrow }} {{ d.pct }}% {{ label_vs }} {{ prior_anno }}</div>
+    {% endif %}
+  </div>
+
+  <!-- Scope 3 -->
+  <div class="kpi-card">
+    <div class="kpi-label">Scope 3</div>
+    <div class="kpi-value">{{ totals_current.scope3 | fmt_num }}</div>
+    <span class="kpi-unit">tCO2e</span>
+    {% set d = deltas.scope3 %}
+    {% if d is not none %}
+      <div class="kpi-delta {{ d.css }}">{{ d.arrow }} {{ d.pct }}% {{ label_vs }} {{ prior_anno }}</div>
+    {% endif %}
+  </div>
+
+</div>
+
+<!-- ROW 2: CHART + TARGET -->
+<div class="row2">
+
+  <!-- Bar chart -->
+  <div class="chart-block">
+    <div class="block-title">{{ label_emissions_by_scope }} ({{ prior_anno }} {{ label_vs_short }} {{ anno }})</div>
+    <img src="{{ chart_data_uri }}" alt="{{ label_chart_alt }}">
+  </div>
+
+  <!-- SBTi target tracker -->
+  <div class="target-block">
+    <div class="block-title">{{ label_sbti_target }}</div>
+    {% if target %}
+      <div class="target-name">{{ target.name }}</div>
+      <div class="target-detail">
+        {{ label_target_year }}: {{ target.target_year }} |
+        {{ label_target_tco2e }}: {{ target.target_tco2e | fmt_num }} tCO2e
+      </div>
+      {% if target.on_track_status == 'ON_TRACK' %}
+        <div class="traffic-light on-track">ON TRACK</div>
+      {% elif target.on_track_status == 'SLIGHTLY_OFF' %}
+        <div class="traffic-light slightly-off">SLIGHTLY OFF</div>
+      {% elif target.on_track_status == 'OFF_TRACK' %}
+        <div class="traffic-light off-track">OFF TRACK</div>
+      {% else %}
+        <div class="traffic-light no-data">NO DATA</div>
+      {% endif %}
+      {% if target.trajectory_note %}
+        <div class="target-trajectory">{{ target.trajectory_note }}</div>
+      {% endif %}
+    {% else %}
+      <div class="target-nodata">{{ label_no_target }}</div>
+    {% endif %}
+  </div>
+
+</div>
+
+<!-- ROW 3: SCOPE 3 HOTSPOTS + INTENSITY -->
+<div class="row3">
+
+  <!-- Scope 3 hotspots -->
+  <div class="table-block">
+    <div class="block-title">{{ label_scope3_hotspots }}</div>
+    <table class="exec-table">
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>{{ label_category }}</th>
+          <th class="num">tCO2e</th>
+          <th class="num">%</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in top_scope3_categories %}
+        <tr>
+          <td class="rank-cell">{{ loop.index }}</td>
+          <td>{{ row.category_label }}</td>
+          <td class="num">{{ row.tco2e | fmt_num }}</td>
+          <td class="num">{{ row.pct | round(1) }}%</td>
+        </tr>
+        {% endfor %}
+        {% if not top_scope3_categories %}
+        <tr>
+          <td colspan="4" style="font-style:italic;color:#888">{{ label_no_data }}</td>
+        </tr>
+        {% endif %}
+      </tbody>
+    </table>
+  </div>
+
+  <!-- Intensity ratios -->
+  <div class="table-block">
+    <div class="block-title">{{ label_intensity }}</div>
+    <table class="exec-table">
+      <thead>
+        <tr>
+          <th>{{ label_metric }}</th>
+          <th class="num">{{ anno }}</th>
+          <th class="num">{{ label_vs }} {{ prior_anno }}</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>tCO2e / MEUR</td>
+          <td class="num">{{ intensity_revenue | fmt_dec }}</td>
+          <td class="num">
+            {% set di = intensity_deltas.revenue %}
+            {% if di is not none %}
+              <span class="{{ di.css }}">{{ di.arrow }} {{ di.pct }}%</span>
+            {% else %}
+              -
+            {% endif %}
+          </td>
+        </tr>
+        <tr>
+          <td>kgCO2e / m2</td>
+          <td class="num">{{ intensity_m2 | fmt_dec }}</td>
+          <td class="num">
+            {% set di = intensity_deltas.m2 %}
+            {% if di is not none %}
+              <span class="{{ di.css }}">{{ di.arrow }} {{ di.pct }}%</span>
+            {% else %}
+              -
+            {% endif %}
+          </td>
+        </tr>
+        <tr>
+          <td>{{ label_biogenic_memo }}</td>
+          <td class="num">{{ totals_current.biogenic_memo | fmt_num }}</td>
+          <td class="num">-</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+</div>
+
+<!-- ROW 4: DQ + SIGN-OFF -->
+<div class="dq-band">
+
+  <div class="dq-cell">
+    <div class="dq-label">{{ label_dq_status }}</div>
+    <div class="dq-value">
+      <span class="crit">{{ dq_summary.crit_open }} CRIT</span>,
+      <span class="warn">{{ dq_summary.warn_open }} WARN</span>,
+      {{ dq_summary.total_findings }} {{ label_total_findings }}
+    </div>
+  </div>
+
+  <div class="dq-cell">
+    <div class="dq-label">{{ label_assurance }}</div>
+    <div class="dq-value">
+      {% if assurance_status == 'limited' %}
+        <span class="assurance-badge limited">ISAE 3000 Limited</span>
+      {% elif assurance_status == 'reasonable' %}
+        <span class="assurance-badge reasonable">ISAE 3000 Reasonable</span>
+      {% else %}
+        <span class="assurance-badge none">None</span>
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="dq-cell">
+    <div class="dq-label">{{ label_esg_manager }}</div>
+    <div class="signature-line">
+      {% if signed_by_esg_manager %}
+        {{ signed_by_esg_manager }}
+      {% else %}
+        ______________________________
+      {% endif %}
+      <br>
+      {{ label_date }}: <span class="signature-underline"></span>
+    </div>
+  </div>
+
+</div>
+
+<!-- FOOTER -->
+<div class="exec-footer">
+  <span>{{ label_dashboard }}: {{ dashboard_id }} v{{ dashboard_version }}</span> |
+  <span>GWP set: {{ gwp_set }}</span> |
+  <span>{{ label_factor_sources }}: ISPRA 2024 + IEA 2024 + ecoinvent v3.10</span> |
+  <span>{{ label_methodology }}: GHG Protocol Corporate Standard (2004)</span> |
+  <span>{{ label_generated }}: {{ generated_at }}</span>
+  <div class="disclaimer">
+    ADR-007: {{ label_biogenic_disclaimer }}
+  </div>
+</div>
+
+</body>
+</html>
