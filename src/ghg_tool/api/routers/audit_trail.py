@@ -137,6 +137,7 @@ async def get_audit_trail(
         log.error(
             "audit_trail query failed",
             exc_type=type(exc).__name__,
+            exc_message=str(exc),
         )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
