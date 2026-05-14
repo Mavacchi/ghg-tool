@@ -239,6 +239,23 @@ Scope 1+2 total tCO2e triggers mandatory base-year recalculation.
 **Normative basis**: GHG Protocol Corporate Standard Chapter 5 ("Setting a GHG Inventory
 Base Year").
 
+### Snapshot-based reconciliation (M13)
+
+Carbontrace freezes the consolidated emissions at the moment a CSRD ESRS E1 report (or
+EU ETS / interim package) is signed by writing a row to `calc.report_snapshots`. Every
+subsequent calc run can be reconciled against the snapshot via
+`GET /api/v1/reconciliation/diff`, which returns a per-row delta with a cause
+classification (`factor_update`, `data_correction`, `methodology`, `new_row`,
+`withdrawn_row`, `unknown`). A restatement is required when either the aggregate
+delta exceeds 5% (matches FR-26 / GHG Protocol §5) or any single sub-scope row
+exceeds 10% AND the absolute delta is at least 100 tCO2e (CSRD Article 23
+"single material item" convention).
+
+Snapshots are append-only; the trigger `trg_report_snapshots_deny_mutation` blocks
+UPDATE and DELETE. Snapshot creation is gated to `esg_manager` and writes a
+`calc.audit_log` row + emits a `report_snapshot_created` SIEM event in the same
+transaction.
+
 ---
 
 ## 7. Audit Trail Integrity (Phase 8)
