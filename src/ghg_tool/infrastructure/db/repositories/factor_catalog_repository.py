@@ -72,6 +72,32 @@ class FactorCatalogRepository:
         )
         return result.scalars().all()
 
+    async def get_by_uuid(
+        self,
+        *,
+        tenant_id: uuid.UUID,
+        factor_uuid: uuid.UUID,
+    ) -> FactorCatalog | None:
+        """Fetch a single factor row by its primary-key UUID, scoped to tenant.
+
+        Used by the publish endpoint to enforce tenant isolation before the
+        False→True transition on ``is_published``.
+
+        Args:
+            tenant_id: Tenant UUID (from JWT claim) — prevents cross-tenant access.
+            factor_uuid: The UUID primary key of the factor row.
+
+        Returns:
+            The matching ``FactorCatalog`` instance or None.
+        """
+        result = await self._session.execute(
+            select(FactorCatalog).where(
+                FactorCatalog.tenant_id == tenant_id,
+                FactorCatalog.id == factor_uuid,
+            )
+        )
+        return result.scalar_one_or_none()
+
     async def insert(self, factor: FactorCatalog) -> FactorCatalog:
         """Insert a new factor catalog row (pre-publish only).
 

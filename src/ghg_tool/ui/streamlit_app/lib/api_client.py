@@ -266,6 +266,29 @@ def create_emission(payload: dict[str, Any]) -> dict[str, Any]:
     return _safe_post(f"{_get_base_url()}/api/v1/emissions/", body=payload)
 
 
+def publish_factor(factor_uuid: str, notes: str | None = None) -> dict[str, Any]:
+    """POST to /api/v1/factor-catalog/{uuid}/publish (esg_manager only).
+
+    Flips the draft factor's ``is_published`` flag to True, stamps
+    ``published_at`` and ``published_by``. After the call the row is
+    frozen by the DB trigger ``trg_factor_immutability`` (MG-02).
+
+    Args:
+        factor_uuid: UUID of the draft factor to publish.
+        notes: Optional ``publish_notes`` payload (audit trail).
+
+    Returns:
+        Updated ``FactorCatalogResponse`` dict, or ``{"error": "...", "status_code": ...}``.
+    """
+    body: dict[str, Any] = {}
+    if notes:
+        body["publish_notes"] = notes
+    return _safe_post(
+        f"{_get_base_url()}/api/v1/factor-catalog/{factor_uuid}/publish",
+        body=body,
+    )
+
+
 def create_factor(payload: dict[str, Any]) -> dict[str, Any]:
     """POST a new factor version to /api/v1/factor-catalog (data_steward).
 

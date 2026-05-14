@@ -22,9 +22,9 @@ st.set_page_config(
 
 from ghg_tool.ui.streamlit_app.lib.auth import get_lang, require_auth  # noqa: E402
 from ghg_tool.ui.streamlit_app.lib.help import _help  # noqa: E402
-from ghg_tool.ui.streamlit_app.lib.brand import apply_brand_chrome  # noqa: E402
+from ghg_tool.ui.streamlit_app.lib.brand import apply_brand_chrome, render_context_bar  # noqa: E402
 from ghg_tool.ui.streamlit_app.lib.i18n import _  # noqa: E402
-from ghg_tool.ui.streamlit_app.lib.api_client import fetch_factor_catalog  # noqa: E402
+from ghg_tool.ui.streamlit_app.lib.api_client import fetch_factor_catalog, publish_factor  # noqa: E402
 
 apply_brand_chrome()
 require_auth()
@@ -60,6 +60,13 @@ with st.sidebar:
         "Solo pubblicati / Published only", value=True,
         help=_help("factor_version", lang),
     )
+
+render_context_bar(
+    lang=lang,
+    year=None,
+    gwp=gwp_filter or None,
+    role=st.session_state.get("role"),
+)
 
 # ---------------------------------------------------------------------------
 # Data fetch
@@ -117,6 +124,79 @@ else:
     )
 
     st.caption(f"Totale fattori: {len(df)}")
+
+# ---------------------------------------------------------------------------
+# Publication queue (esg_manager only)
+#
+# Lists draft factors (is_published=False) and exposes a single-click
+# publish action wired to POST /api/v1/factor-catalog/{id}/publish.
+# Once published, the DB trigger MG-02 freezes the row.
+# ---------------------------------------------------------------------------
+_role = st.session_state.get("role", "auditor")
+if _role == "esg_manager":
+    with st.expander(_("publication_queue_title", lang), expanded=False):
+        st.caption(_("publication_queue_caption", lang))
+        # Fetch DRAFT rows specifically. fetch_factor_catalog has no
+        # is_published filter param, so we reuse the larger pull above
+        # and slice client-side.
+        all_factors = raw or []
+        drafts = [
+            f for f in all_factors
+            if not f.get("is_published") and not f.get("is_tbc")
+            and (f.get("value") is not None or f.get("is_licence_only"))
+        ]
+        if not drafts:
+            st.info(_("publication_queue_empty", lang))
+        else:
+            for d in drafts:
+                cols = st.columns([3, 1, 1])
+                with cols[0]:
+                    st.markdown(
+                        f"**{d.get('factor_id', '?')}** · v{d.get('version', '?')} "
+                        f"· {d.get('source', '?')} · {d.get('gwp_set', '?')}"
+                    )
+                    if d.get("substance"):
+                        st.caption(f"{d.get('substance')} ({d.get('unit', '')})")
+                with cols[1]:
+                    val = d.get("value")
+                    st.markdown(
+                        f"`{val}`" if val is not None
+                        else f"_{_('licence_only_label', lang)}_"
+                    )
+                with cols[2]:
+                    _key = f"publish_{d.get('id')}"
+                    _inflight = st.session_state.get(f"_inflight_{_key}", False)
+                    if st.button(
+                        _("publish_btn", lang),
+                        key=_key,
+                        type="primary",
+                        disabled=_inflight,
+                    ):
+                        st.session_state[f"_inflight_{_key}"] = True
+                        try:
+                            resp = publish_factor(str(d.get("id")))
+                        finally:
+                            st.session_state[f"_inflight_{_key}"] = False
+                        if "error" in resp:
+                            sc = resp.get("status_code")
+                            if sc == 409:
+                                st.warning(_("publish_already_done", lang))
+                            elif sc == 422:
+                                st.error(_("publish_validation_failed", lang))
+                            elif sc == 403:
+                                st.error(_("publish_forbidden", lang))
+                            else:
+                                st.error(f"HTTP {sc}: {resp.get('error', '?')}")
+                        else:
+                            st.success(_("publish_success", lang), icon="✅")
+                            # Invalidate the catalog cache so the next
+                            # render hides the just-published draft.
+                            clear = getattr(fetch_factor_catalog, "clear", None)
+                            if callable(clear):
+                                try:
+                                    clear()
+                                except (AttributeError, TypeError):
+                                    pass
 
 # ---------------------------------------------------------------------------
 # Footer

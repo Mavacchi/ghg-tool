@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import uuid
+from datetime import UTC, datetime
 from typing import Annotated
 
 import structlog
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -18,6 +19,8 @@ from ghg_tool.api.middleware.rbac import require_permission
 from ghg_tool.api.schemas.common import CursorPage
 from ghg_tool.api.schemas.factor_schemas import (
     FactorCatalogCreate,
+    FactorCatalogPublishRequest,
+    FactorCatalogPublishResponse,
     FactorCatalogResponse,
     FactorFilter,
 )
@@ -197,3 +200,175 @@ async def create_factor(
     persisted = await repo.insert(new_factor)
     log.info("Factor created", factor_db_id=str(persisted.id))
     return FactorCatalogResponse.model_validate(persisted)
+
+
+@router.post(
+    "/{factor_uuid}/publish",
+    response_model=FactorCatalogPublishResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Publish a draft factor (esg_manager only)",
+    description=(
+        "Transitions a draft factor (``is_published=False``) to published "
+        "(``is_published=True``). Once published the DB trigger "
+        "``trg_factor_immutable`` (MG-02) makes the row permanently immutable.\n\n"
+        "**Pre-conditions** (all checked before the UPDATE fires):\n"
+        "- Row must exist and belong to the caller's tenant — 404 otherwise.\n"
+        "- Row must not already be published — 409 if ``is_published`` is already True.\n"
+        "- ``is_tbc`` must be False — 422 if True (TBC factors have no pinned value).\n"
+        "- ``value`` must not be NULL unless ``is_licence_only=True`` — 422 otherwise.\n\n"
+        "On success returns HTTP 200 with the full updated factor row.\n\n"
+        "**Audit**: a structured log entry is emitted with ``correlation_id``, "
+        "``factor_uuid``, ``factor_id``, ``version``, ``gwp_set``, ``published_by``, "
+        "and optional ``publish_notes``.\n\n"
+        "**Idempotency**: re-submitting for an already-published row returns 409 "
+        "(not 200) so the caller can detect re-attempts."
+    ),
+    responses={
+        200: {"description": "Factor successfully published"},
+        401: {"description": "Not authenticated"},
+        403: {"description": "Insufficient role — esg_manager required"},
+        404: {"description": "Factor not found or belongs to a different tenant"},
+        409: {"description": "Factor is already published (already_published)"},
+        422: {"description": "Factor cannot be published: is_tbc=True or value=NULL on non-licence factor"},
+    },
+)
+async def publish_factor(
+    factor_uuid: uuid.UUID,
+    body: FactorCatalogPublishRequest | None = None,
+    user: CurrentUser = Depends(require_permission("factor_catalog", "publish")),
+    session: AsyncSession = Depends(get_db),
+) -> FactorCatalogPublishResponse:
+    """Publish a draft emission factor (esg_manager only).
+
+    Fetches the draft row by UUID and tenant, validates publish pre-conditions,
+    then performs the False→True transition on ``is_published``.  The DB trigger
+    ``ops.deny_factor_mutation`` guards against any mutation where
+    ``OLD.is_published`` is already True (MG-02), so the trigger does NOT block
+    this transition (the check is ``IF OLD.is_published THEN RAISE``, and here
+    ``OLD.is_published = False``).
+
+    Args:
+        factor_uuid: UUID primary key of the draft factor row.
+        body: Optional publish notes for the audit trail.
+        user: Authenticated esg_manager user.
+        session: Authenticated DB session.
+
+    Returns:
+        The updated ``FactorCatalogPublishResponse`` with ``is_published=True``.
+
+    Raises:
+        HTTPException: 404 if not found or wrong tenant.
+        HTTPException: 409 if already published.
+        HTTPException: 422 if ``is_tbc=True`` or value is NULL on a non-licence factor.
+    """
+    correlation_id = get_correlation_id()
+    log = logger.bind(
+        correlation_id=correlation_id,
+        user=user.sub[:8],
+        factor_uuid=str(factor_uuid),
+    )
+
+    repo = FactorCatalogRepository(session)
+    factor = await repo.get_by_uuid(
+        tenant_id=uuid.UUID(user.tenant_id),
+        factor_uuid=factor_uuid,
+    )
+
+    if factor is None:
+        log.warning("publish_factor_not_found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={
+                "type": "about:blank",
+                "title": "Not Found",
+                "status": 404,
+                "detail": f"Factor {factor_uuid} not found.",
+                "correlation_id": correlation_id,
+            },
+        )
+
+    if factor.is_published:
+        log.warning(
+            "publish_factor_already_published",
+            factor_id=factor.factor_id,
+            version=factor.version,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "type": "about:blank",
+                "title": "Conflict",
+                "status": 409,
+                "error_code": "already_published",
+                "detail": (
+                    f"Factor {factor.factor_id}/{factor.version} is already published "
+                    "and immutable. No action taken."
+                ),
+                "correlation_id": correlation_id,
+            },
+        )
+
+    if factor.is_tbc:
+        log.warning(
+            "publish_factor_rejected_tbc",
+            factor_id=factor.factor_id,
+            version=factor.version,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "type": "about:blank",
+                "title": "Unprocessable Entity",
+                "status": 422,
+                "error_code": "tbc_factor",
+                "detail": (
+                    f"Factor {factor.factor_id}/{factor.version} is marked as TBC "
+                    "(to-be-confirmed). Pin the numeric value before publishing."
+                ),
+                "correlation_id": correlation_id,
+            },
+        )
+
+    if factor.value is None and not factor.is_licence_only:
+        log.warning(
+            "publish_factor_rejected_null_value",
+            factor_id=factor.factor_id,
+            version=factor.version,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "type": "about:blank",
+                "title": "Unprocessable Entity",
+                "status": 422,
+                "error_code": "null_value",
+                "detail": (
+                    f"Factor {factor.factor_id}/{factor.version} has a NULL value "
+                    "but is_licence_only=False. Set a numeric value or mark as "
+                    "is_licence_only before publishing."
+                ),
+                "correlation_id": correlation_id,
+            },
+        )
+
+    # All pre-conditions passed — perform the False→True transition.
+    # The DB trigger ops.deny_factor_mutation only raises when OLD.is_published
+    # is True; since we confirmed is_published=False above, this UPDATE is allowed.
+    now_utc = datetime.now(tz=UTC)
+    factor.is_published = True
+    factor.published_by = user.sub
+    factor.published_at = now_utc
+
+    await session.flush()
+
+    publish_notes = body.publish_notes if body is not None else None
+    log.info(
+        "factor_published",
+        factor_id=factor.factor_id,
+        version=factor.version,
+        gwp_set=factor.gwp_set,
+        published_by=user.sub,
+        publish_notes=publish_notes,
+    )
+
+    return FactorCatalogPublishResponse.model_validate(factor)

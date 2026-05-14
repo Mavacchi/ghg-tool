@@ -28,7 +28,7 @@ st.set_page_config(
 
 from ghg_tool.ui.streamlit_app.lib.auth import get_lang, require_auth  # noqa: E402
 from ghg_tool.ui.streamlit_app.lib.banner import render_viano_banner, should_show_viano_banner  # noqa: E402
-from ghg_tool.ui.streamlit_app.lib.brand import apply_brand_chrome  # noqa: E402
+from ghg_tool.ui.streamlit_app.lib.brand import apply_brand_chrome, render_context_bar  # noqa: E402
 from ghg_tool.ui.streamlit_app.lib.filters import available_years, sidebar_gwp_filter  # noqa: E402
 from ghg_tool.ui.streamlit_app.lib.help import _help  # noqa: E402
 from ghg_tool.ui.streamlit_app.lib.i18n import _  # noqa: E402
@@ -80,6 +80,13 @@ with st.sidebar:
 # ---------------------------------------------------------------------------
 # VIANO banner
 # ---------------------------------------------------------------------------
+render_context_bar(
+    lang=lang,
+    year=year_compare,
+    gwp=gwp_set,
+    role=st.session_state.get("role"),
+)
+
 if should_show_viano_banner(max(year_base, year_compare)):
     render_viano_banner(lang)
 

@@ -151,6 +151,41 @@ class FactorCatalogCreate(BaseModel):
         return v
 
 
+class FactorCatalogPublishRequest(BaseModel):
+    """Optional body for ``POST /api/v1/factor-catalog/{factor_uuid}/publish``.
+
+    The body is fully optional — the endpoint can be called with an empty
+    payload.  When provided, ``publish_notes`` is recorded in the structured
+    audit log entry.
+
+    Attributes:
+        publish_notes: Free-text note recorded for audit purposes (max 500 chars).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    publish_notes: str | None = Field(default=None, max_length=500)
+
+
+class FactorCatalogPublishResponse(FactorCatalogResponse):
+    """Response schema for a successful publish operation.
+
+    Extends ``FactorCatalogResponse`` with no additional fields — the full
+    updated row is returned so the client sees ``is_published=True``,
+    ``published_by``, and ``published_at`` in one response.
+
+    NOTE (follow-up MG-03): ``published_at`` currently reflects the row
+    INSERT timestamp (DB DEFAULT now()) because the column is ``NOT NULL
+    DEFAULT now()`` and is set on draft creation.  After this publish call
+    the column is overwritten with the actual publish time, so the returned
+    value IS the true publish timestamp.  However, for rows created before
+    this endpoint existed the draft ``published_at`` was already set to the
+    creation time and was NOT meaningful as a "published" timestamp.  A future
+    migration should add a separate ``created_at`` column so the two events
+    can be tracked independently.
+    """
+
+
 class FactorFilter(BaseModel):
     """Query parameters for ``GET /api/v1/factor-catalog``.
 

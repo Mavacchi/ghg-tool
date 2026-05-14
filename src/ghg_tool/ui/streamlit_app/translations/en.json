@@ -132,5 +132,14 @@
   "justification_too_short": "Justification must be at least 10 characters.",
   "no_open_findings": "No OPEN findings available.",
   "sites_filter_hint": "Sites (empty = all)",
-  "rows_per_page": "Rows per page"
+  "rows_per_page": "Rows per page",
+  "publication_queue_title": "📑 Drafts pending publication",
+  "publication_queue_caption": "Publishing a factor makes it immutable (rule MG-02). TBC factors and factors without a value cannot be published.",
+  "publication_queue_empty": "No factors ready for publication.",
+  "publish_btn": "Publish",
+  "publish_success": "Factor published. Now frozen.",
+  "publish_already_done": "This factor is already published.",
+  "publish_validation_failed": "Publication not allowed: factor is TBC or has no value.",
+  "publish_forbidden": "Only the esg_manager role can publish factors.",
+  "licence_only_label": "licence-only"
 }

@@ -41,7 +41,7 @@ from ghg_tool.ui.streamlit_app.lib.auth import (  # noqa: E402
     require_auth,
 )
 from ghg_tool.ui.streamlit_app.lib.banner import render_viano_banner, should_show_viano_banner  # noqa: E402
-from ghg_tool.ui.streamlit_app.lib.brand import apply_brand_chrome  # noqa: E402
+from ghg_tool.ui.streamlit_app.lib.brand import apply_brand_chrome, render_context_bar  # noqa: E402
 from ghg_tool.ui.streamlit_app.lib.filters import sidebar_gwp_filter, sidebar_year_filter  # noqa: E402
 from ghg_tool.ui.streamlit_app.lib.help import _help  # noqa: E402
 from ghg_tool.ui.streamlit_app.lib.i18n import _  # noqa: E402
@@ -82,12 +82,19 @@ with st.sidebar:
 # tertiary line. Year context is surfaced by the sidebar year selector,
 # so we do not repeat it as a subheader here.
 # ---------------------------------------------------------------------------
+render_context_bar(
+    lang=lang,
+    year=selected_year,
+    gwp=selected_gwp,
+    role=st.session_state.get("role"),
+)
+
 _hero_tagline = _("hero_tagline", lang)
 st.markdown(
     f"""
 <div class="carbontrace-hero">
-  <div class="ct-brand-rule"></div>
-  <h1 class="ct-hero-title">{PRODUCT_NAME}</h1>
+  <div class="ct-brand-rule" aria-hidden="true"></div>
+  <h1 class="ct-hero-title" id="main">{PRODUCT_NAME}</h1>
   <p class="ct-hero-tagline">{_hero_tagline}</p>
   <p class="ct-hero-company">{COMPANY_NAME}</p>
 </div>
