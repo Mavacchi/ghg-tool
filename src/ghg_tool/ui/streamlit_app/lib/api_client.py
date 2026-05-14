@@ -499,6 +499,61 @@ def download_report(job_id: str) -> bytes | None:
         return None
 
 
+def import_excel(file_bytes: bytes) -> dict[str, Any]:
+    """POST an Excel workbook to /api/v1/raw/excel/import.
+
+    The bytes are sent as multipart/form-data under the field name
+    ``workbook`` with the OOXML content-type.  The server performs all
+    parsing, DQ-CRIT validation, and DB insertion; this helper is a thin
+    transport wrapper.
+
+    Args:
+        file_bytes: Raw .xlsx bytes from a Streamlit file_uploader.
+
+    Returns:
+        On success: ExcelImportResponse dict with keys
+        ``batch_id``, ``scope1_rows``, ``scope2_rows``, ``scope3_rows``,
+        ``dq_findings``, ``blocked``.
+        On failure: ``{"error": "...", "status_code": int}``.
+    """
+    from ghg_tool.ui.streamlit_app.lib.auth import _DEMO_MODE, _DEMO_TOKEN  # noqa: PLC0415
+
+    token = st.session_state.get("token")
+    if not token:
+        token = _DEMO_TOKEN if _DEMO_MODE else None
+
+    headers: dict[str, str] = {}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+
+    try:
+        resp = httpx.post(
+            f"{_get_base_url()}/api/v1/raw/excel/import",
+            headers=headers,
+            files={
+                "workbook": (
+                    "upload.xlsx",
+                    file_bytes,
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                )
+            },
+            timeout=120.0,  # large uploads may take longer than the default 30 s
+        )
+        resp.raise_for_status()
+        return resp.json()
+    except httpx.HTTPStatusError as exc:
+        try:
+            detail = exc.response.json()
+        except Exception:  # noqa: BLE001
+            detail = exc.response.text
+        return {
+            "error": detail,
+            "status_code": exc.response.status_code,
+        }
+    except httpx.RequestError as exc:
+        return {"error": str(exc)}
+
+
 def emissions_to_dataframe(rows: list[dict[str, Any]]) -> pd.DataFrame:
     """Convert a list of EmissionResponse dicts to a pandas DataFrame.
 

@@ -35,6 +35,11 @@ from typing import Any
 
 import structlog
 
+from ghg_tool.application.services.yoy_stats import (
+    compute_yoy_baseline,
+    threshold_pct,
+)
+
 logger = structlog.get_logger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -75,6 +80,7 @@ class ReconciliationDelta:
     pct_delta: Decimal | None
     cause_category: str
     material: bool
+    threshold_pct_used: Decimal = Decimal("5")
 
 
 @dataclass(frozen=True, slots=True)
@@ -166,6 +172,7 @@ def reconcile(
     materiality_pct: Decimal = Decimal("5"),
     materiality_tco2e: Decimal = Decimal("100"),
     methodology_flags: Iterable[tuple[int, str, str | None, int]] = (),
+    historical_by_year: Mapping[int, Mapping[tuple, Decimal]] | None = None,
 ) -> ReconciliationResult:
     """Compare two emission sets keyed on (scope, sub_scope, codice_sito, anno).
 
@@ -183,6 +190,14 @@ def reconcile(
         methodology_flags: External annotation channel.  Iterable of
             reconciliation keys flagged as methodology-driven; cause inference
             assigns ``methodology`` to these even when factor_version is equal.
+        historical_by_year: Optional outer mapping keyed by year, inner
+            mapping keyed by (scope, sub_scope, codice_sito) -> tco2e.
+            When >= 3 historical YoY deltas can be derived per key
+            (i.e. >= 4 years), the per-key historical sigma replaces
+            ``materiality_pct`` as the per-row threshold.  The
+            aggregate restatement gate still uses ``materiality_pct``
+            as a global floor; the per-row sigma threshold can only flag
+            MORE rows as material, never fewer.
 
     Returns:
         ReconciliationResult with totals, per-row deltas, material count,
@@ -197,6 +212,20 @@ def reconcile(
         current_by_key[_key(row)] = row
 
     methodology_set = {tuple(k) for k in methodology_flags}
+
+    # Build per-key (scope, sub_scope, codice_sito) historical sigma baseline.
+    # The reconciliation row key includes anno, but historical_by_year is
+    # year-indexed at the outer level, so we collapse the row key to its
+    # first three elements when looking up baselines.
+    baseline_by_key3: dict[tuple, Any] = {}
+    if historical_by_year:
+        normalised: dict[int, dict[tuple, Decimal]] = {}
+        for y, inner in historical_by_year.items():
+            normalised[int(y)] = {
+                tuple(k): (v if isinstance(v, Decimal) else Decimal(str(v)))
+                for k, v in inner.items()
+            }
+        baseline_by_key3 = compute_yoy_baseline(normalised)  # type: ignore[assignment]
 
     all_keys = sorted(set(prior_by_key) | set(current_by_key))
 
@@ -233,12 +262,30 @@ def reconcile(
             prior_row, cur_row, methodology_flagged=(k in methodology_set)
         )
 
+        # Per-row pct threshold.  When a reliable sigma baseline is
+        # available for (scope, sub_scope, codice_sito), use it; otherwise
+        # fall back to ``materiality_pct``.  The sigma threshold can only
+        # be LOWER than the fallback in some cases (very stable history)
+        # which flags MORE rows as material -- consistent with the spec
+        # "can only flag MORE rows, never fewer".  When the sigma is
+        # higher than the fallback we still clamp DOWN to materiality_pct
+        # to honour the floor.
+        key3 = (k[0], k[1], k[2])
+        baseline = baseline_by_key3.get(key3)
+        if baseline is not None and getattr(baseline, "is_reliable", False):
+            sigma_thr = threshold_pct(
+                baseline, fallback_pct=materiality_pct
+            )
+            row_threshold = min(sigma_thr, materiality_pct)
+        else:
+            row_threshold = materiality_pct
+
         # Materiality: per-row threshold combines pct AND absolute floor to
         # filter the case where a small base value produces a huge % swing
         # on negligible tCO2e.
         material = (
             pct_delta is not None
-            and abs(pct_delta) > materiality_pct
+            and abs(pct_delta) > row_threshold
             and abs(abs_delta) >= materiality_tco2e
         ) or (
             # New / withdrawn rows count as material when they breach the
@@ -271,6 +318,7 @@ def reconcile(
                 pct_delta=pct_delta,
                 cause_category=cause,
                 material=material,
+                threshold_pct_used=row_threshold,
             )
         )
 

@@ -93,6 +93,19 @@ PERMISSION_MATRIX: Final[dict[str, dict[str, frozenset[str]]]] = {
         "read": frozenset({ROLE_DATA_STEWARD, ROLE_ESG_MANAGER, ROLE_AUDITOR}),
         "write": frozenset({ROLE_ESG_MANAGER}),
     },
+    "raw_ingestions": {
+        # FR-03 Excel bulk import: data_steward and esg_manager may import.
+        # auditor is read-only across the system; no import access.
+        "import": frozenset({ROLE_DATA_STEWARD, ROLE_ESG_MANAGER}),
+    },
+    "chart_annotations": {
+        # M15 -- manual narrative annotations on dashboard charts.
+        # All roles read so auditors see the context the team recorded.
+        # data_steward + esg_manager may write (operations team adds
+        # context; auditor never modifies the trail).
+        "read": frozenset({ROLE_DATA_STEWARD, ROLE_ESG_MANAGER, ROLE_AUDITOR}),
+        "write": frozenset({ROLE_DATA_STEWARD, ROLE_ESG_MANAGER}),
+    },
 }
 
 

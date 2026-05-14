@@ -154,6 +154,7 @@ def make_emission(  # noqa: PLR0913 — wrapper around dataclass with many optio
         co2_fossil_tonne=co2_fossil_tonne,
         ch4_tco2e=ch4_tco2e,
         n2o_tco2e=n2o_tco2e,
+        factor_id_uuid=factor.factor_db_id,
         disclosure_notes=disclosure_notes,
         uncertainty_band_lower=uncertainty_band_lower,
         uncertainty_band_upper=uncertainty_band_upper,

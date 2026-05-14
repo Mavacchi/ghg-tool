@@ -30,6 +30,7 @@ logger = structlog.get_logger(__name__)
 _SELECT_FACTOR = text(
     """
     SELECT
+        id,
         factor_id,
         version,
         value,
@@ -55,6 +56,7 @@ _SELECT_FACTOR = text(
 _SELECT_FACTOR_VINTAGE = text(
     """
     SELECT
+        id,
         factor_id,
         version,
         value,
@@ -85,7 +87,9 @@ def _row_to_factor_record(row: Any) -> FactorRecord:
         row: Row returned by SQLAlchemy Core execute (RowMapping).
 
     Returns:
-        Constructed FactorRecord.
+        Constructed FactorRecord with ``factor_db_id`` populated from the
+        ``id`` column so the persistence layer can satisfy the FK constraint
+        on ``calc.emissions_consolidated.factor_id``.
     """
     value = Decimal(str(row["value"])) if row["value"] is not None else None
     biogenic = (
@@ -93,6 +97,7 @@ def _row_to_factor_record(row: Any) -> FactorRecord:
         if row["biogenic_co2_kg_per_unit"] is not None
         else None
     )
+    db_id: uuid.UUID | None = uuid.UUID(str(row["id"])) if row["id"] is not None else None
     return FactorRecord(
         factor_id=row["factor_id"],
         version=row["version"],
@@ -105,6 +110,7 @@ def _row_to_factor_record(row: Any) -> FactorRecord:
         applicability_note=row["applicability_note"],
         is_tbc=bool(row["is_tbc"]),
         is_licence_only=bool(row["is_licence_only"]),
+        factor_db_id=db_id,
     )
 
 

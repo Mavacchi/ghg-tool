@@ -24,6 +24,7 @@ from typing import Any
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi.responses import JSONResponse
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -33,6 +34,9 @@ from ghg_tool.api.middleware.rate_limit import login_limiter
 from ghg_tool.api.schemas.auth_schemas import LoginRequest, RefreshRequest, TokenResponse
 from ghg_tool.application.services.auth_service import authenticate_user
 from ghg_tool.infrastructure.security import jwt as jwt_module
+
+# TTL for the pre-2FA partial token (section C of TOTP spec).
+_PARTIAL_TOKEN_TTL_S = 300
 
 logger = structlog.get_logger(__name__)
 
@@ -46,18 +50,21 @@ def _hash_username(username: str) -> str:
 
 @router.post(
     "/login",
-    response_model=TokenResponse,
     status_code=status.HTTP_200_OK,
     summary="Authenticate and obtain JWT token pair",
     description=(
         "Validates username/password credentials and returns an access token "
         "(1 h TTL) and a refresh token (24 h TTL). Passwords are never logged. "
+        "If totp_enabled=true for the user, returns 202 with requires_totp=true "
+        "and a short-lived partial_token (5 min, pre_2fa claim); the caller must "
+        "complete the TOTP challenge at POST /api/v1/auth/totp/challenge. "
         "Implements NFR-05 token lifetimes and SG-01 alg=none rejection. "
         "SEC-P1-003: limited to 5 requests per minute per IP to mitigate "
         "credential stuffing. SEC-P1-005: wired to the real DB lookup."
     ),
     responses={
-        200: {"description": "Authentication successful"},
+        200: {"description": "Authentication successful", "model": TokenResponse},
+        202: {"description": "TOTP challenge required"},
         401: {"description": "Invalid credentials", "content": {"application/problem+json": {}}},
         429: {"description": "Rate limit exceeded"},
         422: {"description": "Validation error"},
@@ -67,7 +74,7 @@ async def login(
     request: Request,
     body: LoginRequest,
     session: AsyncSession = Depends(get_db_no_auth),
-) -> TokenResponse:
+) -> Any:
     """Login endpoint — wired to ``authenticate_user`` with DB lookup.
 
     SEC-P0-005: username is never logged in plain text; a 16-char SHA-256
@@ -113,7 +120,7 @@ async def login(
         result = await session.execute(
             text(
                 "SELECT u.id, u.username, u.password_hash, u.is_active, "
-                "r.role_code, u.tenant_id "
+                "r.role_code, u.tenant_id, u.totp_enabled "
                 "FROM ref.users u "
                 "JOIN ref.roles r ON r.id = u.role_id "
                 "WHERE u.username = :username"
@@ -141,6 +148,30 @@ async def login(
             },
             headers={"WWW-Authenticate": "Bearer"},
         )
+
+    # Check whether the user has TOTP enabled: if so, issue a short-lived
+    # partial token and return 202 instead of the full token pair.
+    user_row = await _lookup(body.username)
+    if user_row is not None and getattr(user_row, "totp_enabled", False):
+        # Decode the access token we already issued to extract sub/role/tenant.
+        full_claims = jwt_module.decode_token(token_response.access_token)
+        partial_token = jwt_module.create_access_token(
+            sub=full_claims["sub"],
+            role=full_claims["role"],
+            tenant_id=full_claims["tenant_id"],
+            extra_claims={"pre_2fa": True},
+            ttl_seconds=_PARTIAL_TOKEN_TTL_S,
+        )
+        log.info("login_totp_required")
+        return JSONResponse(
+            status_code=status.HTTP_202_ACCEPTED,
+            content={
+                "requires_totp": True,
+                "partial_token": partial_token,
+                "correlation_id": correlation_id,
+            },
+        )
+
     log.info("login_successful")
     return token_response
 

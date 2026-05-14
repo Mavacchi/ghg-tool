@@ -43,6 +43,7 @@ from ghg_tool.api.routers import (
     auth,
     dq_findings,
     emissions,
+    excel_import,
     exports,
     factor_catalog,
     go_certificates,
@@ -134,12 +135,23 @@ async def _seed_demo_data_if_empty() -> None:
 async def _lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """FastAPI lifespan context — startup and shutdown hooks.
 
+    Starts the optional APScheduler calc scheduler when
+    ``GHG_CALC_SCHEDULE_CRON`` is set (see
+    ``infrastructure.scheduling.calc_scheduler``).  The scheduler is shut
+    down cleanly on exit regardless of whether startup completed.
+
     Args:
         app: The FastAPI application instance.
 
     Yields:
         Control to the request-handling loop.
     """
+    import datetime as _dt  # noqa: PLC0415
+
+    from ghg_tool.infrastructure.scheduling.calc_scheduler import (  # noqa: PLC0415
+        start_scheduler,
+    )
+
     logger.info(
         "GHG API starting",
         version=_VERSION,
@@ -147,8 +159,17 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         demo_mode=_demo_mode_enabled(),
     )
     await _seed_demo_data_if_empty()
-    yield
-    logger.info("GHG API shutting down")
+
+    current_anno = _dt.datetime.now(_dt.timezone.utc).year
+    _scheduler = start_scheduler(anno=current_anno)
+
+    try:
+        yield
+    finally:
+        if _scheduler is not None:
+            _scheduler.shutdown(wait=False)
+            logger.info("calc_scheduler_stopped")
+        logger.info("GHG API shutting down")
 
 
 def _create_app() -> FastAPI:
@@ -275,6 +296,7 @@ def _create_app() -> FastAPI:
     app.include_router(health.router)
     app.include_router(auth.router)
     app.include_router(emissions.router)
+    app.include_router(excel_import.router)
     app.include_router(kpis.router)
     app.include_router(intensity.router)
     app.include_router(audit_trail.router)
