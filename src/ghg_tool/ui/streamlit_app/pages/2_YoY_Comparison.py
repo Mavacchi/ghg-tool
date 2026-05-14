@@ -21,7 +21,7 @@ from ghg_tool.ui.streamlit_app.lib.constants import (
 )
 
 st.set_page_config(
-    page_title=f"YoY Comparison — {PRODUCT_NAME}",
+    page_title=f"YoY Comparison · {PRODUCT_NAME}",
     page_icon=page_icon(),
     layout="wide",
 )
@@ -225,14 +225,14 @@ fig.add_trace(go.Bar(
 if not outlier_df.empty:
     outlier_label = merged[merged["is_outlier"]]["label"]
     fig.add_trace(go.Bar(
-        name=f"{_('yoy_abs_delta', lang)} — {_('yoy_outlier_warn', lang)}",
+        name=f"{_('yoy_abs_delta', lang)} · {_('yoy_outlier_warn', lang)}",
         x=outlier_label,
         y=outlier_df["delta_abs"],
         marker_color=VERMILION,
     ))
 
 fig.update_layout(
-    title=f"{_('chart_title_yoy', lang)} — {year_base} → {year_compare}",
+    title=f"{_('chart_title_yoy', lang)} · {year_base} → {year_compare}",
     xaxis_title=_("table_site", lang),
     yaxis_title="Δ tCO2e",
     barmode="overlay",

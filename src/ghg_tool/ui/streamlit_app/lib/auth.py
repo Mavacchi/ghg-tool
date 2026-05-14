@@ -35,7 +35,7 @@ _LANG_KEY = "lang"
 
 # Demo/fallback tenant and token for environments without live auth.
 # Demo mode is OPT-IN only — must be explicitly enabled via env var.
-_DEMO_TOKEN: Final[str] = "demo-jwt-token"  # noqa: S105 — public sentinel, never a real secret
+_DEMO_TOKEN: Final[str] = "demo-jwt-token"  # noqa: S105 · public sentinel, never a real secret
 _DEMO_TENANT: Final[str] = TENANT_ID
 _DEMO_MODE: Final[bool] = os.getenv("GHG_DEMO_MODE", "").lower() in ("1", "true", "yes")
 
@@ -132,7 +132,7 @@ def _enable_demo_session(username: str) -> None:
     """
     st.session_state[_TOKEN_KEY] = _DEMO_TOKEN
     st.session_state[_ROLE_KEY] = "esg_manager"
-    st.session_state[_USER_KEY] = username[:8]  # truncated — no full PII
+    st.session_state[_USER_KEY] = username[:8]  # truncated · no full PII
     st.session_state[_TENANT_KEY] = _DEMO_TENANT
 
 
@@ -191,7 +191,7 @@ def _do_login(username: str, password: str) -> bool:
             role_claim = claims.get("role")
             tenant_claim = claims.get("tenant_id") or claims.get("tenant")
             st.session_state[_ROLE_KEY] = str(role_claim) if role_claim else "esg_manager"
-            st.session_state[_USER_KEY] = username[:8]  # truncated — no full PII
+            st.session_state[_USER_KEY] = username[:8]  # truncated · no full PII
             st.session_state[_TENANT_KEY] = str(tenant_claim) if tenant_claim else _DEMO_TENANT
             return True
         if resp.status_code == 503 and _DEMO_MODE:

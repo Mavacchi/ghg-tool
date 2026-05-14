@@ -15,7 +15,7 @@ from ghg_tool.ui.streamlit_app.lib.constants import (
 )
 
 st.set_page_config(
-    page_title=f"Factor Catalog — {PRODUCT_NAME}",
+    page_title=f"Factor Catalog · {PRODUCT_NAME}",
     page_icon=page_icon(),
     layout="wide",
 )

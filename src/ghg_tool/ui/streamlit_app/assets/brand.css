@@ -1,195 +1,386 @@
 /* Carbontrace · Gresmalt brand chrome
  *
- * Injected at the top of every page by lib/brand.apply_brand_chrome().
- * Tweaks Streamlit's defaults to match the Gresmalt visual identity:
+ * Style intent: refined editorial. Generous whitespace, restrained
+ * motion, hairline dividers, tabular numerals on figures, single
+ * sans-serif (Inter) with stylistic alternates for a sharper read.
  *
- *   - Larger logo in the top-left header AND in the sidebar
- *   - Editorial typography: tighter headings, modest letter-spacing
- *   - Subtle card treatment for metrics (warm beige fill, brand accent
- *     left border)
- *   - More generous vertical rhythm so the page reads less "dense
- *     scientific dashboard" and more "premium ESG report"
+ * Scope: chrome only (logo, typography, sidebar, metric cards,
+ * dividers, expanders, buttons, alerts). Chart series and DQ severity
+ * badges keep their Okabe-Ito colours for accessibility.
  *
- * Targets only chrome (logo, headings, body, metric containers, sidebar,
- * dividers). Chart series + DQ severity badges remain Okabe-Ito.
- *
- * The selectors lean on Streamlit's documented [data-testid="..."]
- * attributes (stable in 1.35.x). If a future Streamlit release renames
- * one of these, this file degrades gracefully — the theme in
- * .streamlit/config.toml keeps the brand colours intact.
+ * Selector strategy: every rule targets Streamlit 1.35.x stable
+ * data-testid attributes. The whole stylesheet degrades to defaults
+ * if Streamlit renames any attribute upstream.
  */
 
 /* --------------------------------------------------------------------
- * Logo — top-left chrome
- * st.logo() renders into [data-testid="stLogo"]. Default height is
- * ~1.5rem; bumping to 3rem makes the wordmark legible without
- * dominating the toolbar.
+ * Typography stack: Inter for body, IBM Plex Mono for numerals.
+ * @import is cached after first hit; if the request is blocked the
+ * fallback system stack still renders cleanly.
  * ------------------------------------------------------------------ */
-[data-testid="stLogo"] {
-  height: 3rem !important;
-  max-height: 3rem !important;
-}
-[data-testid="stLogo"] img {
-  height: 3rem !important;
-  max-height: 3rem !important;
-  width: auto !important;
-}
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap');
 
-/* Sidebar logo block — see brand.render_sidebar_logo().
- * Constrains the inline <img> so the wordmark sits proportionate to
- * the sidebar width even on narrow displays. */
-.brand-sidebar-logo {
-  padding: 0.75rem 0.25rem 1rem 0.25rem;
-  margin-bottom: 0.5rem;
-  border-bottom: 1px solid #E9E2D8;  /* Gresmalt sand */
-}
-.brand-sidebar-logo img {
-  max-width: 180px;
-  width: 80%;
-  height: auto;
-  display: block;
-  margin: 0 auto;
+html, body,
+[data-testid="stAppViewContainer"],
+[data-testid="stSidebar"] {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-feature-settings: 'ss01', 'cv11', 'cv05';  /* sharper Inter glyphs */
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  color: #2a2a2a;
 }
 
 /* --------------------------------------------------------------------
- * Typography — editorial hierarchy
+ * Motion: gentle entry, brief, never bouncy. Respects reduced-motion.
  * ------------------------------------------------------------------ */
-[data-testid="stAppViewContainer"] h1,
-[data-testid="stAppViewContainer"] h2,
-[data-testid="stAppViewContainer"] h3 {
-  color: #202020;
-  letter-spacing: -0.01em;
+@keyframes brand-fade-up {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
 }
+@keyframes brand-fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+[data-testid="stMain"]    { animation: brand-fade-up 320ms cubic-bezier(0.22, 0.61, 0.36, 1) both; }
+[data-testid="stSidebar"] { animation: brand-fade-in 380ms ease-out both; }
+
+/* --------------------------------------------------------------------
+ * Logo: single instance, sized for editorial presence (one logo only).
+ * ------------------------------------------------------------------ */
+[data-testid="stLogo"] {
+  height: 3.25rem !important;
+  max-height: 3.25rem !important;
+  margin: 0.6rem 0 0.4rem 0 !important;
+}
+[data-testid="stLogo"] img {
+  height: 3.25rem !important;
+  max-height: 3.25rem !important;
+  width: auto !important;
+  max-width: 220px !important;
+}
+
+/* Hairline below the sidebar header so the logo reads as a header band. */
+[data-testid="stSidebarHeader"] {
+  padding-bottom: 0.85rem;
+  border-bottom: 1px solid #ECE5DC;
+  margin-bottom: 0.85rem;
+}
+
+/* --------------------------------------------------------------------
+ * Page header rhythm: subtle accent rule above h1 gives editorial weight.
+ * ------------------------------------------------------------------ */
+[data-testid="stAppViewContainer"] [data-testid="stMain"] > section {
+  padding-top: 1.5rem;
+}
+
 [data-testid="stAppViewContainer"] h1 {
-  font-weight: 600;
+  position: relative;
+  font-weight: 700;
   font-size: 2.1rem;
-  margin-bottom: 0.25rem;
+  line-height: 1.18;
+  letter-spacing: -0.02em;
+  color: #1a1a1a;
+  margin-top: 0;
+  margin-bottom: 0.35rem;
+  padding-top: 0.5rem;
 }
+[data-testid="stAppViewContainer"] h1::before {
+  content: "";
+  display: block;
+  width: 32px;
+  height: 2px;
+  background: #788B99;
+  margin-bottom: 1.1rem;
+  border-radius: 1px;
+}
+
 [data-testid="stAppViewContainer"] h2 {
   font-weight: 600;
-  font-size: 1.45rem;
+  font-size: 1.4rem;
+  line-height: 1.35;
+  letter-spacing: -0.015em;
+  color: #1a1a1a;
+  margin-top: 2rem;
+  margin-bottom: 0.6rem;
+}
+[data-testid="stAppViewContainer"] h3 {
+  font-weight: 600;
+  font-size: 0.78rem;
+  line-height: 1.4;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #788B99;
   margin-top: 1.5rem;
   margin-bottom: 0.5rem;
 }
-[data-testid="stAppViewContainer"] h3 {
-  font-weight: 600;
-  font-size: 1.1rem;
-  color: #788B99;  /* brand accent for tertiary headings only */
+
+/* Subtitle directly under h1 reads as caption. */
+[data-testid="stAppViewContainer"] h1 + [data-testid="stCaptionContainer"],
+[data-testid="stAppViewContainer"] h1 + p {
+  color: #6b6b6b;
+  font-size: 0.92rem;
+  letter-spacing: 0.005em;
+  margin-top: 0;
+  margin-bottom: 1.75rem;
 }
 
-/* Subheader directly under h1 (page subtitle) reads as a caption */
-[data-testid="stAppViewContainer"] h1 + p,
-[data-testid="stAppViewContainer"] h1 + [data-testid="stCaptionContainer"] {
-  color: #5a5a5a;
-  font-size: 0.95rem;
-  margin-top: 0.25rem;
-  margin-bottom: 1.5rem;
+/* Body / paragraph rhythm. */
+[data-testid="stAppViewContainer"] p {
+  line-height: 1.55;
+  color: #2a2a2a;
 }
 
 /* --------------------------------------------------------------------
- * Metric cards — subtle card treatment
+ * Metric cards: refined card with hairline border, tabular numerals,
+ * gentle lift on hover. Smaller, calmer labels; larger figure.
  * ------------------------------------------------------------------ */
 [data-testid="stMetric"] {
   background-color: #FFFFFF;
-  padding: 1rem 1.25rem;
-  border-radius: 6px;
-  border: 1px solid #E9E2D8;
-  border-left: 3px solid #788B99;
-  box-shadow: 0 1px 2px rgba(32, 32, 32, 0.03);
+  padding: 1.1rem 1.35rem 1rem 1.35rem;
+  border-radius: 8px;
+  border: 1px solid #ECE5DC;
+  box-shadow: 0 1px 2px rgba(26, 26, 26, 0.025);
+  transition: transform 220ms cubic-bezier(0.22, 0.61, 0.36, 1),
+              box-shadow 260ms ease,
+              border-color 220ms ease;
+  position: relative;
+  overflow: hidden;
 }
+/* Brand-accent hairline on the top edge instead of a left border. */
+[data-testid="stMetric"]::before {
+  content: "";
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 2px;
+  background: #788B99;
+  transform: scaleX(0);
+  transform-origin: left center;
+  transition: transform 320ms cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+[data-testid="stMetric"]:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 18px rgba(26, 26, 26, 0.06);
+  border-color: #DDD3C5;
+}
+[data-testid="stMetric"]:hover::before {
+  transform: scaleX(1);
+}
+
 [data-testid="stMetricLabel"] {
-  color: #5a5a5a;
-  font-size: 0.85rem;
+  color: #707070;
+  font-size: 0.72rem;
   font-weight: 500;
-  letter-spacing: 0.01em;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  margin-bottom: 0.25rem;
 }
 [data-testid="stMetricValue"] {
-  color: #202020;
-  font-weight: 600;
-  font-size: 1.6rem;
+  color: #1a1a1a;
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  font-weight: 500;
+  font-size: 1.65rem;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums lining-nums;
+  letter-spacing: -0.005em;
 }
 [data-testid="stMetricDelta"] {
-  font-size: 0.85rem;
+  font-size: 0.78rem;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums lining-nums;
+  margin-top: 0.25rem;
 }
 
 /* --------------------------------------------------------------------
- * Sidebar — warm beige with proper rhythm
+ * Sidebar: brand surface, hairline dividers, tighter form rhythm.
  * ------------------------------------------------------------------ */
 [data-testid="stSidebar"] {
-  border-right: 1px solid #E9E2D8;
-}
-[data-testid="stSidebar"] h1,
-[data-testid="stSidebar"] h2,
-[data-testid="stSidebar"] h3 {
-  color: #202020;
+  border-right: 1px solid #ECE5DC;
 }
 [data-testid="stSidebar"] [data-testid="stSelectbox"] label,
 [data-testid="stSidebar"] [data-testid="stMultiSelect"] label,
 [data-testid="stSidebar"] [data-testid="stTextInput"] label,
 [data-testid="stSidebar"] [data-testid="stNumberInput"] label,
-[data-testid="stSidebar"] [data-testid="stSlider"] label {
+[data-testid="stSidebar"] [data-testid="stSlider"] label,
+[data-testid="stSidebar"] [data-testid="stCheckbox"] label {
   font-weight: 500;
-  color: #202020;
+  color: #1a1a1a;
+  font-size: 0.85rem;
+  letter-spacing: 0.005em;
+  margin-bottom: 0.3rem;
 }
-
-/* Sidebar dividers a touch softer than default */
 [data-testid="stSidebar"] hr {
-  border-color: #E9E2D8;
-  margin: 1rem 0;
+  border: none;
+  border-top: 1px solid #ECE5DC;
+  margin: 1.1rem 0;
 }
 
 /* --------------------------------------------------------------------
- * Dividers + footer caption
+ * Form controls: brand-accent focus ring, smooth transitions.
+ * ------------------------------------------------------------------ */
+[data-baseweb="select"] > div,
+[data-baseweb="input"] > div,
+[data-baseweb="textarea"] > div {
+  border-radius: 6px !important;
+  transition: border-color 180ms ease, box-shadow 180ms ease;
+}
+[data-baseweb="select"] > div:focus-within,
+[data-baseweb="input"] > div:focus-within,
+[data-baseweb="textarea"] > div:focus-within {
+  border-color: #788B99 !important;
+  box-shadow: 0 0 0 3px rgba(120, 139, 153, 0.16) !important;
+}
+
+/* --------------------------------------------------------------------
+ * Buttons: refined hover state, accent for primary actions.
+ * ------------------------------------------------------------------ */
+[data-testid="stButton"] > button {
+  border-radius: 6px;
+  font-weight: 500;
+  font-size: 0.9rem;
+  letter-spacing: 0.005em;
+  padding: 0.45rem 1rem;
+  border: 1px solid #D8D8D8;
+  background-color: #FFFFFF;
+  color: #1a1a1a;
+  transition: background-color 180ms ease,
+              border-color 180ms ease,
+              color 180ms ease,
+              transform 120ms ease,
+              box-shadow 220ms ease;
+}
+[data-testid="stButton"] > button:hover {
+  border-color: #788B99;
+  color: #788B99;
+  background-color: rgba(120, 139, 153, 0.05);
+  box-shadow: 0 2px 6px rgba(120, 139, 153, 0.12);
+}
+[data-testid="stButton"] > button:active {
+  transform: translateY(1px);
+  box-shadow: none;
+}
+[data-testid="stButton"] > button[kind="primary"] {
+  background-color: #788B99;
+  border-color: #788B99;
+  color: #FFFFFF;
+}
+[data-testid="stButton"] > button[kind="primary"]:hover {
+  background-color: #5d7280;
+  border-color: #5d7280;
+  color: #FFFFFF;
+}
+
+/* --------------------------------------------------------------------
+ * Dividers: hairline, breathe.
  * ------------------------------------------------------------------ */
 [data-testid="stAppViewContainer"] hr {
   border: none;
-  border-top: 1px solid #E9E2D8;
-  margin: 1.25rem 0;
-}
-[data-testid="stCaptionContainer"] {
-  color: #707070;
-  font-size: 0.8rem;
-  line-height: 1.5;
+  border-top: 1px solid #ECE5DC;
+  margin: 1.75rem 0;
 }
 
 /* --------------------------------------------------------------------
- * Tabs (used on a few pages) — brand accent for selected tab
+ * Captions / footer.
  * ------------------------------------------------------------------ */
+[data-testid="stCaptionContainer"] {
+  color: #707070;
+  font-size: 0.78rem;
+  letter-spacing: 0.005em;
+  line-height: 1.55;
+}
+
+/* --------------------------------------------------------------------
+ * Tabs: hairline underline, brand accent on active.
+ * ------------------------------------------------------------------ */
+[data-testid="stTabs"] {
+  border-bottom: 1px solid #ECE5DC;
+}
+[data-testid="stTabs"] button {
+  font-weight: 500;
+  font-size: 0.9rem;
+  letter-spacing: 0.005em;
+  padding: 0.5rem 1rem;
+  transition: color 180ms ease, border-color 180ms ease;
+}
 [data-testid="stTabs"] button[aria-selected="true"] {
   color: #788B99 !important;
   border-bottom-color: #788B99 !important;
 }
 
 /* --------------------------------------------------------------------
- * Buttons — primary action in brand accent
- * ------------------------------------------------------------------ */
-[data-testid="stButton"] > button {
-  border-radius: 4px;
-  font-weight: 500;
-  letter-spacing: 0.01em;
-  border: 1px solid #C8C8C8;
-}
-[data-testid="stButton"] > button:hover {
-  border-color: #788B99;
-  color: #788B99;
-}
-
-/* --------------------------------------------------------------------
- * Expanders + alerts — softer borders
+ * Expanders + alerts: clean borders, calm motion.
  * ------------------------------------------------------------------ */
 [data-testid="stExpander"] {
-  border: 1px solid #E9E2D8;
-  border-radius: 6px;
+  border: 1px solid #ECE5DC;
+  border-radius: 8px;
   background-color: #FFFFFF;
+  transition: border-color 200ms ease, box-shadow 260ms ease;
+}
+[data-testid="stExpander"]:hover {
+  border-color: #DDD3C5;
+  box-shadow: 0 2px 6px rgba(26, 26, 26, 0.04);
 }
 [data-testid="stExpander"] summary {
   font-weight: 500;
+  padding: 0.65rem 0.9rem;
+  font-size: 0.9rem;
+}
+
+[data-testid="stAlert"] {
+  border-radius: 8px;
+  border: none;
+  box-shadow: 0 1px 2px rgba(26, 26, 26, 0.03);
+  font-size: 0.88rem;
 }
 
 /* --------------------------------------------------------------------
- * DataFrame containers — warm beige header row + readable padding
+ * Dataframes: rounded edges, refined borders, tabular numerals.
  * ------------------------------------------------------------------ */
 [data-testid="stDataFrame"] {
-  border-radius: 4px;
+  border-radius: 6px;
   overflow: hidden;
+  border: 1px solid #ECE5DC;
+}
+[data-testid="stDataFrame"] table {
+  font-variant-numeric: tabular-nums lining-nums;
+  font-size: 0.85rem;
+}
+
+/* --------------------------------------------------------------------
+ * Toolbar (Streamlit menu/help/share): low visual weight.
+ * ------------------------------------------------------------------ */
+[data-testid="stToolbar"] {
+  opacity: 0.55;
+  transition: opacity 220ms ease;
+}
+[data-testid="stToolbar"]:hover {
+  opacity: 1;
+}
+
+/* --------------------------------------------------------------------
+ * Scrollbars: thin, brand-coloured.
+ * ------------------------------------------------------------------ */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #DDD3C5;
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #C8BCA8;
+}
+
+/* --------------------------------------------------------------------
+ * Reduced motion preference.
+ * ------------------------------------------------------------------ */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }

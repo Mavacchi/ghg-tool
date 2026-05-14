@@ -25,7 +25,7 @@ from ghg_tool.ui.streamlit_app.lib.constants import (
 )
 
 st.set_page_config(
-    page_title=f"Intensity Metrics — {PRODUCT_NAME}",
+    page_title=f"Intensity Metrics · {PRODUCT_NAME}",
     page_icon=page_icon(),
     layout="wide",
 )
@@ -183,7 +183,7 @@ _SCOPE_COLORS: dict[str, str] = {
 }
 
 y_label: str = _DENOM_UNIT_LABEL.get(denominator_type, "tCO2e / unit")
-chart_title: str = f"{_('chart_title_intensity', lang)} — {denom_label} ({gwp_set})"
+chart_title: str = f"{_('chart_title_intensity', lang)} · {denom_label} ({gwp_set})"
 
 fig = px.line(
     df,

@@ -19,7 +19,7 @@ from ghg_tool.ui.streamlit_app.lib.constants import (
 )
 
 st.set_page_config(
-    page_title=f"Drill-down — {PRODUCT_NAME}",
+    page_title=f"Drill-down · {PRODUCT_NAME}",
     page_icon=page_icon(),
     layout="wide",
 )
@@ -127,7 +127,7 @@ else:
             y="tco2e",
             color="sub_scope",
             facet_col="scope" if "scope" in df.columns else None,
-            title=f"{_('chart_title_stacked', lang)} — {selected_year}",
+            title=f"{_('chart_title_stacked', lang)} · {selected_year}",
             labels={
                 "tco2e": "tCO2e",
                 "codice_sito": _("table_site", lang),

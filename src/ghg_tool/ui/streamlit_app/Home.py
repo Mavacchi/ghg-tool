@@ -25,7 +25,7 @@ from ghg_tool.ui.streamlit_app.lib.constants import (
 )
 
 st.set_page_config(
-    page_title=f"{PRODUCT_NAME} — {COMPANY_SHORT}",
+    page_title=f"{PRODUCT_NAME} · {COMPANY_SHORT}",
     page_icon=page_icon(),
     layout="wide",
     initial_sidebar_state="expanded",
@@ -94,7 +94,7 @@ require_auth(lang)
 # ---------------------------------------------------------------------------
 st.title(f"{PRODUCT_NAME} · {COMPANY_SHORT}")
 st.caption(COMPANY_NAME)
-st.subheader(f"{_('nav_home', lang)} — {selected_year}")
+st.subheader(f"{_('nav_home', lang)} · {selected_year}")
 
 # Demo-mode banner (visible only when GHG_DEMO_MODE is enabled and the
 # session is currently using a demo token, so users never confuse the
@@ -216,7 +216,7 @@ if kpis:
             x="scope_label",
             y="tco2e",
             color="sub_scope",
-            title=_("chart_title_scope123", lang) + f" — {selected_year}",
+            title=_("chart_title_scope123", lang) + f" · {selected_year}",
             labels={"tco2e": "tCO2e", "scope_label": "Scope", "sub_scope": "Sub-scope"},
             color_discrete_sequence=[VERMILION, BLUE, BLUISH_GREEN, ORANGE],
             custom_data=["factor_source", "factor_version", "gwp_set",
