@@ -173,5 +173,17 @@
   "admin_col_email": "Email",
   "admin_col_role_code": "Role",
   "admin_col_is_active": "Active",
-  "admin_audit_note": "All user creations are tracked in calc.audit_log."
+  "admin_audit_note": "All user creations are tracked in calc.audit_log.",
+  "trend_chart_title": "Total emissions trend · last 5 years (Scope 1 + 2 LB + 3)",
+  "drill_through": "Explore →",
+  "hotspot_tab_title": "Scope 3 Hotspot",
+  "hotspot_table_rank": "Rank",
+  "hotspot_table_category": "Category",
+  "hotspot_table_pct": "% Scope 3",
+  "hotspot_table_cumulative": "Cumulative %",
+  "hotspot_table_yoy": "YoY Δ %",
+  "hotspot_table_flag": "Flag",
+  "hotspot_high_concentration": "Top 5 categories >80%: concentration risk - mitigation required.",
+  "hotspot_low_concentration": "Balanced distribution: no concentration risk on the top 5 categories.",
+  "hotspot_no_data": "No Scope 3 data available for the selected year."
 }

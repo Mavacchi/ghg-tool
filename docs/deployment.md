@@ -1,331 +1,371 @@
-# Deployment Runbook — GHG Accounting Tool v1
+# Carbontrace — Production Deployment Runbook
 
-**Version**: 1.0.0
-**Date**: 2026-05-14
-**Status**: APPROVED for production use — Security APPROVED (Phase 8), Compliance APPROVED (Phase 8)
-**Closes**: SEC-ADV-008, SEC-ADV-009, SEC-ADV-010
+**Product**: Carbontrace GHG Accounting Tool  
+**Tenant**: Gruppo Ceramiche Gresmalt S.p.A.  
+**Version**: 1.0.0  
+**Date**: 2026-05-14  
+**Standards**: CSRD Directive 2022/2464/EU, ESRS E1, ISAE 3000
 
-This document is the authoritative production deployment runbook. It must be read in full
-by the operator before any production deployment. Sections marked **RISK** describe
-acknowledged security trade-offs that have been reviewed and accepted for v1 with explicit
-v2 remediation roadmap items.
+> This runbook covers production deployment only. For local development or
+> demo usage, follow `docker-compose.quickstart.yml`. That file contains the
+> comment "DO NOT use this file in production" and ships a named test JWT
+> secret (`quickstart-only-jwt-secret-min-32-chars-not-prod`) that must never
+> appear in any production configuration.
 
 ---
 
-## Prerequisites
+## 1. Architecture
 
-| Component | Minimum version | Notes |
+```mermaid
+graph TD
+    Browser["Browser / User Agent"]
+    TLS["TLS Terminator\n(nginx / Caddy / ALB)\nport 443"]
+    Streamlit["Streamlit UI container\nport 8501 — cluster-internal only"]
+    API["FastAPI / uvicorn container\nport 8000 — cluster-internal only"]
+    DB["Managed PostgreSQL 15+\nschemas: ref · raw · calc · ops\nPITR enabled"]
+    Vault["Secrets Manager\n(Vault / AWS SM / Azure KV)"]
+    Redis["Redis 7+ (optional)\nproduction rate-limiter\nslowapi upgrade path"]
+    LogAgg["Log Aggregator\n(CloudWatch / Loki / Splunk)"]
+
+    Browser -->|"HTTPS :443"| TLS
+    TLS -->|"HTTP :8501 cluster-internal"| Streamlit
+    TLS -->|"HTTP :8000 direct API calls"| API
+    Streamlit -->|"HTTP :8000 cluster-internal"| API
+    API -->|"asyncpg / psycopg"| DB
+    API -.->|"optional"| Redis
+    Vault -.->|"inject secrets at startup"| API
+    API -->|"structured JSON logs"| LogAgg
+    Streamlit -->|"structured JSON logs"| LogAgg
+```
+
+**Key architectural decisions:**
+
+- The `app` container (uvicorn) listens on plain HTTP `0.0.0.0:8000` inside
+  the cluster. TLS is terminated exclusively at the edge.
+- The `streamlit` container listens on plain HTTP `0.0.0.0:8501` inside the
+  cluster and must NOT be exposed directly to the internet; it is only
+  reachable through the TLS terminator.
+- The API injects `Strict-Transport-Security`, `X-Frame-Options`,
+  `Content-Security-Policy`, and `Referrer-Policy` on every response via
+  `SecurityHeadersMiddleware` (SEC-P1-002, `src/ghg_tool/api/middleware/security_headers.py`).
+  The TLS terminator's HSTS preload directive takes precedence in the
+  outermost response.
+
+---
+
+## 2. Required Infrastructure
+
+| Component | Minimum spec | Notes |
 |---|---|---|
-| PostgreSQL | 15+ | 15 is required for `current_setting(..., true)` (missing_ok) in RLS and security-barrier view syntax used in M4/M7 migrations |
-| Python | 3.11+ | Pinned in `pyproject.toml`; do not deploy with 3.10 or earlier |
-| Docker | 24+ | Docker Compose v2 syntax used in `docker-compose.yml` |
-| Reverse proxy | nginx 1.24+ or Caddy 2.7+ | TLS termination MUST occur at the proxy; do NOT terminate TLS in the FastAPI application |
-| RAM | >= 2 GB available to the application container | ETL batch processing peak; PDF rendering via WeasyPrint |
-| Persistent volume | >= 20 GB for PostgreSQL data directory | Emission records + factor catalog + audit log for 10-year retention |
+| PostgreSQL | 15+ managed | Point-in-time recovery (PITR) enabled; WAL archiving to object storage. See `docs/disaster_recovery.md`. |
+| Container runtime | Kubernetes 1.27+ or Docker 24+ on a VM | `docker-compose.yml` is the canonical reference. Compose v2 syntax. |
+| TLS terminator | nginx 1.25+, Caddy 2.7+, or AWS ALB | App itself speaks plain HTTP inside the cluster. |
+| Secrets manager | HashiCorp Vault, AWS Secrets Manager, or Azure Key Vault | All secrets injected as env vars at container startup — never baked into the image. |
+| Redis | 7+ (optional) | Production upgrade path for multi-replica rate limiting via `slowapi`. The current in-process `RateLimitMiddleware` (`src/ghg_tool/api/middleware/rate_limit.py`) is not shared across replicas. |
+| Log aggregator | CloudWatch, Loki, Splunk, or equivalent | Structured JSON. Container logs must be shipped off-host before local rotation. |
+| Object storage | S3 / Azure Blob / GCS | WAL archive destination and logical backup storage. Retention per `docs/disaster_recovery.md`. |
 
 ---
 
-## Environment Variables
+## 3. Required Environment Variables
 
-All variables must be set in the deployment environment (Docker secrets, `.env` file,
-or cloud secret manager). Variables marked **REQUIRED** will cause a startup error or
-insecure behaviour if absent.
+All secrets must be injected from the secrets manager at container startup.
+No secret may be committed to version control or baked into the image.
 
-| Variable | Required | Default | Description |
+| Variable | Example / Required value | Source | Notes |
 |---|---|---|---|
-| `GHG_JWT_SECRET` | **REQUIRED** | none | JWT signing secret for HS256. Must be >= 32 characters. The application raises `RuntimeError` at startup if the secret is shorter (SEC-P0-001 enforcement). Generate with: `python -c "import secrets; print(secrets.token_hex(32))"` |
-| `GHG_ENVIRONMENT` | **REQUIRED** | none | Runtime environment: `production`, `staging`, `development`, or `test`. Controls demo-mode defaults, error verbosity, and CORS policy. Must be `production` in production deployments. |
-| `DATABASE_URL` | **REQUIRED** | none | Synchronous SQLAlchemy URL for Alembic migrations: `postgresql+psycopg2://ghg_app:<password>@<host>:5432/ghg` |
-| `SQLALCHEMY_URL` | **REQUIRED** | none | Synchronous SQLAlchemy URL for the application: `postgresql+psycopg2://ghg_app:<password>@<host>:5432/ghg` |
-| `SQLALCHEMY_ASYNC_URL` | **REQUIRED** | none | Async SQLAlchemy URL for FastAPI async endpoints: `postgresql+asyncpg://ghg_app:<password>@<host>:5432/ghg` |
-| `GHG_CORS_ORIGINS` | Recommended | `""` (empty — no CORS) | Comma-separated list of allowed origins for CORS, e.g. `https://dashboard.example.com`. Empty string disables CORS. See SEC-ADV-009 note below. |
-| `GHG_DEMO_MODE` | Optional | `false` | When `true`, enables demo fixtures and relaxed seed data. Must be `false` in production. |
-| `GHG_API_BASE_URL` | Required for Streamlit | `http://localhost:8000` | Base URL of the FastAPI service, as seen by the Streamlit container. In production: `https://api.example.com` |
-| `GHG_TENANT_ID` | Required for Streamlit | none | UUID of the default tenant used by the Streamlit session GUC middleware. Must match the `ref.tenants.id` seeded during database setup. |
+| `GHG_JWT_SECRET` | 64 hex chars from CSPRNG | Secrets manager | Min 32 chars enforced at startup by `_load_jwt_secret()` in `src/ghg_tool/infrastructure/security/jwt.py` — app raises `RuntimeError` and refuses to start if absent or too short in production. |
+| `GHG_JWT_ALGORITHM` | `HS256` (default) · `HS512` (recommended) · `RS256` (highest assurance) | Secrets manager or config | For RS256 also set `GHG_JWT_PUBLIC_KEY_PATH` and `GHG_JWT_PRIVATE_KEY_PATH` (PEM files mounted as secrets). `alg=none` is explicitly rejected at decode time (SG-01). |
+| `GHG_JWT_PUBLIC_KEY_PATH` | `/run/secrets/jwt_public.pem` | Secret mount | Required only when `GHG_JWT_ALGORITHM=RS256`. |
+| `GHG_JWT_PRIVATE_KEY_PATH` | `/run/secrets/jwt_private.pem` | Secret mount | Required only when `GHG_JWT_ALGORITHM=RS256`. |
+| `GHG_JWT_ISSUER` | `https://carbontrace.gresmalt.it` | Config | Optional; enables `iss` claim validation on decode. |
+| `GHG_JWT_AUDIENCE` | `carbontrace-api` | Config | Optional; enables `aud` claim validation on decode. |
+| `GHG_ENVIRONMENT` | `production` | Config | Must be `production`: disables `/docs` and `/redoc` Swagger UI (`main.py` line 158–159); blocks demo-seed auto-seeding; enforces JWT secret presence at startup. |
+| `GHG_CORS_ORIGINS` | `https://dashboard.gresmalt.it` | Config | Comma-separated HTTPS origins. Must NOT contain `*`. Wildcard CORS is explicitly forbidden (SEC-P1-001; see `main.py` comment on `_CORS_ORIGINS_RAW`). |
+| `GHG_DEMO_MODE` | Must be unset or `false` | Config | When `GHG_ENVIRONMENT=production` the app skips demo-seeding regardless, but this variable must still be absent or `false` to prevent ambiguity. |
+| `SQLALCHEMY_URL` | `postgresql+psycopg://ghg_app:***@db.internal:5432/ghg_tool` | Secrets manager | Sync DSN used by Alembic migrations and `scripts/create_user.py`. |
+| `SQLALCHEMY_ASYNC_URL` | `postgresql+asyncpg://ghg_app:***@db.internal:5432/ghg_tool` | Secrets manager | Async DSN used by the FastAPI app at runtime. |
+| `DATABASE_URL` | Same as `SQLALCHEMY_URL` | Secrets manager | Preferred env var consumed by `scripts/create_user.py` (`_dsn()` function). |
+| `POSTGRES_PASSWORD` | Strong random password | Secrets manager | Used by the `db` service if running self-hosted Postgres via Compose. Not needed when connecting to a managed service via full DSN. |
+| `GHG_COMPANY_NAME` | `Gresmalt` | Config | Tenant branding displayed in reports. |
+| `GHG_TENANT_ID` | UUID of the `CERAMIC_TILE_CO` tenant row | Config | Populated by migrations; retrieve via `SELECT id FROM ref.tenants WHERE code='CERAMIC_TILE_CO'`. |
+| `GHG_SITES` | `IANO,VIANO,VIANO_GARGOLA,CASALGRANDE,FIORANO,SASSUOLO,FRASSINORO` | Config | All 7 operational sites in scope (see `docs/methodology.md` Section 1). |
+| `GHG_LOG_LEVEL` | `INFO` | Config | `DEBUG` must not be set in production; it may log sensitive request data. |
+| `GHG_ACCESS_TOKEN_TTL` | `3600` (1 h default) | Config | Access token TTL in seconds (NFR-05). |
+| `GHG_REFRESH_TOKEN_TTL` | `86400` (24 h default) | Config | Refresh token TTL in seconds (NFR-05). |
 
 ---
 
-## Database Setup
+## 4. TLS Termination
 
-### 1. Create the application role and database
-
-Connect as a PostgreSQL superuser and run:
-
-```sql
-CREATE ROLE ghg_app LOGIN PASSWORD '<strong-password>';
-CREATE DATABASE ghg OWNER ghg_app;
-```
-
-### 2. Run Alembic migrations
-
-```bash
-# From the repository root, with DATABASE_URL set:
-alembic upgrade head
-```
-
-Migrations apply in sequence: M0 (base schema + schemas + shared mutation guard) through
-M7 (security-barrier views). Each migration is idempotent. Running `alembic upgrade head`
-twice is safe.
-
-Expected final state after `alembic upgrade head`:
-
-| Migration | Description |
-|---|---|
-| 0001_M0 | Schemas (raw, ref, calc, mv, ops), extensions, shared mutation guard function, ref.tenants, ref.roles, ref.users, gwp_sets (AR6+AR5 seeded) |
-| 0002_M1 | calc.emissions_consolidated with bitemporal columns, `trg_emissions_deny_mutation` trigger, `calc.fn_emit_correction()` stored procedure |
-| 0003_M2 | Raw staging tables (raw.scope1_ingestions, raw.scope2_ingestions, raw.scope3_ingestions) |
-| 0004_M3 | calc.dq_findings, calc.dlq, calc.audit_log — all append-only |
-| 0005_M4 | PostgreSQL Row-Level Security policies on raw.* and calc.* tables; GUC `app.tenant_id` pattern |
-| 0006_M5 | ref.factor_catalog schema; go_certificate_evidence table |
-| 0007_M6 | Materialised views calc.mv_kpi_summary and calc.mv_intensity_metrics |
-| 0008_M7 | Security-barrier views calc.v_kpi_summary and calc.v_intensity_metrics; REVOKE direct MV access from ghg_app |
-
-### 3. Grant setup verification
-
-After migrations, verify:
-
-```sql
--- Application role must have SELECT on views but NOT on underlying MVs
-SELECT has_table_privilege('ghg_app', 'calc.v_kpi_summary', 'SELECT');       -- must be true
-SELECT has_table_privilege('ghg_app', 'calc.mv_kpi_summary', 'SELECT');      -- must be false
-SELECT has_table_privilege('ghg_app', 'calc.v_intensity_metrics', 'SELECT'); -- must be true
-SELECT has_table_privilege('ghg_app', 'calc.mv_intensity_metrics', 'SELECT'); -- must be false
-```
-
-### 4. Materialised view refresh schedule
-
-The KPI and intensity materialised views must be refreshed periodically so that the
-security-barrier views surface current data. Schedule a concurrent refresh:
-
-```sql
--- Run as the superuser or migration role (NOT as ghg_app, which lacks MV access)
-REFRESH MATERIALIZED VIEW CONCURRENTLY calc.mv_kpi_summary;
-REFRESH MATERIALIZED VIEW CONCURRENTLY calc.mv_intensity_metrics;
-```
-
-Recommended schedule: **hourly** via `cron` or `pg_cron`. Example crontab entry:
-
-```
-0 * * * * psql -U postgres -d ghg -c "REFRESH MATERIALIZED VIEW CONCURRENTLY calc.mv_kpi_summary; REFRESH MATERIALIZED VIEW CONCURRENTLY calc.mv_intensity_metrics;"
-```
-
-Alert if refresh latency exceeds 5 minutes (see Monitoring section).
-
----
-
-## TLS Termination
-
-TLS must be terminated at the reverse proxy. The FastAPI application (`uvicorn`) listens
-on HTTP internally and must never be exposed directly on port 443.
-
-**Recommended nginx configuration excerpt**:
+The application does not terminate TLS. All HTTPS must be handled at the
+edge. Below is a reference nginx configuration for a single-host VM
+deployment. For AWS, use an ALB with an ACM certificate and a target group
+pointing at port 8000.
 
 ```nginx
+# /etc/nginx/sites-available/carbontrace
+
+# Redirect all HTTP to HTTPS
+server {
+    listen 80;
+    listen [::]:80;
+    server_name dashboard.gresmalt.it;
+    return 301 https://$host$request_uri;
+}
+
 server {
     listen 443 ssl http2;
-    server_name api.example.com;
+    listen [::]:443 ssl http2;
+    server_name dashboard.gresmalt.it;
 
-    ssl_certificate     /etc/ssl/certs/api.example.com.crt;
-    ssl_certificate_key /etc/ssl/private/api.example.com.key;
-    ssl_protocols       TLSv1.2 TLSv1.3;
-    ssl_ciphers         HIGH:!aNULL:!MD5;
+    # Certificate (use Certbot / ACME or your PKI)
+    ssl_certificate     /etc/ssl/certs/gresmalt.crt;
+    ssl_certificate_key /etc/ssl/private/gresmalt.key;
 
-    location / {
-        proxy_pass         http://ghg_api:8000;
+    # Modern cipher suite — TLS 1.2 minimum; TLS 1.3 preferred
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers 'ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:'
+                'ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:'
+                'ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305';
+    ssl_prefer_server_ciphers off;
+    ssl_session_cache shared:SSL:10m;
+    ssl_session_timeout 1d;
+    ssl_session_tickets off;
+
+    # OCSP stapling
+    ssl_stapling on;
+    ssl_stapling_verify on;
+
+    # HSTS with preload (1 year — submit to https://hstspreload.org when ready)
+    add_header Strict-Transport-Security
+        "max-age=31536000; includeSubDomains; preload" always;
+
+    # Direct API calls
+    location /api/ {
+        proxy_pass         http://127.0.0.1:8000;
         proxy_set_header   Host $host;
         proxy_set_header   X-Real-IP $remote_addr;
         proxy_set_header   X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header   X-Forwarded-Proto $scheme;
+        proxy_set_header   X-Forwarded-Proto https;
+        proxy_read_timeout 60s;
+    }
+
+    # Streamlit dashboard (WebSocket upgrade required for Streamlit long-poll)
+    location / {
+        proxy_pass         http://127.0.0.1:8501;
+        proxy_http_version 1.1;
+        proxy_set_header   Upgrade $http_upgrade;
+        proxy_set_header   Connection "upgrade";
+        proxy_set_header   Host $host;
+        proxy_set_header   X-Real-IP $remote_addr;
+        proxy_set_header   X-Forwarded-Proto https;
+        proxy_read_timeout 86400s;
+    }
+
+    # Healthcheck endpoint (accessible by load balancer, no auth required)
+    location = /healthz {
+        proxy_pass http://127.0.0.1:8000/healthz;
+        access_log off;
     }
 }
-
-server {
-    listen 80;
-    server_name api.example.com;
-    return 301 https://$host$request_uri;
-}
 ```
 
 ---
 
-## Acknowledged Risks for Production
+## 5. Pre-Deployment Checklist
 
-The following risks are acknowledged, documented, and accepted for v1 deployment.
-Each has an explicit v2 remediation item in `docs/roadmap.md`.
+Complete every item before routing production traffic. Leave no item
+unchecked — partial completion is not acceptable for a CSRD-grade emissions
+ledger.
 
-### SEC-ADV-008 — Rate limiter is in-process (per pod)
+- [ ] `GHG_JWT_SECRET` sourced from secrets manager. Not committed to any
+  file in the repository. Not equal to `quickstart-only-jwt-secret-min-32-chars-not-prod`
+  or `test-only-jwt-secret-min-32-chars-not-for-prod-xx`.
+- [ ] `GHG_JWT_SECRET` is at least 32 characters (enforced at startup, but
+  verify independently: `echo -n "$GHG_JWT_SECRET" | wc -c`).
+- [ ] `GHG_ENVIRONMENT=production` set. Verify by confirming `/docs` returns
+  HTTP 404 after starting the app.
+- [ ] `GHG_DEMO_MODE` is unset or `false`.
+- [ ] `GHG_CORS_ORIGINS` is set to one or more HTTPS origins and does NOT
+  contain `*`.
+- [ ] All 10 Alembic migrations (M0 through M9) applied. Run
+  `alembic current` inside the container and confirm the output ends with
+  `(head)`.
+- [ ] At least one user with role `esg_manager` seeded via
+  `scripts/create_user.py` (see Step 4 in Section 6).
+- [ ] Backup schedule active and last backup verified (see
+  `docs/disaster_recovery.md`).
+- [ ] Log aggregation wired: container stdout/stderr reaching off-host store
+  before local log rotation.
+- [ ] `/healthz` endpoint wired to load balancer / container orchestrator
+  healthcheck.
+- [ ] TLS certificate valid. `curl -I https://dashboard.gresmalt.it/healthz`
+  shows HTTP 200 and `Strict-Transport-Security` header.
+- [ ] PostgreSQL PITR (WAL archiving) confirmed active on the managed DB.
+- [ ] Encryption at rest enabled on the Postgres volume or managed DB instance.
+- [ ] `POSTGRES_PASSWORD` (if self-hosted) is a strong random value, not
+  `changeme`.
 
-**Risk description**: The 5-per-minute login rate limit (SEC-P1-003) is implemented using
-slowapi with an in-memory store. In a single-worker, single-replica deployment this
-functions correctly. In a multi-replica (horizontal scale) deployment, each pod maintains
-an independent counter: a credential-stuffer can reach 5 x N login attempts per minute
-where N is the replica count, without triggering any single pod's limit.
+---
 
-**Affected component**: `src/ghg_tool/api/middleware/rate_limit.py`
+## 6. First-Time Deployment (Step-by-Step)
 
-**Severity for v1 single-worker deployment**: Low. The v1 deployment profile is a
-single-worker Docker container behind a reverse proxy. The risk is not realised in this
-topology.
+### Step 1 — Provision PostgreSQL 15+
 
-**Mitigation for multi-replica deployment**: Either (a) configure sticky sessions at the
-load balancer so that all requests from a given source IP route to the same pod, or
-(b) migrate the slowapi storage backend to Redis. Option (b) is the correct long-term fix.
+Use a managed service (AWS RDS for PostgreSQL, Azure Database for PostgreSQL
+Flexible Server, or GCP Cloud SQL for PostgreSQL) with the following settings:
 
-**v2 roadmap**: SEC-ADV-008 is tracked as a v2 item in `docs/roadmap.md`. Before horizontal
-scaling is enabled, Redis-backed rate limiting must be deployed.
+- Engine version: PostgreSQL 15 or later.
+- Point-in-time recovery: enabled (WAL archiving to object storage).
+- Encryption at rest: enabled.
+- Automated backups: nightly logical dump + continuous WAL (5-minute granularity
+  or finer). See `docs/disaster_recovery.md` for retention settings.
+- Database name: `ghg_tool`, application user: `ghg_app`.
 
-**Operator action required**: If the deployment topology includes more than one API replica,
-implement sticky sessions at the load balancer **before** enabling multi-replica mode.
-Document the decision in the operations runbook.
+### Step 2 — Pull or build the runtime image
 
-### SEC-ADV-009 — CORS allow_credentials=False default
+```bash
+# From a registry (preferred for production):
+docker pull ghg-tool:1.0.0
 
-**Risk description**: The application's CORS configuration defaults to
-`allow_credentials=False`. All current authorisation flows use the `Authorization: Bearer
-<token>` header, which does not require `allow_credentials=True`. This is correct for the
-current design.
+# Or build from the repository root:
+docker build --target runtime -t ghg-tool:1.0.0 .
+```
 
-**If cookie-based authentication is ever enabled**: Setting `allow_credentials=True` in
-the CORS middleware is required for cookies to be sent cross-origin. However, the
-application has **no CSRF middleware** in v1. Enabling `allow_credentials=True` without
-adding CSRF protection creates a Cross-Site Request Forgery vulnerability.
+The `Dockerfile` uses a two-stage build (`builder` → `runtime`). The runtime
+image runs as non-root user `ghg` (created at build time, NFR-21) and exposes
+port 8000. No build tools or dev dependencies are present in the runtime
+image.
 
-**Operator action required**: Do not enable cookie-based authentication without
-simultaneously adding CSRF middleware (e.g. `starlette-csrf`) and explicitly documenting
-the decision. The `GHG_CORS_ORIGINS` variable controls the origins whitelist. An empty
-value disables all CORS.
+### Step 3 — Apply Alembic migrations
 
-**v2 roadmap**: If cookie-based auth is adopted (e.g. for same-site SSO integration),
-CSRF protection must be added as a simultaneous change.
+Run the migration one-shot against the production database before starting the
+application. The `migrate` service in `docker-compose.yml` does this
+automatically; for a bare container run:
 
-### SEC-ADV-010 — Content Security Policy and Streamlit dashboard
+```bash
+docker run --rm \
+  -e SQLALCHEMY_URL="postgresql+psycopg://ghg_app:<password>@<host>:5432/ghg_tool" \
+  ghg-tool:1.0.0 \
+  python -m alembic upgrade head
+```
 
-**Risk description**: The API applies a strict `Content-Security-Policy: default-src
-'self'` header. The Streamlit dashboard uses Plotly for interactive charts, which requires
-`script-src 'unsafe-inline'` and `style-src 'unsafe-inline'` to function correctly. These
-directives are incompatible with a strict CSP.
+Verify with `alembic current` — output must end with `(head)`. All 10
+migrations (M0–M9) seed reference data: tenants, roles, sites, emission factor
+catalog, and GWP values. Do not skip any migration.
 
-**Affected scope**: In v1 the FastAPI API and the Streamlit dashboard are served on
-**different origins** (different ports or different hostnames). The CSP header on the API
-does not govern the Streamlit origin. However, if the two components are ever served under
-the same origin or the dashboard is embedded via an iframe on a controlled page, this
-creates a conflict.
+### Step 4 — Seed the initial admin user
 
-**Operator action required before rolling out the dashboard**:
+```bash
+docker run --rm -it \
+  -e DATABASE_URL="postgresql+psycopg://ghg_app:<password>@<host>:5432/ghg_tool" \
+  ghg-tool:1.0.0 \
+  python -m scripts.create_user \
+    --username admin@gresmalt.it \
+    --email admin@gresmalt.it \
+    --role esg_manager \
+    --tenant-code CERAMIC_TILE_CO
+```
 
-1. Verify end-to-end with browser developer tools that Plotly charts render correctly under
-   the deployment CSP.
-2. If the dashboard is served under the same origin as the API, add a path-specific CSP
-   relaxation for `/dashboard/*`:
+The script reads the password from stdin (interactive double-prompt) or from
+`GHG_NEW_USER_PASSWORD` env var; the password never appears in shell history
+or process listings. Valid roles: `data_steward`, `esg_manager`, `auditor`.
+
+Exit codes: 0 = created, 2 = already exists (safe to ignore on re-run), 3 =
+tenant or role not found (means migrations were not applied).
+
+### Step 5 — Start application containers
+
+```bash
+docker compose \
+  --env-file /run/secrets/carbontrace.env \
+  --profile app \
+  up -d
+```
+
+The `--profile app` flag is required because the `app` service is
+profile-gated in `docker-compose.yml` (the quickstart override removes this
+gate for development). The `streamlit` service starts after `app` is healthy.
+
+### Step 6 — Verify the healthcheck
+
+```bash
+curl -f https://dashboard.gresmalt.it/healthz
+# Expected: HTTP 200
+```
+
+The `Dockerfile` HEALTHCHECK polls `http://localhost:8000/healthz` every 30 s
+with a 5 s timeout, a 10 s start period, and 3 retries before marking the
+container unhealthy.
+
+### Step 7 — Run the smoke test
+
+1. Open `https://dashboard.gresmalt.it` in a browser.
+2. Log in with the `esg_manager` user created in Step 4.
+3. Navigate to the KPI dashboard; confirm Scope 1 / Scope 2 totals render.
+4. Call `GET /api/v1/emissions/scope1?year=2024` with a Bearer token; verify
+   a JSON response with emission records for the 7 Gresmalt sites.
+5. Confirm `GET /docs` returns HTTP 404 (Swagger UI disabled in production).
+6. Confirm `curl -I https://dashboard.gresmalt.it` shows the
+   `Strict-Transport-Security` header.
+
+---
+
+## 7. Rolling Update Procedure
+
+1. Build and tag the new image: `ghg-tool:<new_version>`.
+2. Push to the container registry.
+3. Apply database migrations for the new version **before** updating running
+   containers. Migrations that add columns are backward-compatible — the old
+   code ignores unknown columns:
+   ```bash
+   docker run --rm \
+     -e SQLALCHEMY_URL="postgresql+psycopg://ghg_app:***@<host>:5432/ghg_tool" \
+     ghg-tool:<new_version> \
+     python -m alembic upgrade head
    ```
-   Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'
-   ```
-3. Document the relaxation decision in this runbook before enabling it.
-
-**v2 roadmap**: Evaluate migrating interactive charts to a CSP-compatible rendering path
-(e.g. server-side SVG rendering) to eliminate `unsafe-inline` requirements.
-
----
-
-## Backup and Restore
-
-### Backup policy
-
-```bash
-# Nightly full logical backup — run as superuser or backup role
-pg_dump -U postgres -Fc -f /backups/ghg_$(date +%Y%m%d).dump ghg
-
-# Retain 30 days of daily backups; purge older files
-find /backups/ -name "ghg_*.dump" -mtime +30 -delete
-```
-
-Backup files must be encrypted at rest (AES-256) using the cloud provider's storage
-encryption or `gpg --symmetric` before transfer off-site. The encryption key must be
-stored separately from the backup files (key management system or offline vault).
-
-### Restore procedure
-
-**Standard restore** (to a clean PostgreSQL 15 instance):
-
-```bash
-# 1. Create the ghg_app role and ghg database (see Database Setup above)
-# 2. Restore
-pg_restore -U postgres -d ghg --no-owner --role=ghg_app /backups/ghg_YYYYMMDD.dump
-# 3. Re-run migrations to ensure trigger and view state is current
-alembic upgrade head
-```
-
-### Immutable audit log restoration
-
-The append-only audit trail (`calc.audit_log`, `calc.emissions_consolidated`,
-`calc.dq_findings`, `calc.dlq`) cannot be restored by UPDATE. If a partial restore is
-required after data corruption:
-
-1. Restore the backup to a **new tenant_id** space (insert a new row in `ref.tenants`
-   with a different `code` value).
-2. Import the affected rows with the new `tenant_id` as INSERT statements.
-3. Do not re-link the restored rows to the original `tenant_id` — this would create
-   duplicate natural-key conflicts in the active partition.
-4. Retain both the original (potentially corrupted) and restored rows; the ISAE 3000
-   assurance provider must be notified of any restoration event for chain-of-custody
-   continuity.
+4. Update the `app` service:
+   - **Kubernetes**: `kubectl set image deployment/carbontrace-app app=ghg-tool:<new_version>`
+   - **Docker Compose on VM**: `docker compose --profile app up -d --no-deps app`
+5. Wait for the new `app` container's healthcheck to pass (poll `/healthz`).
+6. Update the `streamlit` service the same way.
+7. Run the smoke test (Section 6, Step 7).
+8. Monitor logs for 10 minutes post-deploy for unexpected 5xx responses.
 
 ---
 
-## Monitoring and Alerts
+## 8. Rollback Procedure
 
-### Log pipeline
+> Rollback reverts the application image only. It does NOT revert database
+> migrations. If a migration rollback is needed, treat it as a DR event and
+> follow `docs/disaster_recovery.md`.
 
-The application emits structured JSON logs via `structlog`. Route to ELK (Elasticsearch
-+ Logstash + Kibana) or Grafana Loki + Promtail. All log lines are PII-free: usernames
-are SHA-256 hashed to a 16-char prefix (SEC-P0-005).
-
-### Key alert rules
-
-| Alert | Log field / query | Threshold | Action |
-|---|---|---|---|
-| Credential-stuffing probe | `probe_attempt=True` in `/api/v1/auth/login` or `/api/v1/auth/refresh` log lines | > 10 events in 5 minutes from any single source | Notify security on-call; consider IP block at reverse proxy |
-| DLQ backlog | `SELECT COUNT(*) FROM calc.dlq WHERE replay_status='PENDING'` | > 0 rows | Notify data_steward; investigate DQ gate failure |
-| MV refresh latency | Wall-clock time between consecutive refresh completions | > 5 minutes | Notify IT Operations; dashboard data may be stale |
-| Login rate limit exceeded | HTTP 429 responses on `/api/v1/auth/login` | > 5 in 1 minute from a single IP | Notify security on-call |
-| JWT startup assertion | `RuntimeError: GHG_JWT_SECRET must be at least 32 characters` | Any occurrence | Application will not start; rotate secret and redeploy |
+1. Identify the last known-good image tag from the container registry.
+2. Re-deploy the previous image using the same rolling update steps as
+   Section 7, substituting the previous tag.
+3. If the current schema is incompatible with the previous image:
+   - **Option A (preferred)**: Deploy a hotfix image that tolerates the
+     current schema.
+   - **Option B**: Restore from the most recent pre-migration backup. This
+     is a DR event; follow `docs/disaster_recovery.md` Section 5 and execute
+     the communication plan in Section 7 of that document.
+4. Verify `/healthz` returns 200 and re-run the smoke test.
+5. Record the rollback in the incident log: timestamp, version rolled back
+   from, version rolled back to, root cause, and approver.
 
 ---
 
-## Smoke Test Checklist
+## References
 
-Run after every production deployment to verify end-to-end functionality:
-
-```bash
-BASE=https://api.example.com
-
-# 1. Login — obtain tokens
-RESPONSE=$(curl -s -X POST "$BASE/api/v1/auth/login" \
-  -H "Content-Type: application/json" \
-  -d '{"username":"esg_manager","password":"<password>"}')
-ACCESS=$(echo $RESPONSE | python3 -c "import sys,json; print(json.load(sys.stdin)['access_token'])")
-
-# 2. GET /kpis — verify emissions data accessible
-curl -s -H "Authorization: Bearer $ACCESS" "$BASE/api/v1/kpis" | python3 -m json.tool
-
-# 3. GET /intensity — verify intensity ratios accessible
-curl -s -H "Authorization: Bearer $ACCESS" "$BASE/api/v1/intensity" | python3 -m json.tool
-
-# 4. POST /exports/pdf — request PDF generation
-PDF_RESPONSE=$(curl -s -X POST "$BASE/api/v1/exports/pdf" \
-  -H "Authorization: Bearer $ACCESS" \
-  -H "Content-Type: application/json" \
-  -d '{"anno":2024,"gwp_set":"AR6","lang":"it"}')
-PDF_JOB_ID=$(echo $PDF_RESPONSE | python3 -c "import sys,json; print(json.load(sys.stdin)['job_id'])")
-
-# 5. Retrieve PDF and validate magic bytes (PDF starts with %PDF-)
-curl -s -H "Authorization: Bearer $ACCESS" \
-  "$BASE/api/v1/exports/pdf/$PDF_JOB_ID" -o /tmp/test_report.pdf
-head -c 5 /tmp/test_report.pdf | od -c | grep '%   P   D   F   -'
-# Must output a matching line; if empty the PDF export is broken
-
-# 6. Verify audit trail has entries (non-empty means writes are being logged)
-curl -s -H "Authorization: Bearer $ACCESS" "$BASE/api/v1/audit-trail?limit=1" | python3 -m json.tool
-```
-
-All six steps must succeed before declaring the deployment healthy.
+- `docs/disaster_recovery.md` — backup, PITR, and DR procedure
+- `docs/methodology.md` — ESG calculation methodology (v1.0.0)
+- `docker-compose.yml` — service definitions (development / integration)
+- `docker-compose.quickstart.yml` — quickstart override (development only, contains explicit "DO NOT use in production" comment)
+- `Dockerfile` — two-stage build; non-root user `ghg`; exposes port 8000
+- `src/ghg_tool/api/main.py` — middleware stack; env var consumption
+- `src/ghg_tool/infrastructure/security/jwt.py` — JWT secret loading and algorithm validation
+- `src/ghg_tool/api/middleware/security_headers.py` — HSTS, CSP, X-Frame-Options (SEC-P1-002)
+- `src/ghg_tool/api/middleware/rate_limit.py` — in-process rate limiter; Redis upgrade path
+- `scripts/create_user.py` — admin user seeding CLI
+- `alembic/versions/` — 10 migrations M0–M9

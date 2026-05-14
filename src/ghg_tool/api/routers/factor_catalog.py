@@ -30,6 +30,7 @@ from ghg_tool.infrastructure.db.models.factor import FactorCatalog
 from ghg_tool.infrastructure.db.repositories.factor_catalog_repository import (
     FactorCatalogRepository,
 )
+from ghg_tool.infrastructure.security import siem
 
 logger = structlog.get_logger(__name__)
 
@@ -472,6 +473,20 @@ async def publish_factor(
         published_by=user.sub,
         reason_code=body.reason_code,
         publish_notes=body.publish_notes,
+    )
+    # Forward to SIEM (no-op when GHG_SIEM_WEBHOOK_URL is unset).
+    siem.emit(
+        event="factor_published",
+        correlation_id=correlation_id,
+        tenant_id=user.tenant_id,
+        user_sub=user.sub,
+        severity="INFO",
+        payload={
+            "factor_id": factor.factor_id,
+            "version": factor.version,
+            "gwp_set": factor.gwp_set,
+            "reason_code": body.reason_code,
+        },
     )
 
     return FactorCatalogPublishResponse.model_validate(factor)

@@ -25,6 +25,7 @@ from ghg_tool.ui.streamlit_app.lib.help import _help  # noqa: E402
 from ghg_tool.ui.streamlit_app.lib.brand import apply_brand_chrome, render_context_bar, render_role_chip  # noqa: E402
 from ghg_tool.ui.streamlit_app.lib.i18n import _  # noqa: E402
 from ghg_tool.ui.streamlit_app.lib.api_client import fetch_factor_catalog, publish_factor  # noqa: E402
+from ghg_tool.ui.streamlit_app.lib.exports import render_download_row  # noqa: E402
 
 apply_brand_chrome()
 require_auth()
@@ -119,8 +120,15 @@ else:
         "is_tbc": "TBC",
     }
 
+    _export_df = df[display_cols].rename(columns=col_labels)
+    render_download_row(
+        _export_df,
+        basename=f"factor_catalog_{gwp_filter or 'all'}",
+        lang=lang,
+        key_prefix="fc",
+    )
     st.dataframe(
-        df[display_cols].rename(columns=col_labels),
+        _export_df,
         use_container_width=True,
         hide_index=True,
     )
