@@ -4,14 +4,15 @@ Lives in ``lib/`` so that pages can import these symbols without
 re-executing ``Home.py`` (which would call ``st.set_page_config`` a
 second time and crash with ``StreamlitAPIException``).
 
-Branding values default to Saturnia Ceramica (the project's launch tenant)
-but can be overridden via environment variables:
+Branding values default to Gruppo Ceramiche Gresmalt S.p.A. (the
+project's launch customer) but can be overridden via environment
+variables:
 
   - ``GHG_COMPANY_NAME``  — display name shown in titles, footers, PDF.
   - ``GHG_COMPANY_SHORT`` — short name for browser tab / page_title.
   - ``GHG_TENANT_ID``     — tenant identifier used by the auth fallback.
   - ``GHG_SITES``         — comma-separated list of site codes (overrides
-                            the built-in 7-site Saturnia list).
+                            the built-in 7-site default).
 """
 
 from __future__ import annotations
@@ -22,9 +23,9 @@ from typing import Final
 DASHBOARD_VERSION: Final[str] = "1.0.0"
 DASHBOARD_ID: Final[str] = "esg-main-2026"
 
-_DEFAULT_COMPANY_NAME: Final[str] = "Saturnia Ceramica S.r.l."
-_DEFAULT_COMPANY_SHORT: Final[str] = "Saturnia Ceramica"
-_DEFAULT_TENANT_ID: Final[str] = "saturnia-ceramica-v1"
+_DEFAULT_COMPANY_NAME: Final[str] = "Gruppo Ceramiche Gresmalt S.p.A."
+_DEFAULT_COMPANY_SHORT: Final[str] = "Gresmalt"
+_DEFAULT_TENANT_ID: Final[str] = "gresmalt-v1"
 _DEFAULT_SITES: Final[tuple[str, ...]] = (
     "IANO",
     "VIANO",

@@ -7,7 +7,7 @@
 ![Streamlit](https://img.shields.io/badge/Streamlit-1.35%2B-FF4B4B)
 ![License](https://img.shields.io/badge/license-proprietary-lightgrey)
 
-Purpose-built GHG emissions accounting system for Saturnia Ceramica S.r.l., a gres
+Purpose-built GHG emissions accounting system for Gruppo Ceramiche Gresmalt S.p.A., a gres
 porcellanato manufacturer operating 7 Italian production sites. The platform ingests annual
 activity data, applies a versioned emission factor catalog, calculates greenhouse gas
 emissions across Scopes 1, 2, and 3 per the GHG Protocol Corporate Standard, and produces
@@ -179,7 +179,7 @@ All checks are required gates on every PR.
 
 ## License and Contact
 
-Proprietary — Saturnia Ceramica S.r.l. All rights reserved.
+Proprietary — Gruppo Ceramiche Gresmalt S.p.A. All rights reserved.
 
 For questions about this tool: [TBD — insert internal contact before deployment]
 For data protection enquiries: [TBD — insert DPO contact before deployment]
