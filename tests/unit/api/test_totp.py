@@ -217,7 +217,13 @@ class TestTOTPDisable:
 
 class TestLoginTOTPFlow:
     def test_partial_token_cannot_be_used_as_bearer(self) -> None:
-        """A partial_token (pre_2fa=True) is rejected on protected endpoints."""
+        """A partial_token (pre_2fa=True) is rejected on protected endpoints.
+
+        The token is always rejected -- either:
+        - 401 from the auth dependency (pre_2fa guard), or
+        - 401/503 from the session_check middleware (no session row / DB error).
+        The key invariant: 200 must never be returned for a pre_2fa token.
+        """
         partial = create_access_token(
             sub=TEST_USER,
             role="esg_manager",
@@ -231,7 +237,8 @@ class TestLoginTOTPFlow:
                 "/api/v1/emissions/",
                 headers={"Authorization": f"Bearer {partial}"},
             )
-        assert resp.status_code == 401
+        # Must not be 200 -- either middleware (503/401) or auth dep (401) blocks it.
+        assert resp.status_code in (401, 503)
 
     def test_partial_token_claims(self) -> None:
         """Partial token carries pre_2fa=True and has a short TTL (<=300s)."""

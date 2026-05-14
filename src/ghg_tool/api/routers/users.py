@@ -21,7 +21,7 @@ import uuid
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
-from sqlalchemy import select, text
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ghg_tool.api.dependencies.auth import CurrentUser
@@ -848,6 +848,18 @@ async def reset_user_password(
         },
     )
 
+    # S-014: revoke all active sessions for the target user so that any
+    # concurrent sessions become invalid immediately after the password reset.
+    revoke_result = await session.execute(
+        text(
+            "UPDATE auth.sessions SET revoked_at = now() "
+            "WHERE user_id = CAST(:uid AS uuid) "
+            "  AND revoked_at IS NULL"
+        ),
+        {"uid": str(user_uuid)},
+    )
+    revoked_sessions: int = revoke_result.rowcount  # type: ignore[assignment]
+
     reset_at = datetime.now(tz=UTC).isoformat()
 
     # after_state carries ONLY reset_at; never the hash or plaintext.
@@ -871,7 +883,12 @@ async def reset_user_password(
     await session.flush()
 
     # Log the action - never include the password or its hash.
-    log.info("user_password_reset", target_user=str(user_uuid))
+    # S-014: include the number of revoked sessions in the log for forensics.
+    log.info(
+        "user_password_reset",
+        target_user=str(user_uuid),
+        sessions_revoked=revoked_sessions,
+    )
 
     siem.emit(
         event="user_password_reset",

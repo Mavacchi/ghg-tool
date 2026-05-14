@@ -60,6 +60,12 @@ class FactorCatalog(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
+    # C-004: created_by is NULL for back-filled rows (migration 0020 adds the
+    # column as NULLABLE for back-fill safety).  New rows always set this field
+    # from user.sub in the create endpoint.
+    created_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("ref.users.id"), nullable=True
+    )
     published_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )

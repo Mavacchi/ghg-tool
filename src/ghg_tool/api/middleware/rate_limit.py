@@ -146,7 +146,17 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 
 
 def _extract_rate_key(request: Request) -> str:
-    """Extract a rate-limit key from the request state or client IP.
+    """Extract a rate-limit key from the request state or Bearer JWT sub.
+
+    Priority order (BUG-08 fix):
+    1. ``request.state.user_sub`` (set by auth dependency -- only available
+       after auth middleware has run, which is AFTER rate-limit middleware
+       for most routes; therefore this is usually None at middleware time).
+    2. Bearer JWT ``sub`` claim decoded WITHOUT signature verification.
+       This is safe: the sub is used only as a rate-limit routing key, not
+       for authorisation.  The auth dependency performs the authoritative
+       signature check later.
+    3. Fallback to client IP for requests without a Bearer token.
 
     Args:
         request: The HTTP request.
@@ -154,10 +164,24 @@ def _extract_rate_key(request: Request) -> str:
     Returns:
         A string key uniquely identifying the caller for rate-limiting purposes.
     """
-    # Prefer authenticated user sub (set by auth dependency after decoding JWT)
+    # Priority 1: already decoded by auth dependency (rare at middleware time)
     user_sub: str | None = getattr(request.state, "user_sub", None)
     if user_sub:
         return f"user:{user_sub}"
-    # Fallback to client IP
+
+    # Priority 2: extract sub from Bearer JWT without signature verification.
+    auth_header = request.headers.get("Authorization", "")
+    if auth_header.startswith("Bearer "):
+        token = auth_header.removeprefix("Bearer ")
+        try:
+            from ghg_tool.infrastructure.security import jwt as jwt_module  # noqa: PLC0415
+            unverified = jwt_module.get_unverified_claims(token)
+            sub: str = str(unverified.get("sub", ""))
+            if sub:
+                return f"user:{sub}"
+        except Exception:  # noqa: BLE001 -- best effort; fall through to IP
+            pass
+
+    # Priority 3: fallback to client IP
     client_host = request.client.host if request.client else "unknown"
     return f"ip:{client_host}"
