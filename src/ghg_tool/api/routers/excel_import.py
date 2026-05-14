@@ -38,7 +38,11 @@ from ghg_tool.api.dependencies.db import get_db
 from ghg_tool.api.middleware.correlation_id import get_correlation_id
 from ghg_tool.api.middleware.rbac import require_permission
 from ghg_tool.etl.orchestrator import run_ingestion_pipeline
-from ghg_tool.etl.readers.excel_reader import WorkbookParseError, parse_workbook
+from ghg_tool.etl.readers.excel_reader import (
+    InvalidExcelFormatError,
+    WorkbookParseError,
+    parse_workbook,
+)
 from ghg_tool.infrastructure.db.models.audit_log import AuditLog
 from ghg_tool.infrastructure.db.models.ingestion_batch import IngestionBatch
 from ghg_tool.infrastructure.security import siem
@@ -354,6 +358,20 @@ async def import_excel(
     # ------------------------------------------------------------------
     try:
         parsed = parse_workbook(raw_bytes)
+    except InvalidExcelFormatError as exc:
+        # BUG-13: magic-byte check failed before openpyxl was invoked.
+        log.warning("excel_import_invalid_format", detail=str(exc))
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "type": "about:blank",
+                "title": "Invalid Excel Format",
+                "status": 422,
+                "detail": str(exc),
+                "error_code": "invalid_excel_format",
+                "correlation_id": correlation_id,
+            },
+        ) from exc
     except WorkbookParseError as exc:
         log.warning("excel_import_parse_error", detail=str(exc))
         raise HTTPException(
@@ -389,8 +407,22 @@ async def import_excel(
     scope2_df = parsed.get("scope2", pd.DataFrame())
     scope3_df = parsed.get("scope3", pd.DataFrame())
 
+    def _sanitise_cell_for_csv(value: Any) -> Any:
+        """Prefix formula-trigger chars to prevent CSV injection (BUG-07).
+
+        Affected first-characters: ``=``, ``+``, ``-``, ``@``, ``\\t``, ``\\r``.
+        """
+        formula_triggers = frozenset({"=", "+", "-", "@", "\t", "\r"})
+        if isinstance(value, str) and value and value[0] in formula_triggers:
+            return "'" + value
+        return value
+
     def _write_temp_csv(df: pd.DataFrame) -> tempfile.NamedTemporaryFile:  # type: ignore[type-arg]
-        """Write df to a UTF-8-BOM semicolon CSV in /tmp; caller owns the handle."""
+        """Write df to a UTF-8-BOM semicolon CSV in /tmp; caller owns the handle.
+
+        All string cells are sanitised against formula injection before writing
+        (BUG-07: temp CSV path was previously unsanitised).
+        """
         tf = tempfile.NamedTemporaryFile(
             mode="w",
             suffix=".csv",
@@ -399,7 +431,11 @@ async def import_excel(
             delete=True,
             dir=None,  # system default tmp dir
         )
-        df.to_csv(tf, sep=";", index=False)
+        try:
+            sanitised = df.map(_sanitise_cell_for_csv)  # pandas >= 2.1
+        except AttributeError:
+            sanitised = df.applymap(_sanitise_cell_for_csv)  # pandas < 2.1 fallback
+        sanitised.to_csv(tf, sep=";", index=False)
         tf.flush()
         return tf
 

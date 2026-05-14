@@ -42,10 +42,31 @@ _PARTIAL_TOKEN_KEY = "totp_partial_token"
 _TOTP_PENDING_KEY = "totp_pending"
 
 # Demo/fallback tenant and token for environments without live auth.
-# Demo mode is OPT-IN only — must be explicitly enabled via env var.
+# Demo mode is OPT-IN only — must be explicitly enabled via env var AND the active
+# environment must be "development" or "test".  In production or staging the flag is
+# silently suppressed and a CRITICAL log line is emitted (BUG-23 / S-011).
 _DEMO_TOKEN: Final[str] = "demo-jwt-token"  # noqa: S105 · public sentinel, never a real secret
 _DEMO_TENANT: Final[str] = TENANT_ID
-_DEMO_MODE: Final[bool] = os.getenv("GHG_DEMO_MODE", "").lower() in ("1", "true", "yes")
+_GHG_ENVIRONMENT: Final[str] = os.getenv("GHG_ENVIRONMENT", "development").lower()
+_DEMO_MODE_REQUESTED: Final[bool] = (
+    os.getenv("GHG_DEMO_MODE", "").lower() in ("1", "true", "yes")
+)
+_DEMO_ALLOWED_ENVS: Final[frozenset[str]] = frozenset({"development", "test"})
+
+if _DEMO_MODE_REQUESTED and _GHG_ENVIRONMENT not in _DEMO_ALLOWED_ENVS:
+    # Refuse demo mode outside development/test.  Import-time logging uses the
+    # standard library logger because structlog may not be initialised yet.
+    import logging as _stdlib_logging
+
+    _stdlib_logging.getLogger(__name__).critical(
+        "event=demo_mode_blocked_outside_dev "
+        "GHG_DEMO_MODE=true is not permitted in environment=%s; "
+        "demo mode disabled.",
+        _GHG_ENVIRONMENT,
+    )
+    _DEMO_MODE: Final[bool] = False
+else:
+    _DEMO_MODE: Final[bool] = _DEMO_MODE_REQUESTED  # type: ignore[misc]
 
 # Minimum length required for username and password in demo mode.
 # This prevents an empty form submission from creating a demo session and

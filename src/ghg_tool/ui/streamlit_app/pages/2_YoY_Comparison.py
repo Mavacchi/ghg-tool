@@ -3,7 +3,7 @@
 Features:
   - Two-year comparator (default 2024 → 2025)
   - Absolute Δ and relative Δ% per scope per site, with bootstrap CI bands
-  - Highlights rows where |Δ| > 2σ of historical variation (Okabe-Ito palette)
+  - Highlights rows where |Δ| > YOY_SIGMA_MULTIPLIER * sigma of historical variation (Okabe-Ito palette)
   - Normalised YoY (per EUR revenue, per m² production)
   - VIANO 2025 banner when applicable
 """
@@ -36,6 +36,7 @@ from ghg_tool.ui.streamlit_app.lib.api_client import fetch_emissions, emissions_
 from ghg_tool.ui.streamlit_app.lib.palette import (  # noqa: E402
     ORANGE, VERMILION, BLUISH_GREEN, BLUE, SKY_BLUE, plotly_qualitative
 )
+from ghg_tool.application.services.hotspot_service import YOY_SIGMA_MULTIPLIER  # noqa: E402
 
 apply_brand_chrome()
 require_auth()
@@ -154,11 +155,12 @@ merged["delta_pct"] = merged.apply(
     axis=1,
 )
 
-# Mark outliers (|Δ - μ| > 2σ): standard z-score test.
+# Mark outliers (|Δ - μ| > YOY_SIGMA_MULTIPLIER * sigma): standard z-score test.
+# YOY_SIGMA_MULTIPLIER is the canonical constant from hotspot_service (R-09).
 sigma = merged["delta_abs"].std()
 mean_delta = merged["delta_abs"].mean()
 if sigma and not pd.isna(sigma) and sigma > 0:
-    merged["is_outlier"] = (merged["delta_abs"] - mean_delta).abs() > 2 * sigma
+    merged["is_outlier"] = (merged["delta_abs"] - mean_delta).abs() > float(YOY_SIGMA_MULTIPLIER) * sigma
 else:
     merged["is_outlier"] = False
 merged["row_color"] = merged.apply(

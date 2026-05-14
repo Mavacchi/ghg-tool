@@ -58,6 +58,15 @@ class WorkbookParseError(ValueError):
     """Raised when the uploaded workbook does not match any expected layout."""
 
 
+class InvalidExcelFormatError(WorkbookParseError):
+    """Raised when the uploaded file fails the XLSX magic-byte check (BUG-13).
+
+    An XLSX file is a ZIP archive; valid XLSX files begin with the ZIP local-file
+    header signature ``PK\\x03\\x04`` (bytes 0-3).  Files that do not carry this
+    signature are rejected before openpyxl is invoked.
+    """
+
+
 def _normalise_columns(df: pd.DataFrame) -> pd.DataFrame:
     """Strip whitespace + BOM from column names."""
     df = df.copy()
@@ -104,6 +113,14 @@ def parse_workbook(
     """
     if not raw:
         raise WorkbookParseError("Empty upload payload.")
+    # Magic-byte check: XLSX is a ZIP archive; the first 4 bytes of a valid XLSX
+    # file must be the ZIP local-file header signature PK\x03\x04 (BUG-13).
+    # Reject before invoking openpyxl to avoid parser CPU on arbitrary binary blobs.
+    xlsx_magic = b"PK\x03\x04"
+    if raw[:4] != xlsx_magic:
+        raise InvalidExcelFormatError(
+            "file is not a valid XLSX (missing ZIP magic bytes)"
+        )
     try:
         bio = io.BytesIO(raw)
         xls = pd.ExcelFile(bio, engine="openpyxl")

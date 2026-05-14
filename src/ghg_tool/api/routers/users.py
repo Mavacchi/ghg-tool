@@ -379,9 +379,15 @@ async def create_user(
             ip_address=client_ip,
             user_agent=user_agent,
             after_state={
-                "username": body.username,
-                "email": body.email,
-                "role_code": body.role_code,
+                # C-012: PII (username/email) removed from audit_log.after_state.
+                # Forensic lookup uses the user_id UUID and joins ref.users for
+                # human-readable details.  Audit_log retention is 10 years per
+                # GDPR Art. 6(1)(c) + Art. 32; storing PII here would expand the
+                # Art. 4(1) scope of audit_log beyond what is disclosed in the
+                # Art. 30 register.
+                "user_id": str(new_id),
+                "tenant_id": user.tenant_id,
+                "role_id": str(role.id),
                 "is_active": True,
             },
         )
