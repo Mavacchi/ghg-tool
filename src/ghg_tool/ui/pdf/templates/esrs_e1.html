@@ -2,8 +2,14 @@
 <html lang="{{ language }}">
 <head>
   <meta charset="utf-8">
-  <title>GHG Report ESRS E1 — Saturnia Ceramica S.r.l. — {{ anno }}</title>
+  <title>GHG Report ESRS E1 — {{ company_name }} — {{ anno }}</title>
   <link rel="stylesheet" href="{{ css_path }}">
+  <style>
+    /* Per-render override so the running @top-center header reflects the
+       configured company name (GHG_COMPANY_NAME). The base styles.css
+       declares a static fallback. */
+    @page { @top-center { content: "{{ company_name }} — GHG Report ESRS E1"; } }
+  </style>
 </head>
 <body data-year="{{ anno }}" data-dashboard-version="Dashboard v{{ dashboard_version }}">
 
@@ -11,7 +17,7 @@
 <!-- REPORT HEADER                                                -->
 <!-- ============================================================ -->
 <div class="report-header">
-  <div class="company-name">Saturnia Ceramica S.r.l.</div>
+  <div class="company-name">{{ company_name }}</div>
   <div class="report-subtitle">
     Report GHG — ESRS E1-6 + E1-7 | Anno di rendicontazione: {{ anno }}
   </div>

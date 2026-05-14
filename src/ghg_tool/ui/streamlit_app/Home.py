@@ -14,21 +14,30 @@ from __future__ import annotations
 
 import streamlit as st
 
-# ---------------------------------------------------------------------------
-# Dashboard version — reported in footer for auditor traceability
-# ---------------------------------------------------------------------------
-DASHBOARD_VERSION = "1.0.0"
-DASHBOARD_ID = "esg-main-2026"
+from ghg_tool.ui.streamlit_app.lib.constants import (
+    COMPANY_NAME,
+    COMPANY_SHORT,
+    DASHBOARD_ID,
+    DASHBOARD_VERSION,
+    KNOWN_SITES,
+)
 
 st.set_page_config(
-    page_title="GHG Dashboard — Saturnia Ceramica",
+    page_title=f"GHG Dashboard — {COMPANY_SHORT}",
     page_icon="🏭",
     layout="wide",
     initial_sidebar_state="expanded",
 )
 
 # Must import after set_page_config
-from ghg_tool.ui.streamlit_app.lib.auth import get_lang, get_token, logout, require_auth  # noqa: E402
+from ghg_tool.ui.streamlit_app.lib.auth import (  # noqa: E402
+    get_lang,
+    get_token,
+    is_demo_mode,
+    logout,
+    render_demo_mode_banner,
+    require_auth,
+)
 from ghg_tool.ui.streamlit_app.lib.banner import render_viano_banner, should_show_viano_banner  # noqa: E402
 from ghg_tool.ui.streamlit_app.lib.i18n import _  # noqa: E402
 from ghg_tool.ui.streamlit_app.lib.api_client import fetch_kpis, emissions_to_dataframe  # noqa: E402
@@ -71,17 +80,19 @@ require_auth(lang)
 # ---------------------------------------------------------------------------
 # Page title
 # ---------------------------------------------------------------------------
-st.title(_("app_title", lang))
+st.title(_("app_title", lang).format(company_name=COMPANY_NAME))
 st.subheader(f"{_('nav_home', lang)} — {selected_year}")
+
+# Demo-mode banner (visible only when GHG_DEMO_MODE is enabled and the
+# session is currently using a demo token, so users never confuse the
+# bypass with a real authenticated session).
+if is_demo_mode():
+    render_demo_mode_banner(lang)
 
 # ---------------------------------------------------------------------------
 # VIANO banner check (FR-24)
 # ---------------------------------------------------------------------------
-# All 7 known sites; in production this would come from the API
-_ALL_SITES = ["IANO", "VIANO", "VIANO_GARGOLA", "CASALGRANDE",
-              "FIORANO", "SASSUOLO", "FRASSINORO"]
-
-if should_show_viano_banner(selected_year, _ALL_SITES):
+if should_show_viano_banner(selected_year, list(KNOWN_SITES)):
     render_viano_banner(lang)
 
 # ---------------------------------------------------------------------------

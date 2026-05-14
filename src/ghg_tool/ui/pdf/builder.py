@@ -34,6 +34,14 @@ _CSS_PATH = _TEMPLATES_DIR / "styles.css"
 DASHBOARD_VERSION = "1.0.0"
 DASHBOARD_ID = "esg-main-2026"
 
+_DEFAULT_COMPANY_NAME = "Saturnia Ceramica S.r.l."
+
+
+def _company_name() -> str:
+    """Return the configured company name (env ``GHG_COMPANY_NAME``)."""
+    import os
+    return os.getenv("GHG_COMPANY_NAME", "").strip() or _DEFAULT_COMPANY_NAME
+
 _DISCLAIMER_IT = (
     "Questo report è generato automaticamente dal GHG Accounting Tool v1. "
     "I valori sono calcolati secondo il GHG Protocol Corporate Standard (2004) "
@@ -145,6 +153,7 @@ class PDFBuilder:
             "anno": anno,
             "gwp_set": gwp_set,
             "language": language,
+            "company_name": _company_name(),
             "scope1_rows": scope1_rows,
             "scope2_rows": scope2_rows,
             "scope3_rows": scope3_rows,
@@ -271,12 +280,13 @@ def _fallback_html(ctx: dict[str, Any]) -> str:
     generated_at = ctx["generated_at"]
     dashboard_id = ctx["dashboard_id"]
     dashboard_version = ctx["dashboard_version"]
+    company_name = ctx.get("company_name", _DEFAULT_COMPANY_NAME)
 
     return f"""<!DOCTYPE html>
 <html><head><meta charset='utf-8'>
 <title>GHG Report ESRS E1 {anno}</title></head>
 <body>
-<h1>Saturnia Ceramica S.r.l. — GHG Report ESRS E1-6 — {anno}</h1>
+<h1>{company_name} — GHG Report ESRS E1-6 — {anno}</h1>
 <p>GWP set: {gwp_set} | Metodologia: GHG Protocol Corporate Standard</p>
 <p>Generato: {generated_at} | Dashboard: {dashboard_id} v{dashboard_version}</p>
 <p>API v1 | Fonti fattori: ISPRA 2024 + IEA 2024</p>

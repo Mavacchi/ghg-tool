@@ -7,12 +7,20 @@ from ghg_tool.ui.streamlit_app.lib.i18n import _, supported_languages
 
 class TestI18n:
     def test_it_translation_loads(self) -> None:
+        # app_title is now parametric: the company name is injected at
+        # render time via .format(company_name=...). See lib/constants.py.
         result = _("app_title", "it")
-        assert "Saturnia" in result
+        assert "Strumento GHG" in result
+        assert "{company_name}" in result
+        rendered = result.format(company_name="Acme Tiles")
+        assert "Acme Tiles" in rendered
 
     def test_en_translation_loads(self) -> None:
         result = _("app_title", "en")
         assert "GHG Tool" in result
+        assert "{company_name}" in result
+        rendered = result.format(company_name="Acme Tiles")
+        assert "Acme Tiles" in rendered
 
     def test_viano_banner_it(self) -> None:
         text = _("viano_banner", "it")
