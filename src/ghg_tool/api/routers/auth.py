@@ -231,7 +231,7 @@ async def refresh(
             "SELECT u.id, u.username, r.role_code, u.is_active "
             "FROM ref.users u "
             "JOIN ref.roles r ON r.id = u.role_id "
-            "WHERE u.id = :uid::uuid"
+            "WHERE u.id = CAST(:uid AS uuid)"
         ),
         {"uid": user_id},
     )

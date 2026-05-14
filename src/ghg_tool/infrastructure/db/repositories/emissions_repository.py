@@ -124,7 +124,9 @@ class EmissionsRepository:
         await self._session.execute(
             text(
                 "SELECT calc.fn_emit_correction("
-                "   :predecessor_id::uuid, :new_id::uuid, :reason_code"
+                "   CAST(:predecessor_id AS uuid),"
+                "   CAST(:new_id AS uuid),"
+                "   :reason_code"
                 ")"
             ),
             {
