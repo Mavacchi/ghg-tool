@@ -112,14 +112,18 @@ def _make_factor_orm(
 def _db_returning(factor: MagicMock | None) -> Any:
     """Build an async DB session override whose ``get_by_uuid`` returns *factor*.
 
-    The router issues two ``session.execute`` calls for the publish path:
+    The router now issues three ``session.execute`` calls for the publish path
+    under the two-eyes approval workflow (FR-12):
       1. SELECT (via FactorCatalogRepository.get_by_uuid)
-      2. conditional UPDATE (rowcount must equal 1 for the happy path)
-    ``side_effect`` supplies a distinct result for each call.
+      2. SELECT pending approval (_get_pending_approval) -> None (no prior request)
+      When no PENDING approval exists the handler creates an approval row and
+      returns 202 (Accepted). It does NOT proceed to UPDATE the factor.
 
-    ``session.refresh`` simulates DB reload: when factor is not None and was
-    a draft, flip is_published=True and set published fields to match what
-    the UPDATE wrote, so model_validate sees the post-commit state.
+    To test the full approval+publish path (200) use the helpers in
+    test_factor_publish_approval.py instead.
+
+    ``session.refresh`` is kept for completeness but is only reached on the
+    second esg_manager's call (state 3 in the workflow).
     """
 
     async def _gen() -> Any:
@@ -127,26 +131,27 @@ def _db_returning(factor: MagicMock | None) -> Any:
         session.flush = AsyncMock(return_value=None)
         session.add = MagicMock(return_value=None)
 
-        # First execute: SELECT -- scalar_one_or_none returns *factor*
+        # Call 1: SELECT via FactorCatalogRepository.get_by_uuid
         select_result = MagicMock()
         select_result.scalar_one_or_none = MagicMock(return_value=factor)
 
-        # Second execute: conditional UPDATE -- rowcount=1 signals success
+        # Call 2: SELECT pending approval -> None (no prior approval row)
+        no_approval_result = MagicMock()
+        no_approval_result.scalar_one_or_none = MagicMock(return_value=None)
+
+        # Call 3: conditional UPDATE (only reached by the second esg_manager)
         update_result = MagicMock()
         update_result.rowcount = 1
 
-        session.execute = AsyncMock(side_effect=[select_result, update_result])
+        session.execute = AsyncMock(
+            side_effect=[select_result, no_approval_result, update_result]
+        )
 
         async def _refresh(obj: Any) -> None:
-            # Simulate the DB returning post-UPDATE state on refresh.
-            # The router uses a SQLAlchemy update() statement, not direct ORM
-            # attribute assignment, so we must simulate DB reload here.
             if obj is factor and factor is not None and not obj.is_published:
                 obj.is_published = True
                 if obj.published_at is None:
                     obj.published_at = datetime(2026, 5, 14, 0, 0, 0, tzinfo=UTC)
-                # published_by is set by the UPDATE to the caller's sub; the
-                # test _auth_override uses _USER_ESG so we mirror that here.
                 if obj.published_by is None:
                     obj.published_by = _USER_ESG
 
@@ -175,9 +180,16 @@ def _clear_overrides():
 
 
 class TestPublishHappyPath:
-    """Successful publish transitions draft → published."""
+    """First publish call (no prior approval) creates PENDING approval row -> 202.
 
-    def test_happy_path_returns_200_with_is_published_true(self) -> None:
+    Under the two-eyes approval workflow (FR-12, ISAE 3000 §A99) the first
+    esg_manager to call /publish does NOT immediately publish the factor.
+    Instead, an approval row is created with decision=PENDING and HTTP 202
+    is returned. The factor is published by the second esg_manager's call.
+    Full second-manager approval tests live in test_factor_publish_approval.py.
+    """
+
+    def test_happy_path_returns_202_with_approval_id(self) -> None:
         factor = _make_factor_orm(is_published=False, value=1.23)
         app.dependency_overrides[get_current_user] = _auth_override(
             "esg_manager", user_id=_USER_ESG
@@ -187,13 +199,13 @@ class TestPublishHappyPath:
         with TestClient(app, raise_server_exceptions=False) as client:
             resp = client.post(_BASE_URL, json={"reason_code": "INITIAL_PUBLICATION"})
 
-        assert resp.status_code == 200
+        assert resp.status_code == 202
         data = resp.json()
-        assert data["is_published"] is True
-        assert data["factor_id"] == "TEST_FACTOR_001"
-        assert data["version"] == "v1"
+        assert "approval_id" in data
+        assert "awaiting" in data["message"].lower()
 
-    def test_happy_path_sets_published_by_to_caller_sub(self) -> None:
+    def test_happy_path_factor_not_yet_published_after_first_call(self) -> None:
+        """Factor must remain unpublished; the ORM is_published stays False."""
         factor = _make_factor_orm(is_published=False, value=5.0)
         app.dependency_overrides[get_current_user] = _auth_override(
             "esg_manager", user_id=_USER_ESG
@@ -201,16 +213,13 @@ class TestPublishHappyPath:
         app.dependency_overrides[get_db] = _db_returning(factor)
 
         with TestClient(app, raise_server_exceptions=False) as client:
-            resp = client.post(_BASE_URL, json={"reason_code": "INITIAL_PUBLICATION"})
+            client.post(_BASE_URL, json={"reason_code": "INITIAL_PUBLICATION"})
 
-        assert resp.status_code == 200
-        data = resp.json()
-        # The ORM object's published_by was set to user.sub by the handler.
-        # Because our MagicMock assigns attributes directly, check the mock state.
-        assert factor.published_by == _USER_ESG
-        assert factor.is_published is True
+        # After the first /publish call the factor must still be a draft.
+        assert factor.is_published is False
 
-    def test_happy_path_with_publish_notes(self) -> None:
+    def test_happy_path_with_publish_notes_accepted(self) -> None:
+        """publish_notes is accepted at schema level; reason_code is stored."""
         factor = _make_factor_orm(is_published=False, value=2.5)
         app.dependency_overrides[get_current_user] = _auth_override(
             "esg_manager", user_id=_USER_ESG
@@ -223,11 +232,10 @@ class TestPublishHappyPath:
                 json={"reason_code": "INITIAL_PUBLICATION", "publish_notes": "Reviewed against DEFRA 2024 spreadsheet"},
             )
 
-        assert resp.status_code == 200
-        assert resp.json()["is_published"] is True
+        assert resp.status_code == 202
 
-    def test_happy_path_licence_only_null_value_is_allowed(self) -> None:
-        """A licence-only factor with value=None must be publishable."""
+    def test_happy_path_licence_only_null_value_accepted(self) -> None:
+        """A licence-only factor with value=None must be accepted (passes pre-conditions)."""
         factor = _make_factor_orm(
             is_published=False,
             value=None,
@@ -241,8 +249,7 @@ class TestPublishHappyPath:
         with TestClient(app, raise_server_exceptions=False) as client:
             resp = client.post(_BASE_URL, json={"reason_code": "INITIAL_PUBLICATION"})
 
-        assert resp.status_code == 200
-        assert resp.json()["is_published"] is True
+        assert resp.status_code == 202
 
 
 class TestPublishAuth:
