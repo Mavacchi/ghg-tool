@@ -18,6 +18,7 @@ ON CONFLICT DO NOTHING idempotency-key guard used by seed_demo_data.py applies.
 
 from __future__ import annotations
 
+import asyncio
 import os
 import re
 import tempfile
@@ -36,6 +37,8 @@ from ghg_tool.api.dependencies.auth import CurrentUser
 from ghg_tool.api.dependencies.db import get_db
 from ghg_tool.api.middleware.correlation_id import get_correlation_id
 from ghg_tool.api.middleware.rbac import require_permission
+from ghg_tool.etl.orchestrator import run_ingestion_pipeline
+from ghg_tool.etl.readers.excel_reader import WorkbookParseError, parse_workbook
 from ghg_tool.infrastructure.db.models.audit_log import AuditLog
 from ghg_tool.infrastructure.db.models.ingestion_batch import IngestionBatch
 from ghg_tool.infrastructure.security import siem
@@ -313,8 +316,6 @@ async def import_excel(
     Raises:
         HTTPException: 422 on parse failure or DQ-CRIT block.
     """
-    import asyncio  # noqa: PLC0415
-
     correlation_id = get_correlation_id()
     log = logger.bind(
         correlation_id=correlation_id,
@@ -351,11 +352,6 @@ async def import_excel(
     # ------------------------------------------------------------------
     # 2. Parse the workbook in-memory (bytes never touch disk)
     # ------------------------------------------------------------------
-    from ghg_tool.etl.readers.excel_reader import (  # noqa: PLC0415
-        WorkbookParseError,
-        parse_workbook,
-    )
-
     try:
         parsed = parse_workbook(raw_bytes)
     except WorkbookParseError as exc:
@@ -380,8 +376,6 @@ async def import_excel(
     # for the orchestrator to read them.  delete=True ensures cleanup
     # even on exception.
     # ------------------------------------------------------------------
-    from ghg_tool.etl.orchestrator import run_ingestion_pipeline  # noqa: PLC0415
-
     import pandas as pd  # noqa: PLC0415
     from pathlib import Path  # noqa: PLC0415
 

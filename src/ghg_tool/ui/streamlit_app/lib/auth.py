@@ -36,6 +36,10 @@ _ROLE_KEY = "role"
 _USER_KEY = "user_sub"
 _TENANT_KEY = "tenant_id"
 _LANG_KEY = "lang"
+# TOTP flow keys -- partial_token is stored until the challenge is completed;
+# it is NEVER promoted to _TOKEN_KEY.
+_PARTIAL_TOKEN_KEY = "totp_partial_token"
+_TOTP_PENDING_KEY = "totp_pending"
 
 # Demo/fallback tenant and token for environments without live auth.
 # Demo mode is OPT-IN only — must be explicitly enabled via env var.
@@ -98,7 +102,8 @@ def get_tenant_id() -> str:
 
 def logout() -> None:
     """Clear all auth-related session state keys."""
-    for key in (_TOKEN_KEY, _ROLE_KEY, _USER_KEY, _TENANT_KEY):
+    for key in (_TOKEN_KEY, _ROLE_KEY, _USER_KEY, _TENANT_KEY,
+                _PARTIAL_TOKEN_KEY, _TOTP_PENDING_KEY):
         st.session_state.pop(key, None)
 
 

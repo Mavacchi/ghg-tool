@@ -205,3 +205,62 @@ def test_output_is_immutable() -> None:
     except dataclasses.FrozenInstanceError:
         return
     raise AssertionError("HotspotEntry should be frozen")
+
+
+# ---------------------------------------------------------------------------
+# Sigma-based outlier threshold (multi-year history).
+# ---------------------------------------------------------------------------
+def test_sigma_threshold_used_when_history_reliable() -> None:
+    """4 years of constant +10% YoY -> sigma=0 -> threshold = |mean| ~= 10%.
+
+    With a current +15% jump that exceeds the per-key sigma threshold (~10%)
+    the row IS flagged as outlier, even though it would NOT be flagged by
+    the legacy +/- 20% fallback.
+    """
+    current = [_em(sub_scope="Cat1", tco2e="151.8", anno=2026)]
+    prior = [_em(sub_scope="Cat1", tco2e="132", anno=2025)]
+    history = {
+        2022: {"Cat1": Decimal("100")},
+        2023: {"Cat1": Decimal("110")},
+        2024: {"Cat1": Decimal("121")},
+        2025: {"Cat1": Decimal("132")},
+    }
+    out = compute_hotspots(
+        emissions_current=current,
+        emissions_prior=prior,
+        historical_by_year=history,
+    )
+    entry = out[0]
+    # YoY: (151.8 - 132)/132 * 100 = 15%
+    assert abs((entry.yoy_delta_pct or Decimal("0")) - Decimal("15")) < Decimal("0.0001")
+    # threshold = |10| + 2*0 = 10, less than 15 -> flagged
+    assert entry.outlier_threshold_pct < YOY_FALLBACK_PCT
+    assert entry.flag_yoy_outlier is True
+
+
+def test_legacy_fallback_when_history_insufficient() -> None:
+    """With <3 deltas the per-row threshold stays at the +/- 20% fallback."""
+    current = [_em(sub_scope="Cat1", tco2e="900", anno=2025)]
+    prior = [_em(sub_scope="Cat1", tco2e="600", anno=2024)]
+    history = {
+        2023: {"Cat1": Decimal("550")},
+        2024: {"Cat1": Decimal("600")},
+    }  # only 1 YoY delta -> not reliable
+    out = compute_hotspots(
+        emissions_current=current,
+        emissions_prior=prior,
+        historical_by_year=history,
+    )
+    entry = out[0]
+    assert entry.outlier_threshold_pct == YOY_FALLBACK_PCT
+    # YoY = +50%, > 20 -> still flagged via fallback (legacy behaviour).
+    assert entry.flag_yoy_outlier is True
+
+
+def test_no_history_argument_preserves_legacy_behaviour() -> None:
+    """Omitting historical_by_year keeps the +/- 20% fallback (regression)."""
+    current = [_em(sub_scope="Cat1", tco2e="660", anno=2025)]
+    prior = [_em(sub_scope="Cat1", tco2e="600", anno=2024)]
+    out = compute_hotspots(emissions_current=current, emissions_prior=prior)
+    assert out[0].outlier_threshold_pct == YOY_FALLBACK_PCT
+    assert out[0].flag_yoy_outlier is False

@@ -109,6 +109,16 @@ def _parse_args() -> argparse.Namespace:
         action="store_true",
         help="Load and run orchestrator but do not write to DB",
     )
+    parser.add_argument(
+        "--dual",
+        action="store_true",
+        help=(
+            "FR-34 dual-track: run TWICE — once with (AR6, CSRD_ESRS_E1) then "
+            "(AR5, EU_ETS_PHASE_IV) — and print both result summaries. "
+            "Supersedes --gwp-set and --regulatory-stream when set. "
+            "MUST be used before any EU ETS filing per Reg. UE 2018/2066 + 2018/2067."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -162,9 +172,47 @@ def main() -> None:
         sync_engine.dispose()
         return
 
-    try:
-        from ghg_tool.application.services.calc_persistence import run_calc_and_persist
+    from ghg_tool.application.services.calc_persistence import run_calc_and_persist
 
+    if args.dual:
+        # FR-34: run both CSRD (AR6) and EU ETS (AR5) tracks.
+        # Per Regolamento UE 2018/2066 (MRR Art. 12) + 2018/2067 (Verification),
+        # both tracks MUST complete before any EU ETS filing.
+        tracks = [
+            ("AR6", "CSRD_ESRS_E1"),
+            ("AR5", "EU_ETS_PHASE_IV"),
+        ]
+        exit_code = 0
+        for gwp, stream in tracks:
+            track_cid = uuid.uuid4()
+            try:
+                result = run_calc_and_persist(
+                    tenant_id=tenant_id,
+                    anno=args.anno,
+                    correlation_id=track_cid,
+                    sync_engine=sync_engine,
+                    async_session_factory=session_factory,
+                    gwp_set=gwp,
+                    regulatory_stream=stream,
+                    created_by="scripts.run_calc.dual",
+                )
+                print(  # noqa: T201
+                    f"OK [{stream}/{gwp}] tenant={args.tenant_code} anno={args.anno} "
+                    f"correlation_id={result.correlation_id} "
+                    f"emissions_written={result.emissions_written} "
+                    f"(s1={result.scope1_count} s2={result.scope2_count} s3={result.scope3_count}) "
+                    f"duration_ms={result.duration_ms}"
+                )
+            except Exception as exc:  # noqa: BLE001
+                print(  # noqa: T201
+                    f"ERROR [{stream}/{gwp}]: calc run failed -- {exc}", file=sys.stderr
+                )
+                exit_code = 1
+        sync_engine.dispose()
+        sys.exit(exit_code)
+
+    # Single-track run (default behaviour, unchanged).
+    try:
         result = run_calc_and_persist(
             tenant_id=tenant_id,
             anno=args.anno,
