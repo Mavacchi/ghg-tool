@@ -1,5 +1,5 @@
 {
-  "app_title": "GHG Tool — Saturnia Ceramica S.r.l.",
+  "app_title": "GHG Tool — {company_name}",
   "nav_home": "Overview",
   "nav_drilldown": "Drill-down",
   "nav_yoy": "YoY Comparison",
@@ -18,7 +18,11 @@
   "login_pass": "Password",
   "login_btn": "Log in",
   "login_error": "Invalid credentials.",
+  "login_error_shape": "Username (min {min_user} chars) and password (min {min_pass} chars) are required.",
   "login_demo_hint": "Demo: enter any username/password for a demo token.",
+  "login_demo_warning": "⚠️ DEMO MODE active (GHG_DEMO_MODE=true). Authentication is bypassed: any username/password meeting the minimum length will be admitted with a demo token. Do NOT use in production.",
+  "login_real_hint": "Authenticated login. Credentials are verified by the backend.",
+  "demo_mode_banner": "DEMO MODE — you are authenticated with a demo token. The data and roles shown are not guaranteed by the backend.",
   "logout_btn": "Log out",
   "total_emissions": "Total Emissions (Scope 1+2 LB+3)",
   "scope1_total": "Scope 1 — Total",

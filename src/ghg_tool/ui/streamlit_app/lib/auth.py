@@ -23,6 +23,7 @@ from typing import Any, Final
 
 import streamlit as st
 
+from ghg_tool.ui.streamlit_app.lib.constants import TENANT_ID
 from ghg_tool.ui.streamlit_app.lib.i18n import _
 
 # Session-state keys
@@ -35,8 +36,33 @@ _LANG_KEY = "lang"
 # Demo/fallback tenant and token for environments without live auth.
 # Demo mode is OPT-IN only — must be explicitly enabled via env var.
 _DEMO_TOKEN: Final[str] = "demo-jwt-token"  # noqa: S105 — public sentinel, never a real secret
-_DEMO_TENANT: Final[str] = "saturnia-ceramica-v1"
+_DEMO_TENANT: Final[str] = TENANT_ID
 _DEMO_MODE: Final[bool] = os.getenv("GHG_DEMO_MODE", "").lower() in ("1", "true", "yes")
+
+# Minimum length required for username and password in demo mode.
+# This prevents an empty form submission from creating a demo session and
+# makes it clear to the user that credentials matter even when bypassed.
+_DEMO_MIN_USER_LEN: Final[int] = 3
+_DEMO_MIN_PASS_LEN: Final[int] = 4
+
+
+def is_demo_mode() -> bool:
+    """Return True iff demo-mode is enabled AND the active session uses a demo token.
+
+    Demo mode is enabled via the ``GHG_DEMO_MODE`` env var; the session is
+    "in demo" only after a demo-fallback login has populated session state
+    with the sentinel ``_DEMO_TOKEN``.
+    """
+    return _DEMO_MODE and st.session_state.get(_TOKEN_KEY) == _DEMO_TOKEN
+
+
+def render_demo_mode_banner(lang: str = "it") -> None:
+    """Render a visible warning banner when the session is in demo mode.
+
+    Call after ``require_auth`` on any page that should make the bypass
+    obvious to the user — they must never confuse it with a real login.
+    """
+    st.warning(_("demo_mode_banner", lang), icon="⚠️")
 
 
 def get_token() -> str | None:
@@ -110,10 +136,25 @@ def _enable_demo_session(username: str) -> None:
     st.session_state[_TENANT_KEY] = _DEMO_TENANT
 
 
+def _credentials_valid_shape(username: str, password: str) -> bool:
+    """Return True iff username/password meet minimum-shape requirements.
+
+    Applied uniformly to both real and demo-mode logins so that an empty
+    form submission can never authenticate. The real API still validates
+    against its own credential store — this is just an additional client-
+    side guard that mirrors the minimum acceptable shape.
+    """
+    return (
+        len(username.strip()) >= _DEMO_MIN_USER_LEN
+        and len(password) >= _DEMO_MIN_PASS_LEN
+    )
+
+
 def _do_login(username: str, password: str) -> bool:
     """Attempt login against the API; fail closed on errors.
 
     Behaviour (REV-WAVE3-003 + REV-WAVE3-014):
+    - empty / too-short credentials: rejected before any network call.
     - 200: store the real token from the auth endpoint.
     - 503: fail closed (returns False) UNLESS ``GHG_DEMO_MODE`` env var
       is true, in which case the demo fallback is used.
@@ -129,6 +170,9 @@ def _do_login(username: str, password: str) -> bool:
         True on successful authentication.
     """
     import httpx  # local import to avoid top-level circular dep
+
+    if not _credentials_valid_shape(username, password):
+        return False
 
     api_base = st.session_state.get("api_base_url", "http://localhost:8000")
     try:
@@ -168,7 +212,10 @@ def render_login_form(lang: str = "it") -> None:
         lang: Language code for labels.
     """
     st.title(_("login_title", lang))
-    st.caption(_("login_demo_hint", lang))
+    if _DEMO_MODE:
+        st.warning(_("login_demo_warning", lang), icon="⚠️")
+    else:
+        st.caption(_("login_real_hint", lang))
 
     with st.form("login_form"):
         username = st.text_input(_("login_user", lang))
@@ -176,7 +223,13 @@ def render_login_form(lang: str = "it") -> None:
         submitted = st.form_submit_button(_("login_btn", lang))
 
     if submitted:
-        if _do_login(username, password):
+        if not _credentials_valid_shape(username, password):
+            st.error(
+                _("login_error_shape", lang).format(
+                    min_user=_DEMO_MIN_USER_LEN, min_pass=_DEMO_MIN_PASS_LEN
+                )
+            )
+        elif _do_login(username, password):
             st.rerun()
         else:
             st.error(_("login_error", lang))

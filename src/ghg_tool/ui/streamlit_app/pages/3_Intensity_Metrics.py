@@ -27,7 +27,7 @@ import datetime as dt  # noqa: E402
 import pandas as pd  # noqa: E402
 import plotly.express as px  # noqa: E402
 
-from ghg_tool.ui.streamlit_app.Home import DASHBOARD_ID, DASHBOARD_VERSION  # noqa: E402
+from ghg_tool.ui.streamlit_app.lib.constants import DASHBOARD_ID, DASHBOARD_VERSION  # noqa: E402
 from ghg_tool.ui.streamlit_app.lib.api_client import fetch_intensity  # noqa: E402
 from ghg_tool.ui.streamlit_app.lib.auth import get_lang, require_auth  # noqa: E402
 from ghg_tool.ui.streamlit_app.lib.banner import render_viano_banner, should_show_viano_banner  # noqa: E402
