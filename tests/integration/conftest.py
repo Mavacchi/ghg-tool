@@ -27,6 +27,7 @@ from sqlalchemy.ext.asyncio import (
     async_sessionmaker,
     create_async_engine,
 )
+from sqlalchemy.pool import NullPool
 
 # ---------------------------------------------------------------------------
 # Connection URL — prefer CI env vars; fall back to local docker-compose stack
@@ -44,8 +45,33 @@ _ASYNC_URL = (
 
 @pytest_asyncio.fixture(scope="session")
 async def db_engine() -> AsyncIterator[AsyncEngine]:
-    """Yield a session-scoped async engine; dispose on teardown."""
-    engine = create_async_engine(_ASYNC_URL, echo=False, future=True)
+    """Yield a session-scoped async engine; dispose on teardown.
+
+    NullPool is required because pytest-asyncio 0.23 creates a fresh event
+    loop per function-scoped fixture by default, while this engine is
+    session-scoped.  A pooled asyncpg connection borrowed on the session
+    loop and reused on a function loop produces:
+
+        RuntimeError: Task ... got Future ... attached to a different loop
+
+    on the first test, then leaves the connection in an "in transaction"
+    state that surfaces as:
+
+        InterfaceError: cannot perform operation: another operation is in
+        progress
+
+    on every subsequent test that inherits that poisoned connection.
+
+    NullPool disables pooling — each ``async with engine.begin()`` opens a
+    fresh asyncpg connection on the current loop and closes it on exit, so
+    no connection is ever crossed between loops.
+    """
+    engine = create_async_engine(
+        _ASYNC_URL,
+        echo=False,
+        future=True,
+        poolclass=NullPool,
+    )
     yield engine
     await engine.dispose()
 

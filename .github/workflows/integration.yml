@@ -116,12 +116,18 @@ jobs:
           python -m alembic heads
 
       - name: Run integration tests
+        # --cov-fail-under=0 disables the 85% gate from pyproject.toml on this
+        # job: the integration suite alone only exercises a slice of src/ (it
+        # covers the DB layer, while pure-Python modules are tested in the
+        # unit job in ci.yml).  The 85% gate is enforced there on the unit
+        # suite — applying it here would always fail at ~34%.
         run: |
           python -m pytest tests/integration \
             -v --tb=short --strict-markers \
             -m "integration" \
             --cov=src/ghg_tool --cov-append \
-            --cov-report=term-missing
+            --cov-report=term-missing \
+            --cov-fail-under=0
 
       - name: Upload coverage artifact
         # Always upload so failures still produce a coverage artefact for diagnosis.
@@ -188,12 +194,14 @@ jobs:
         run: python -m alembic upgrade head
 
       - name: Run e2e tests
+        # See "Run integration tests" — same reason for disabling the 85% gate.
         run: |
           python -m pytest tests/e2e \
             -v --tb=short --strict-markers \
             -m "e2e" \
             --cov=src/ghg_tool --cov-append \
-            --cov-report=term-missing
+            --cov-report=term-missing \
+            --cov-fail-under=0
 
       - name: Upload coverage artifact
         if: always()
