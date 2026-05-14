@@ -1,0 +1,195 @@
+/* Carbontrace · Gresmalt brand chrome
+ *
+ * Injected at the top of every page by lib/brand.apply_brand_chrome().
+ * Tweaks Streamlit's defaults to match the Gresmalt visual identity:
+ *
+ *   - Larger logo in the top-left header AND in the sidebar
+ *   - Editorial typography: tighter headings, modest letter-spacing
+ *   - Subtle card treatment for metrics (warm beige fill, brand accent
+ *     left border)
+ *   - More generous vertical rhythm so the page reads less "dense
+ *     scientific dashboard" and more "premium ESG report"
+ *
+ * Targets only chrome (logo, headings, body, metric containers, sidebar,
+ * dividers). Chart series + DQ severity badges remain Okabe-Ito.
+ *
+ * The selectors lean on Streamlit's documented [data-testid="..."]
+ * attributes (stable in 1.35.x). If a future Streamlit release renames
+ * one of these, this file degrades gracefully — the theme in
+ * .streamlit/config.toml keeps the brand colours intact.
+ */
+
+/* --------------------------------------------------------------------
+ * Logo — top-left chrome
+ * st.logo() renders into [data-testid="stLogo"]. Default height is
+ * ~1.5rem; bumping to 3rem makes the wordmark legible without
+ * dominating the toolbar.
+ * ------------------------------------------------------------------ */
+[data-testid="stLogo"] {
+  height: 3rem !important;
+  max-height: 3rem !important;
+}
+[data-testid="stLogo"] img {
+  height: 3rem !important;
+  max-height: 3rem !important;
+  width: auto !important;
+}
+
+/* Sidebar logo block — see brand.render_sidebar_logo().
+ * Constrains the inline <img> so the wordmark sits proportionate to
+ * the sidebar width even on narrow displays. */
+.brand-sidebar-logo {
+  padding: 0.75rem 0.25rem 1rem 0.25rem;
+  margin-bottom: 0.5rem;
+  border-bottom: 1px solid #E9E2D8;  /* Gresmalt sand */
+}
+.brand-sidebar-logo img {
+  max-width: 180px;
+  width: 80%;
+  height: auto;
+  display: block;
+  margin: 0 auto;
+}
+
+/* --------------------------------------------------------------------
+ * Typography — editorial hierarchy
+ * ------------------------------------------------------------------ */
+[data-testid="stAppViewContainer"] h1,
+[data-testid="stAppViewContainer"] h2,
+[data-testid="stAppViewContainer"] h3 {
+  color: #202020;
+  letter-spacing: -0.01em;
+}
+[data-testid="stAppViewContainer"] h1 {
+  font-weight: 600;
+  font-size: 2.1rem;
+  margin-bottom: 0.25rem;
+}
+[data-testid="stAppViewContainer"] h2 {
+  font-weight: 600;
+  font-size: 1.45rem;
+  margin-top: 1.5rem;
+  margin-bottom: 0.5rem;
+}
+[data-testid="stAppViewContainer"] h3 {
+  font-weight: 600;
+  font-size: 1.1rem;
+  color: #788B99;  /* brand accent for tertiary headings only */
+}
+
+/* Subheader directly under h1 (page subtitle) reads as a caption */
+[data-testid="stAppViewContainer"] h1 + p,
+[data-testid="stAppViewContainer"] h1 + [data-testid="stCaptionContainer"] {
+  color: #5a5a5a;
+  font-size: 0.95rem;
+  margin-top: 0.25rem;
+  margin-bottom: 1.5rem;
+}
+
+/* --------------------------------------------------------------------
+ * Metric cards — subtle card treatment
+ * ------------------------------------------------------------------ */
+[data-testid="stMetric"] {
+  background-color: #FFFFFF;
+  padding: 1rem 1.25rem;
+  border-radius: 6px;
+  border: 1px solid #E9E2D8;
+  border-left: 3px solid #788B99;
+  box-shadow: 0 1px 2px rgba(32, 32, 32, 0.03);
+}
+[data-testid="stMetricLabel"] {
+  color: #5a5a5a;
+  font-size: 0.85rem;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+}
+[data-testid="stMetricValue"] {
+  color: #202020;
+  font-weight: 600;
+  font-size: 1.6rem;
+}
+[data-testid="stMetricDelta"] {
+  font-size: 0.85rem;
+}
+
+/* --------------------------------------------------------------------
+ * Sidebar — warm beige with proper rhythm
+ * ------------------------------------------------------------------ */
+[data-testid="stSidebar"] {
+  border-right: 1px solid #E9E2D8;
+}
+[data-testid="stSidebar"] h1,
+[data-testid="stSidebar"] h2,
+[data-testid="stSidebar"] h3 {
+  color: #202020;
+}
+[data-testid="stSidebar"] [data-testid="stSelectbox"] label,
+[data-testid="stSidebar"] [data-testid="stMultiSelect"] label,
+[data-testid="stSidebar"] [data-testid="stTextInput"] label,
+[data-testid="stSidebar"] [data-testid="stNumberInput"] label,
+[data-testid="stSidebar"] [data-testid="stSlider"] label {
+  font-weight: 500;
+  color: #202020;
+}
+
+/* Sidebar dividers a touch softer than default */
+[data-testid="stSidebar"] hr {
+  border-color: #E9E2D8;
+  margin: 1rem 0;
+}
+
+/* --------------------------------------------------------------------
+ * Dividers + footer caption
+ * ------------------------------------------------------------------ */
+[data-testid="stAppViewContainer"] hr {
+  border: none;
+  border-top: 1px solid #E9E2D8;
+  margin: 1.25rem 0;
+}
+[data-testid="stCaptionContainer"] {
+  color: #707070;
+  font-size: 0.8rem;
+  line-height: 1.5;
+}
+
+/* --------------------------------------------------------------------
+ * Tabs (used on a few pages) — brand accent for selected tab
+ * ------------------------------------------------------------------ */
+[data-testid="stTabs"] button[aria-selected="true"] {
+  color: #788B99 !important;
+  border-bottom-color: #788B99 !important;
+}
+
+/* --------------------------------------------------------------------
+ * Buttons — primary action in brand accent
+ * ------------------------------------------------------------------ */
+[data-testid="stButton"] > button {
+  border-radius: 4px;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  border: 1px solid #C8C8C8;
+}
+[data-testid="stButton"] > button:hover {
+  border-color: #788B99;
+  color: #788B99;
+}
+
+/* --------------------------------------------------------------------
+ * Expanders + alerts — softer borders
+ * ------------------------------------------------------------------ */
+[data-testid="stExpander"] {
+  border: 1px solid #E9E2D8;
+  border-radius: 6px;
+  background-color: #FFFFFF;
+}
+[data-testid="stExpander"] summary {
+  font-weight: 500;
+}
+
+/* --------------------------------------------------------------------
+ * DataFrame containers — warm beige header row + readable padding
+ * ------------------------------------------------------------------ */
+[data-testid="stDataFrame"] {
+  border-radius: 4px;
+  overflow: hidden;
+}

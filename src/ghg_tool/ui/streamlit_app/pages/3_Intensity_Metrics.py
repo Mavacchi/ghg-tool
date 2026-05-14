@@ -39,6 +39,7 @@ from ghg_tool.ui.streamlit_app.lib.api_client import fetch_intensity  # noqa: E4
 from ghg_tool.ui.streamlit_app.lib.auth import get_lang, require_auth  # noqa: E402
 from ghg_tool.ui.streamlit_app.lib.banner import render_viano_banner, should_show_viano_banner  # noqa: E402
 from ghg_tool.ui.streamlit_app.lib.help import _help  # noqa: E402
+from ghg_tool.ui.streamlit_app.lib.brand import apply_brand_chrome  # noqa: E402
 from ghg_tool.ui.streamlit_app.lib.i18n import _  # noqa: E402
 from ghg_tool.ui.streamlit_app.lib.palette import (  # noqa: E402
     BLUE,
@@ -48,6 +49,7 @@ from ghg_tool.ui.streamlit_app.lib.palette import (  # noqa: E402
 )
 from ghg_tool.ui.streamlit_app.lib.tooltips import build_emission_hovertemplate  # noqa: E402
 
+apply_brand_chrome()
 require_auth()
 lang = get_lang()
 

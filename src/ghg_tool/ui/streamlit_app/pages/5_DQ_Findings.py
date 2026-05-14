@@ -21,10 +21,12 @@ st.set_page_config(
 
 from ghg_tool.ui.streamlit_app.lib.auth import get_lang, require_auth  # noqa: E402
 from ghg_tool.ui.streamlit_app.lib.help import _help  # noqa: E402
+from ghg_tool.ui.streamlit_app.lib.brand import apply_brand_chrome  # noqa: E402
 from ghg_tool.ui.streamlit_app.lib.i18n import _  # noqa: E402
 from ghg_tool.ui.streamlit_app.lib.api_client import fetch_dq_findings, post_waiver  # noqa: E402
 from ghg_tool.ui.streamlit_app.lib.palette import SEVERITY_COLOURS, STATUS_COLOURS, VERMILION, ORANGE, BLUISH_GREEN  # noqa: E402
 
+apply_brand_chrome()
 require_auth()
 lang = get_lang()
 
