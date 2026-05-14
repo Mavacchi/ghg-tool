@@ -22,6 +22,7 @@ import streamlit as st
 
 st.set_page_config(page_title="Intensity Metrics — GHG", layout="wide")
 
+import datetime as dt  # noqa: E402
 import os  # noqa: E402
 
 import pandas as pd  # noqa: E402
@@ -64,7 +65,7 @@ _DENOM_UNIT_LABEL: dict[str, str] = {
     "kg_product": "tCO2e / kg",
 }
 
-_CURRENT_YEAR: int = 2026  # pinned to dashboard release year; update annually
+_CURRENT_YEAR: int = dt.date.today().year  # REV-WAVE3-009: derived dynamically
 
 with st.sidebar:
     gwp_set = st.selectbox("GWP Set", ["AR6", "AR5"], key="intensity_gwp")
@@ -139,11 +140,7 @@ if note:
     st.info(note)
 
 if df.empty:
-    st.warning(
-        "Nessun dato disponibile per i filtri selezionati. "
-        "Verificare che la pipeline di calcolo (wave 3) sia stata eseguita.",
-        icon="ℹ️",
-    )
+    st.warning(_("no_data", lang), icon="ℹ️")
     st.divider()
     st.caption(
         f"Dashboard ID: {DASHBOARD_ID} | v{DASHBOARD_VERSION} | "
@@ -207,7 +204,7 @@ st.plotly_chart(fig, use_container_width=True)
 # Tabular view + CSV download
 # ---------------------------------------------------------------------------
 
-st.subheader("Dati tabellari")
+st.subheader(_("table_view", lang))
 
 display_cols: list[str] = [
     c for c in [
@@ -225,7 +222,7 @@ st.dataframe(df[display_cols], use_container_width=True)
 
 csv_bytes: bytes = df[display_cols].to_csv(index=False).encode("utf-8")
 st.download_button(
-    label="Scarica CSV",
+    label=_("download_csv", lang),
     data=csv_bytes,
     file_name=f"intensity_{denominator_type}_{anno_from}_{anno_to}_{gwp_set}.csv",
     mime="text/csv",

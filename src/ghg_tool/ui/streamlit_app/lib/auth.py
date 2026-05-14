@@ -7,10 +7,17 @@ Flow:
   4. On success, stores token + user metadata in session_state.
   5. All subsequent API calls pass the Bearer token via ``api_client``.
 
+Demo-mode fallback is OPT-IN via ``GHG_DEMO_MODE=true`` env var
+(REV-WAVE3-003 + REV-WAVE3-014): in production the login form fails
+closed when the auth endpoint is unreachable or returns 503.
+
 No PII stored in logs.  Token value is never logged.
 """
 
 from __future__ import annotations
+
+import os
+from typing import Final
 
 import streamlit as st
 
@@ -23,9 +30,11 @@ _USER_KEY = "user_sub"
 _TENANT_KEY = "tenant_id"
 _LANG_KEY = "lang"
 
-# Demo/fallback tenant and token for environments without live auth
-_DEMO_TOKEN = "demo-jwt-token"  # noqa: S105 — not a real secret
-_DEMO_TENANT = "saturnia-ceramica-v1"
+# Demo/fallback tenant and token for environments without live auth.
+# Demo mode is OPT-IN only — must be explicitly enabled via env var.
+_DEMO_TOKEN: Final[str] = "demo-jwt-token"  # noqa: S105 — public sentinel, never a real secret
+_DEMO_TENANT: Final[str] = "saturnia-ceramica-v1"
+_DEMO_MODE: Final[bool] = os.getenv("GHG_DEMO_MODE", "").lower() in ("1", "true", "yes")
 
 
 def get_token() -> str | None:
@@ -61,15 +70,34 @@ def logout() -> None:
         st.session_state.pop(key, None)
 
 
+def _enable_demo_session(username: str) -> None:
+    """Populate session_state with demo credentials. REV-WAVE3-003.
+
+    Guarded by ``_DEMO_MODE`` env var — only invoked when explicit opt-in.
+    """
+    st.session_state[_TOKEN_KEY] = _DEMO_TOKEN
+    st.session_state[_ROLE_KEY] = "esg_manager"
+    st.session_state[_USER_KEY] = username[:8]  # truncated — no full PII
+    st.session_state[_TENANT_KEY] = _DEMO_TENANT
+
+
 def _do_login(username: str, password: str) -> bool:
-    """Attempt login against the API; fall back to demo token on 503.
+    """Attempt login against the API; fail closed on errors.
+
+    Behaviour (REV-WAVE3-003 + REV-WAVE3-014):
+    - 200: store the real token from the auth endpoint.
+    - 503: fail closed (returns False) UNLESS ``GHG_DEMO_MODE`` env var
+      is true, in which case the demo fallback is used.
+    - 4xx (e.g., 401 wrong credentials): fail closed.
+    - Network errors (ConnectError, TimeoutException): fail closed
+      UNLESS ``GHG_DEMO_MODE`` is true.
 
     Args:
         username: Submitted username (not logged).
         password: Submitted password (never logged, never stored).
 
     Returns:
-        True on successful authentication (real or demo fallback).
+        True on successful authentication.
     """
     import httpx  # local import to avoid top-level circular dep
 
@@ -87,21 +115,15 @@ def _do_login(username: str, password: str) -> bool:
             st.session_state[_USER_KEY] = username[:8]  # truncated — no full PII
             st.session_state[_TENANT_KEY] = _DEMO_TENANT
             return True
-        if resp.status_code == 503:
-            # Wave-3 fallback: auth endpoint not yet wired to user DB
-            st.session_state[_TOKEN_KEY] = _DEMO_TOKEN
-            st.session_state[_ROLE_KEY] = "esg_manager"
-            st.session_state[_USER_KEY] = username[:8]
-            st.session_state[_TENANT_KEY] = _DEMO_TENANT
+        if resp.status_code == 503 and _DEMO_MODE:
+            _enable_demo_session(username)
             return True
         return False
     except (httpx.ConnectError, httpx.TimeoutException):
-        # API not reachable — enter demo mode so the UI is still usable
-        st.session_state[_TOKEN_KEY] = _DEMO_TOKEN
-        st.session_state[_ROLE_KEY] = "esg_manager"
-        st.session_state[_USER_KEY] = username[:8]
-        st.session_state[_TENANT_KEY] = _DEMO_TENANT
-        return True
+        if _DEMO_MODE:
+            _enable_demo_session(username)
+            return True
+        return False
 
 
 def render_login_form(lang: str = "it") -> None:

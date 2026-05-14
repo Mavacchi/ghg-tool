@@ -187,11 +187,15 @@ class TestEmissionsIntegration:
         """
         token = _data_steward_token(tenant_id)
 
+        # REV-WAVE3-012: UUID-suffixed sub_scope avoids collision with the
+        # partial unique active-row index (ux_emissions_active_natural_key),
+        # so the POST must succeed (201) and the row must be readable.
+        unique_sub_scope = f"combustion_{uuid.uuid4().hex[:8]}"
         payload = {
             "raw_row_id": str(uuid.uuid4()),
             "raw_scope": 1,
             "scope": 1,
-            "sub_scope": "combustion",
+            "sub_scope": unique_sub_scope,
             "codice_sito": "IANO",
             "anno": 2024,
             "tco2e": 3.141,
@@ -209,10 +213,8 @@ class TestEmissionsIntegration:
                 headers={"Authorization": f"Bearer {token}"},
             )
 
-        # The API must accept the insert (201 Created) or return 422 if the
-        # sub_scope is rejected by the unique active-row index.  Both are
-        # acceptable; what matters is that it does not return 5xx.
-        assert post_resp.status_code in {201, 200, 409, 422}, (
+        # With a UUID-suffixed sub_scope the insert must succeed (201).
+        assert post_resp.status_code in {200, 201}, (
             f"Unexpected status from POST /emissions/: {post_resp.status_code} — "
             f"{post_resp.text}"
         )
@@ -308,30 +310,26 @@ class TestEmissionsIntegration:
                 headers={"Authorization": f"Bearer {token}"},
             )
 
-        # Accept 200/201 (success) or 404/422 (correction endpoint path varies)
-        # The key assertion is that the predecessor was closed IF the call succeeded.
-        if resp.status_code in {200, 201}:
-            # Verify predecessor was closed by fn_emit_correction
-            result = await rls_session.execute(
-                text(
-                    "SELECT valid_to, superseded_by "
-                    "FROM calc.emissions_consolidated "
-                    "WHERE id = :id::uuid"
-                ),
-                {"id": row_a_id},
-            )
-            row = result.fetchone()
-            if row is not None:
-                # If the correction was applied, valid_to must be set
-                assert row[0] is not None or row[1] is not None, (
-                    "Predecessor row A must have valid_to or superseded_by set after correction"
-                )
-        else:
-            # Non-2xx is acceptable if the correction endpoint path or schema differs;
-            # the critical invariant (405 on DELETE) is separately tested.
-            assert resp.status_code in {200, 201, 404, 422, 400}, (
-                f"Unexpected status from correction endpoint: {resp.status_code} — {resp.text}"
-            )
+        # REV-WAVE3-013: POST /api/v1/emissions/correction must succeed
+        # for a valid predecessor that was seeded above. We assert the
+        # 2xx invariant unconditionally and verify the predecessor was
+        # closed by fn_emit_correction.
+        assert resp.status_code in {200, 201}, (
+            f"Correction must succeed (200/201), got {resp.status_code} — {resp.text}"
+        )
+        result = await rls_session.execute(
+            text(
+                "SELECT valid_to, superseded_by "
+                "FROM calc.emissions_consolidated "
+                "WHERE id = :id::uuid"
+            ),
+            {"id": row_a_id},
+        )
+        row = result.fetchone()
+        assert row is not None, "Predecessor row A must remain readable after correction"
+        assert row[0] is not None or row[1] is not None, (
+            "Predecessor row A must have valid_to or superseded_by set after correction"
+        )
 
     @pytest.mark.asyncio
     async def test_rls_prevents_cross_tenant_access(
