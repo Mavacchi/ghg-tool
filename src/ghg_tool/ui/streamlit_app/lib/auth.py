@@ -23,7 +23,11 @@ from typing import Any, Final
 
 import streamlit as st
 
-from ghg_tool.ui.streamlit_app.lib.constants import TENANT_ID
+from ghg_tool.ui.streamlit_app.lib.constants import (
+    COMPANY_NAME,
+    PRODUCT_NAME,
+    TENANT_ID,
+)
 from ghg_tool.ui.streamlit_app.lib.i18n import _
 
 # Session-state keys
@@ -211,13 +215,6 @@ def render_login_form(lang: str = "it") -> None:
     The form sits in a narrow centred column so the brand reads as a
     proper sign-in landing page rather than a wide demo layout.
     """
-    # Defer brand-constant import to runtime to avoid a top-level cycle
-    # (lib.brand imports lib.auth indirectly through Home.py).
-    from ghg_tool.ui.streamlit_app.lib.constants import (  # noqa: PLC0415
-        COMPANY_NAME,
-        PRODUCT_NAME,
-    )
-
     # Centred narrow column: 1 / 2 / 1 ratio gives a comfortable form
     # width on any reasonable viewport.
     _spacer_l, _form_col, _spacer_r = st.columns([1, 2, 1])

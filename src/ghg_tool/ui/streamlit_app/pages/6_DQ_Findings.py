@@ -146,16 +146,16 @@ else:
                         if "error" in result:
                             st.error(f"Errore: {result['error']}")
                         else:
-                            st.success("Rinuncia applicata.")
+                            st.success(_("waiver_applied", lang))
                             # Clear only the affected cache; avoid nuking other pages' data.
                             try:
                                 fetch_dq_findings.clear()  # type: ignore[attr-defined]
                             except AttributeError:
                                 st.cache_data.clear()
                     else:
-                        st.error("Giustificazione deve essere almeno 10 caratteri.")
+                        st.error(_("justification_too_short", lang))
             else:
-                st.info("Nessun finding OPEN disponibile.")
+                st.info(_("no_open_findings", lang))
 
 # ---------------------------------------------------------------------------
 # Footer

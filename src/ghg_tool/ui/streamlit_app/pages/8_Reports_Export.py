@@ -111,7 +111,7 @@ st.title(_("nav_reports", lang))
 with st.sidebar:
     anno = sidebar_year_filter(lang)
     gwp_set = sidebar_gwp_filter(lang)
-    report_lang = st.selectbox("Report language", ["it", "en"])
+    report_lang = st.selectbox(_("report_lang_label", lang), ["it", "en"])
 
 # ---------------------------------------------------------------------------
 # PDF export

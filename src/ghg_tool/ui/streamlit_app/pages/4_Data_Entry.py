@@ -60,7 +60,7 @@ lang = get_lang()
 # ---------------------------------------------------------------------------
 # Page header
 # ---------------------------------------------------------------------------
-st.title("Inserimento dati" if lang == "it" else "Data entry")
+st.title(_("nav_data_entry", lang))
 
 # Append-only explainer (the most important message on this page).
 st.info(
@@ -157,13 +157,17 @@ def _show_success(label: str, payload: dict) -> None:
     if corr:
         st.caption(f"Correlation ID: `{corr}`")
 
-    # Invalidate any cached GETs that just went stale.
+    # Invalidate any cached GETs that just went stale. clear() can raise
+    # AttributeError if the underlying cache wrapper has been swapped at
+    # runtime (e.g. in tests); a TypeError surfaces when the wrapper does
+    # not actually carry a callable. Both are recoverable - cache
+    # invalidation is best-effort and never blocks the write success path.
     for fn in (fetch_emissions, fetch_factor_catalog):
         clear = getattr(fn, "clear", None)
         if callable(clear):
             try:
                 clear()
-            except Exception:  # noqa: BLE001 - cache invalidation is best-effort
+            except (AttributeError, TypeError):
                 pass
 
     # Primary CTA: one-click jump to Audit Trail to verify the new row.

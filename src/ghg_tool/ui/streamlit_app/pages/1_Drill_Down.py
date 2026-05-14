@@ -15,7 +15,7 @@ from __future__ import annotations
 import streamlit as st
 
 from ghg_tool.ui.streamlit_app.lib.constants import (
-    DASHBOARD_ID, DASHBOARD_VERSION, PRODUCT_NAME, page_icon,
+    DASHBOARD_ID, DASHBOARD_VERSION, KNOWN_SITES, PRODUCT_NAME, page_icon,
 )
 
 st.set_page_config(
@@ -61,8 +61,7 @@ with st.sidebar:
     if selected_scope_label != _("all_scopes", lang):
         selected_scope = int(selected_scope_label.split()[-1])
 
-    all_sites = ["IANO", "VIANO", "VIANO_GARGOLA", "CASALGRANDE",
-                 "FIORANO", "SASSUOLO", "FRASSINORO"]
+    all_sites = list(KNOWN_SITES)
     selected_sites = st.multiselect(
         _("site_filter", lang), all_sites, default=all_sites,
         help=_help("codice_sito", lang),
@@ -217,7 +216,7 @@ else:
                             else:
                                 st.success(_("correction_ok", lang))
                         else:
-                            st.error("Giustificazione deve essere almeno 10 caratteri.")
+                            st.error(_("justification_too_short", lang))
                 else:
                     st.info("Nessuna emissione disponibile per correzione.")
 

@@ -40,6 +40,16 @@ _YEAR_OPTIONS: Final[list[int]] = list(range(2024, 2027))
 _GWP_OPTIONS: Final[list[str]] = ["AR6", "AR5"]
 
 
+def available_years() -> list[int]:
+    """Return the canonical list of selectable fiscal years.
+
+    Pages with year-related UI that does NOT go through the shared
+    sidebar widgets (e.g. dual-year YoY, Audit Trail filter) should
+    call this getter so the option list stays in one place.
+    """
+    return list(_YEAR_OPTIONS)
+
+
 def _default_year() -> int:
     """Return the year shown the first time the user lands on a page."""
     current = _dt.date.today().year
@@ -85,7 +95,7 @@ def sidebar_gwp_filter(lang: str = "it") -> str:
     if _GWP_KEY not in st.session_state:
         st.session_state[_GWP_KEY] = _GWP_OPTIONS[0]
     return st.selectbox(
-        "GWP Set",
+        _("gwp_filter_label", lang),
         _GWP_OPTIONS,
         key=_GWP_KEY,
         help=_help("gwp", lang),

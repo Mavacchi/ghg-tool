@@ -123,5 +123,14 @@
   "all_sites": "Tutti i Siti",
   "all_label": "Tutti",
   "search_btn": "Cerca",
-  "no_results": "Nessun risultato per i filtri selezionati."
+  "no_results": "Nessun risultato per i filtri selezionati.",
+  "gwp_filter_label": "Set GWP",
+  "report_lang_label": "Lingua del report",
+  "nav_data_entry": "Inserimento dati",
+  "no_biogenic_in_period": "Nessuna emissione biogenica nel periodo selezionato.",
+  "waiver_applied": "Rinuncia applicata.",
+  "justification_too_short": "La giustificazione deve essere almeno 10 caratteri.",
+  "no_open_findings": "Nessun finding OPEN disponibile.",
+  "sites_filter_hint": "Siti (vuoto = tutti)",
+  "rows_per_page": "Righe per pagina"
 }

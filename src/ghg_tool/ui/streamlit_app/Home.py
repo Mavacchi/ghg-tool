@@ -157,7 +157,7 @@ total_lb = sum(scope_totals.values())
 # show a clear guided CTA instead of five "0.0 tCO2e" tiles that read
 # as broken/loading.
 # ---------------------------------------------------------------------------
-if not kpis or total_lb <= 0.0 and scope2_mb_total <= 0.0:
+if not kpis or (total_lb <= 0.0 and scope2_mb_total <= 0.0):
     with st.container(border=True):
         st.subheader(_("empty_kpi_title", lang))
         st.markdown(_("empty_kpi_body", lang))
@@ -230,7 +230,7 @@ with st.expander(f"⚠️ {_('biogenic_memo', lang)}", expanded=False):
             help=_help("biogenic", lang),
         )
     else:
-        st.caption("Nessuna emissione biogenica nel periodo selezionato.")
+        st.caption(_("no_biogenic_in_period", lang))
 
 # ---------------------------------------------------------------------------
 # Scope breakdown bar chart

@@ -110,7 +110,7 @@ with st.sidebar:
         "CASALGRANDE", "FIORANO", "SASSUOLO", "FRASSINORO",
     ]
     selected_sites: list[str] = st.multiselect(
-        "Siti (vuoto = tutti)",
+        _("sites_filter_hint", lang),
         _ALL_SITES,
         default=[],
         key="intensity_sites",

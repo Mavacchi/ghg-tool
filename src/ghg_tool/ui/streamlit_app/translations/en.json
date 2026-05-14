@@ -123,5 +123,14 @@
   "all_sites": "All Sites",
   "all_label": "All",
   "search_btn": "Search",
-  "no_results": "No results for the selected filters."
+  "no_results": "No results for the selected filters.",
+  "gwp_filter_label": "GWP Set",
+  "report_lang_label": "Report language",
+  "nav_data_entry": "Data Entry",
+  "no_biogenic_in_period": "No biogenic emissions in the selected period.",
+  "waiver_applied": "Waiver applied.",
+  "justification_too_short": "Justification must be at least 10 characters.",
+  "no_open_findings": "No OPEN findings available.",
+  "sites_filter_hint": "Sites (empty = all)",
+  "rows_per_page": "Rows per page"
 }
