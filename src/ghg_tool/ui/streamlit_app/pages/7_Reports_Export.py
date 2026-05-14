@@ -18,6 +18,7 @@ st.set_page_config(page_title="Reports Export — GHG", layout="wide")
 
 from ghg_tool.ui.streamlit_app.lib.constants import DASHBOARD_ID, DASHBOARD_VERSION  # noqa: E402
 from ghg_tool.ui.streamlit_app.lib.auth import get_lang, require_auth  # noqa: E402
+from ghg_tool.ui.streamlit_app.lib.help import _help  # noqa: E402
 from ghg_tool.ui.streamlit_app.lib.i18n import _  # noqa: E402
 from ghg_tool.ui.streamlit_app.lib.api_client import (  # noqa: E402
     trigger_pdf_report,
@@ -98,8 +99,14 @@ st.title(_("nav_reports", lang))
 # Sidebar
 # ---------------------------------------------------------------------------
 with st.sidebar:
-    anno = st.selectbox(_("year_filter", lang), [2024, 2025], index=1)
-    gwp_set = st.selectbox("GWP Set", ["AR6", "AR5"])
+    anno = st.selectbox(
+        _("year_filter", lang), [2024, 2025], index=1,
+        help=_help("anno_fiscale", lang),
+    )
+    gwp_set = st.selectbox(
+        "GWP Set", ["AR6", "AR5"],
+        help=_help("gwp", lang),
+    )
     report_lang = st.selectbox("Report language", ["it", "en"])
 
 # ---------------------------------------------------------------------------
@@ -107,11 +114,12 @@ with st.sidebar:
 # ---------------------------------------------------------------------------
 st.subheader(_("generate_pdf", lang))
 st.caption(_("pdf_subtitle", lang))
+st.caption(f"ℹ️ {_help('esrs_e1', lang)}")
 
 col_pdf, col_pdf_status = st.columns([1, 2])
 
 with col_pdf:
-    if st.button(_("generate_pdf", lang), key="btn_pdf"):
+    if st.button(_("generate_pdf", lang), key="btn_pdf", help=_help("esrs_e1", lang)):
         result = trigger_pdf_report(anno=anno, gwp_set=gwp_set, language=report_lang)
         if "error" in result:
             st.error(f"{_('job_failed', lang)}: {result['error']}")

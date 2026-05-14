@@ -21,6 +21,7 @@ st.set_page_config(page_title="YoY Comparison — GHG", layout="wide")
 from ghg_tool.ui.streamlit_app.lib.constants import DASHBOARD_ID, DASHBOARD_VERSION  # noqa: E402
 from ghg_tool.ui.streamlit_app.lib.auth import get_lang, require_auth  # noqa: E402
 from ghg_tool.ui.streamlit_app.lib.banner import render_viano_banner, should_show_viano_banner  # noqa: E402
+from ghg_tool.ui.streamlit_app.lib.help import _help  # noqa: E402
 from ghg_tool.ui.streamlit_app.lib.i18n import _  # noqa: E402
 from ghg_tool.ui.streamlit_app.lib.api_client import fetch_emissions, emissions_to_dataframe  # noqa: E402
 from ghg_tool.ui.streamlit_app.lib.palette import (  # noqa: E402
@@ -36,15 +37,36 @@ st.title(_("nav_yoy", lang))
 # Sidebar
 # ---------------------------------------------------------------------------
 with st.sidebar:
-    year_base = st.selectbox(_("select_year_base", lang), [2024, 2025], index=0)
-    year_compare = st.selectbox(_("select_year_compare", lang), [2024, 2025], index=1)
-    gwp_set = st.selectbox("GWP Set", ["AR6", "AR5"])
+    year_base = st.selectbox(
+        _("select_year_base", lang), [2024, 2025], index=0,
+        help=_help("anno_fiscale", lang),
+    )
+    year_compare = st.selectbox(
+        _("select_year_compare", lang), [2024, 2025], index=1,
+        help=_help("yoy_delta_abs", lang),
+    )
+    gwp_set = st.selectbox(
+        "GWP Set", ["AR6", "AR5"],
+        help=_help("gwp", lang),
+    )
 
     st.divider()
-    revenue_meur_base = st.number_input("Ricavi base (M€)", value=120.0, min_value=0.1)
-    revenue_meur_cmp = st.number_input("Ricavi confronto (M€)", value=115.0, min_value=0.1)
-    prod_t_base = st.number_input("Produzione base (t)", value=500000.0, min_value=1.0)
-    prod_t_cmp = st.number_input("Produzione confronto (t)", value=480000.0, min_value=1.0)
+    revenue_meur_base = st.number_input(
+        "Ricavi base (M€)", value=120.0, min_value=0.1,
+        help=_help("intensity_revenue", lang),
+    )
+    revenue_meur_cmp = st.number_input(
+        "Ricavi confronto (M€)", value=115.0, min_value=0.1,
+        help=_help("intensity_revenue", lang),
+    )
+    prod_t_base = st.number_input(
+        "Produzione base (t)", value=500000.0, min_value=1.0,
+        help=_help("intensity_kg_product", lang),
+    )
+    prod_t_cmp = st.number_input(
+        "Produzione confronto (t)", value=480000.0, min_value=1.0,
+        help=_help("intensity_kg_product", lang),
+    )
 
 # ---------------------------------------------------------------------------
 # VIANO banner

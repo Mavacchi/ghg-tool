@@ -13,6 +13,7 @@ st.set_page_config(page_title="DQ Findings — GHG", layout="wide")
 
 from ghg_tool.ui.streamlit_app.lib.constants import DASHBOARD_ID, DASHBOARD_VERSION  # noqa: E402
 from ghg_tool.ui.streamlit_app.lib.auth import get_lang, require_auth  # noqa: E402
+from ghg_tool.ui.streamlit_app.lib.help import _help  # noqa: E402
 from ghg_tool.ui.streamlit_app.lib.i18n import _  # noqa: E402
 from ghg_tool.ui.streamlit_app.lib.api_client import fetch_dq_findings, post_waiver  # noqa: E402
 from ghg_tool.ui.streamlit_app.lib.palette import SEVERITY_COLOURS, STATUS_COLOURS, VERMILION, ORANGE, BLUISH_GREEN  # noqa: E402
@@ -27,11 +28,17 @@ st.title(_("nav_dq_findings", lang))
 # ---------------------------------------------------------------------------
 with st.sidebar:
     severity_opts = ["Tutti / All", "CRIT", "WARN", "INFO"]
-    severity_label = st.selectbox(_("dq_severity", lang), severity_opts)
+    severity_label = st.selectbox(
+        _("dq_severity", lang), severity_opts,
+        help=_help("dq_crit", lang),
+    )
     severity_filter = None if severity_label.startswith("Tutti") else severity_label
 
     status_opts = ["Tutti / All", "OPEN", "WAIVED", "REMEDIATED"]
-    status_label = st.selectbox(_("dq_status", lang), status_opts)
+    status_label = st.selectbox(
+        _("dq_status", lang), status_opts,
+        help=_help("dq_status_open", lang),
+    )
     status_filter = None if status_label.startswith("Tutti") else status_label
 
     rule_id_filter = st.text_input(_("dq_rule", lang), value="")
@@ -62,12 +69,12 @@ else:
     col1, col2, col3 = st.columns(3)
     with col1:
         st.metric(f"CRIT ({_('dq_crit', lang)})", n_crit,
-                  help="Colour: Vermilion #D55E00 (Okabe-Ito)")
+                  help=_help("dq_crit", lang))
     with col2:
         st.metric(f"WARN ({_('dq_warn', lang)})", n_warn,
-                  help="Colour: Orange #E69F00 (Okabe-Ito)")
+                  help=_help("dq_warn", lang))
     with col3:
-        st.metric(f"OPEN", n_open)
+        st.metric(f"OPEN", n_open, help=_help("dq_status_open", lang))
 
     st.divider()
 

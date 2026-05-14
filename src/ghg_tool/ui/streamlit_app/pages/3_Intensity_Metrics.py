@@ -31,6 +31,7 @@ from ghg_tool.ui.streamlit_app.lib.constants import DASHBOARD_ID, DASHBOARD_VERS
 from ghg_tool.ui.streamlit_app.lib.api_client import fetch_intensity  # noqa: E402
 from ghg_tool.ui.streamlit_app.lib.auth import get_lang, require_auth  # noqa: E402
 from ghg_tool.ui.streamlit_app.lib.banner import render_viano_banner, should_show_viano_banner  # noqa: E402
+from ghg_tool.ui.streamlit_app.lib.help import _help  # noqa: E402
 from ghg_tool.ui.streamlit_app.lib.i18n import _  # noqa: E402
 from ghg_tool.ui.streamlit_app.lib.palette import (  # noqa: E402
     BLUE,
@@ -66,13 +67,24 @@ _DENOM_UNIT_LABEL: dict[str, str] = {
 
 _CURRENT_YEAR: int = dt.date.today().year  # REV-WAVE3-009: derived dynamically
 
+_DENOM_HELP_KEYS: dict[str, str] = {
+    "EUR_revenue": "intensity_revenue",
+    "m2_production": "intensity_m2",
+    "FTE": "intensity_fte",
+    "kg_product": "intensity_kg_product",
+}
+
 with st.sidebar:
-    gwp_set = st.selectbox("GWP Set", ["AR6", "AR5"], key="intensity_gwp")
+    gwp_set = st.selectbox(
+        "GWP Set", ["AR6", "AR5"], key="intensity_gwp",
+        help=_help("gwp", lang),
+    )
 
     denom_label = st.selectbox(
         _("intensity_denominator", lang),
         list(_DENOM_LABELS.keys()),
         key="intensity_denom",
+        help=_help("intensity_revenue", lang),
     )
     denominator_type = _DENOM_LABELS[denom_label]  # type: ignore[index]
 

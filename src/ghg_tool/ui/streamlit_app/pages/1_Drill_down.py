@@ -19,6 +19,7 @@ st.set_page_config(page_title="Drill-down — GHG", layout="wide")
 from ghg_tool.ui.streamlit_app.lib.constants import DASHBOARD_ID, DASHBOARD_VERSION  # noqa: E402
 from ghg_tool.ui.streamlit_app.lib.auth import get_lang, require_auth  # noqa: E402
 from ghg_tool.ui.streamlit_app.lib.banner import render_viano_banner, should_show_viano_banner  # noqa: E402
+from ghg_tool.ui.streamlit_app.lib.help import _help  # noqa: E402
 from ghg_tool.ui.streamlit_app.lib.i18n import _  # noqa: E402
 from ghg_tool.ui.streamlit_app.lib.api_client import (  # noqa: E402
     fetch_emissions,
@@ -40,10 +41,16 @@ with st.sidebar:
     st.header("Filtri / Filters")
 
     year_opts = list(range(2024, 2027))
-    selected_year = st.selectbox(_("year_filter", lang), year_opts, index=0)
+    selected_year = st.selectbox(
+        _("year_filter", lang), year_opts, index=0,
+        help=_help("anno_fiscale", lang),
+    )
 
     scope_opts = [_("all_scopes", lang), "Scope 1", "Scope 2", "Scope 3"]
-    selected_scope_label = st.selectbox(_("scope_filter", lang), scope_opts)
+    selected_scope_label = st.selectbox(
+        _("scope_filter", lang), scope_opts,
+        help=_help("scope1", lang),  # generic scope 1/2/3 explainer; per-scope detail in metric cards
+    )
     selected_scope: int | None = None
     if selected_scope_label != _("all_scopes", lang):
         selected_scope = int(selected_scope_label.split()[-1])
@@ -51,12 +58,16 @@ with st.sidebar:
     all_sites = ["IANO", "VIANO", "VIANO_GARGOLA", "CASALGRANDE",
                  "FIORANO", "SASSUOLO", "FRASSINORO"]
     selected_sites = st.multiselect(
-        _("site_filter", lang), all_sites, default=all_sites
+        _("site_filter", lang), all_sites, default=all_sites,
+        help=_help("codice_sito", lang),
     )
 
     selected_sub_scope = st.text_input(_("sub_scope_filter", lang), value="")
 
-    gwp_set = st.selectbox("GWP Set", ["AR6", "AR5"])
+    gwp_set = st.selectbox(
+        "GWP Set", ["AR6", "AR5"],
+        help=_help("gwp", lang),
+    )
 
 # ---------------------------------------------------------------------------
 # VIANO banner
@@ -158,11 +169,15 @@ else:
             with st.expander(f"✏️ {_('correction_btn', lang)}", expanded=False):
                 emission_ids = df["id"].tolist() if "id" in df.columns else []
                 if emission_ids:
-                    selected_id = st.selectbox("Emission ID da correggere", emission_ids)
+                    selected_id = st.selectbox(
+                        "Emission ID da correggere", emission_ids,
+                        help=_help("audit_predecessor", lang),
+                    )
                     reason = st.selectbox(
                         _("correction_reason", lang),
                         ["DATA_ERROR", "FACTOR_UPDATE", "BOUNDARY_CHANGE",
                          "METHODOLOGY_REVISION", "RESTATEMENT_>5PCT"],
+                        help=_help("audit_valid_from_to", lang),
                     )
                     justification = st.text_area(
                         _("correction_justification", lang),
