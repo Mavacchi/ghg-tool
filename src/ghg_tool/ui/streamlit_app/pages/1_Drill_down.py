@@ -136,8 +136,13 @@ else:
         ]
         st.dataframe(df[display_cols], use_container_width=True, hide_index=True)
 
-        # CSV download
-        csv_data = df[display_cols].to_csv(index=False).encode("utf-8")
+        # CSV download — defang Excel formula injection in string columns
+        from ghg_tool.ui.excel.sheets import _safe_cell_value  # noqa: PLC0415
+
+        _csv_df = df[display_cols].copy()
+        for _col in _csv_df.select_dtypes(include=["object"]).columns:
+            _csv_df[_col] = _csv_df[_col].map(_safe_cell_value)
+        csv_data = _csv_df.to_csv(index=False).encode("utf-8")
         st.download_button(
             label=_("download_csv", lang),
             data=csv_data,
@@ -159,7 +164,11 @@ else:
                         ["DATA_ERROR", "FACTOR_UPDATE", "BOUNDARY_CHANGE",
                          "METHODOLOGY_REVISION", "RESTATEMENT_>5PCT"],
                     )
-                    justification = st.text_area(_("correction_justification", lang), min_chars=10)
+                    justification = st.text_area(
+                        _("correction_justification", lang),
+                        max_chars=4000,
+                        help="Minimo 10 caratteri",
+                    )
                     tco2e_new = st.number_input("Nuovo valore tCO2e", min_value=0.0, step=0.001)
 
                     if st.button(_("correction_btn", lang)):

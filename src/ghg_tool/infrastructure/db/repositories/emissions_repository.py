@@ -47,18 +47,28 @@ class EmissionsRepository:
         await self._session.flush()
         return emission
 
-    async def get_by_id(self, emission_id: uuid.UUID) -> Emission | None:
-        """Fetch a single emission row by primary key.
+    async def get_by_id(
+        self,
+        emission_id: uuid.UUID,
+        *,
+        tenant_id: uuid.UUID | None = None,
+    ) -> Emission | None:
+        """Fetch a single emission row by primary key, optionally tenant-scoped.
 
         Args:
             emission_id: UUID primary key.
+            tenant_id: When provided, filters the row by tenant as a
+                defence-in-depth layer on top of RLS; the row is returned only
+                when both the primary key and tenant match. Callers exposed
+                to user input MUST pass this.
 
         Returns:
-            The ``Emission`` instance, or None if not found.
+            The ``Emission`` instance, or None if not found / wrong tenant.
         """
-        result = await self._session.execute(
-            select(Emission).where(Emission.id == emission_id)
-        )
+        stmt = select(Emission).where(Emission.id == emission_id)
+        if tenant_id is not None:
+            stmt = stmt.where(Emission.tenant_id == tenant_id)
+        result = await self._session.execute(stmt)
         return result.scalar_one_or_none()
 
     async def get_active(

@@ -58,23 +58,29 @@ def check_facility_coverage(
         present = set(s1_year["Codice_Sito"].unique())
         missing = _VALID_SITI - present
         if missing:
-            findings.append(
-                {
-                    "rule_id": "DQ-CRIT-01",
-                    "severity": "CRIT",
-                    "scope": 1,
-                    "anno": int(year),
-                    "codice_sito": ",".join(sorted(missing)),
-                    "metric": "facility_coverage_s1",
-                    "value_observed": len(present),
-                    "value_reference": 7,
-                    "trigger_desc": (
-                        f"DQ-CRIT-01: Scope 1 coverage {len(present)}/7 for year {year}. "
-                        f"Missing sites: {sorted(missing)}"
-                    ),
-                    "blocks_pipeline": True,
-                }
-            )
+            sorted_missing = sorted(missing)
+            # codice_sito column is VARCHAR(40) in calc.dq_findings, so a
+            # multi-site CSV would overflow when many sites are missing.
+            # Emit one finding per missing site; the trigger_desc still lists
+            # the full set for human readers.
+            for site in sorted_missing:
+                findings.append(
+                    {
+                        "rule_id": "DQ-CRIT-01",
+                        "severity": "CRIT",
+                        "scope": 1,
+                        "anno": int(year),
+                        "codice_sito": site,
+                        "metric": "facility_coverage_s1",
+                        "value_observed": len(present),
+                        "value_reference": 7,
+                        "trigger_desc": (
+                            f"DQ-CRIT-01: Scope 1 coverage {len(present)}/7 for year {year}. "
+                            f"Missing sites: {sorted_missing}"
+                        ),
+                        "blocks_pipeline": True,
+                    }
+                )
     return len(findings) == 0, findings
 
 
@@ -194,12 +200,17 @@ def check_outlier_zscore(df: pd.DataFrame, scope: int) -> tuple[bool, list[Findi
     qty = pd.to_numeric(df["Quantità"], errors="coerce")
     df = df.copy()
     df["_qty"] = qty
-    # Group by (fuel_col, Anno) and compute z-score within each group
+    # Group by (fuel_col, Anno) and compute z-score within each group.
+    # Use population std (ddof=0) so the achievable |z| maximum is
+    # (n-1)/sqrt(n) — matching the docstring (≈2.27 for n=7) and the test
+    # expectation. Pandas default ddof=1 would yield ~sqrt(n-1) ≈ 2.45
+    # for the same scenario, moving the threshold off its intended margin.
     for (fuel, anno), grp in df.groupby([fuel_col, "Anno"]):
         grp_qty = grp["_qty"].dropna()
-        if grp_qty.std() == 0 or len(grp_qty) < _MIN_OUTLIER_GROUP_SIZE:
+        std = grp_qty.std(ddof=0)
+        if pd.isna(std) or std <= 1e-12 or len(grp_qty) < _MIN_OUTLIER_GROUP_SIZE:
             continue
-        z_scores = (grp_qty - grp_qty.mean()) / grp_qty.std()
+        z_scores = (grp_qty - grp_qty.mean()) / std
         for idx, z in z_scores.items():
             if abs(z) > _ZSCORE_CRIT_THRESHOLD:
                 # pandas-stubs types idx as Hashable; runtime types are int/str labels.

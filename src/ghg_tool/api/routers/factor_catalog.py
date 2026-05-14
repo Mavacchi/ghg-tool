@@ -184,7 +184,11 @@ async def create_factor(
         applicability_note=body.applicability_note,
         pdf_source_uri=body.pdf_source_uri,
         biogenic_co2_kg_per_unit=body.biogenic_co2_kg_per_unit,
-        published_by=user.sub,
+        # New factors land as drafts (is_published=False). published_by is
+        # the *publisher* attribution and must remain NULL until a dedicated
+        # publish endpoint flips is_published — recording a publisher for an
+        # unpublished factor would falsify the audit trail.
+        published_by=None,
         is_published=False,
         is_tbc=False,
     )

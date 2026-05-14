@@ -115,7 +115,9 @@ else:
                      "METHODOLOGY_INFO", "ASSURANCE_ACCEPTED"],
                 )
                 waiver_justification = st.text_area(
-                    _("correction_justification", lang), min_chars=10
+                    _("correction_justification", lang),
+                    max_chars=4000,
+                    help="Minimo 10 caratteri",
                 )
                 if st.button(_("acknowledge_btn", lang)):
                     if len(waiver_justification) >= 10:
@@ -128,7 +130,11 @@ else:
                             st.error(f"Errore: {result['error']}")
                         else:
                             st.success("Rinuncia applicata.")
-                            st.cache_data.clear()
+                            # Clear only the affected cache; avoid nuking other pages' data.
+                            try:
+                                fetch_dq_findings.clear()  # type: ignore[attr-defined]
+                            except AttributeError:
+                                st.cache_data.clear()
                     else:
                         st.error("Giustificazione deve essere almeno 10 caratteri.")
             else:

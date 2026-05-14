@@ -63,7 +63,11 @@ def calculate(
     for row in raw_rows:
         if int(row.get("categoria_s3", 0)) != 7:
             continue
-        if "commuting" not in str(row.get("sottocategoria", "")).lower():
+        # The DEFRA factor wired here is the average-CAR factor; restrict to
+        # the exact 'commuting_auto' subcategory. A substring match on
+        # 'commuting' would silently apply the car factor to bus / rail / cycle
+        # km, inflating Cat 7 emissions by 5x or more for those modes.
+        if str(row.get("sottocategoria", "")).strip().lower() != "commuting_auto":
             continue
         km = to_decimal(row["quantita"])
         tco2e = (factor.value or Decimal("0")) * km * KG_TO_TONNE

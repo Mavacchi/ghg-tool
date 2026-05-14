@@ -111,11 +111,19 @@ def _create_app() -> FastAPI:
     )
 
     # ------------------------------------------------------------------
-    # Middleware stack (applied in reverse — last added = outermost)
+    # Middleware stack (applied in reverse — last added = outermost).
+    # Desired wrap order, from innermost (closest to routes) to outermost:
+    #   RateLimit → CorrelationId → ErrorHandler → SecurityHeaders → CORS
+    # ErrorHandler must sit OUTSIDE CorrelationId so that exceptions raised
+    # inside CorrelationIdMiddleware itself are still converted to RFC 7807
+    # (instead of bubbling up as a generic 500). CORS stays outermost so that
+    # every response — including error responses — carries CORS headers.
+    # Allowed methods include DELETE/PUT so browsers can observe the explicit
+    # 405 returned by the append-only emissions endpoints (CSRD audit trail).
     # ------------------------------------------------------------------
-    app.add_middleware(ErrorHandlerMiddleware)
     app.add_middleware(RateLimitMiddleware)
     app.add_middleware(CorrelationIdMiddleware)
+    app.add_middleware(ErrorHandlerMiddleware)
 
     # SEC-P1-002: Security response headers (HSTS, CSP, X-Frame-Options, …)
     app.add_middleware(SecurityHeadersMiddleware)
@@ -125,7 +133,7 @@ def _create_app() -> FastAPI:
         CORSMiddleware,
         allow_origins=_CORS_ORIGINS,
         allow_credentials=False,
-        allow_methods=["GET", "POST", "OPTIONS"],
+        allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
         allow_headers=["Authorization", "Content-Type", "X-Correlation-Id"],
     )
 
@@ -152,21 +160,16 @@ def _create_app() -> FastAPI:
             """Strip non-serialisable / PII fields from a Pydantic error dict.
 
             Pydantic v2 ``exc.errors()`` may embed ``ValueError`` objects inside
-            the ``ctx`` mapping and raw input values inside ``input``.  Both must
-            be stripped before JSON serialisation (NFR-09 — no stack trace; NFR-08
-            — no PII in responses).
+            the ``ctx`` mapping and raw input values inside ``input`` — both must
+            be stripped before JSON serialisation (NFR-09 — no stack trace;
+            NFR-08 — no PII in responses).  ``msg`` is also stripped because
+            Pydantic frequently echoes the offending value inside the message
+            (e.g. ``"String should match pattern '...': got 'user@example.com'"``)
+            which would leak PII back to the caller.  ``loc`` and ``type`` are
+            machine-actionable and safe to retain.
             """
-            out: dict = {}  # type: ignore[type-arg]
-            for k, v in err.items():
-                if k in ("input", "url"):
-                    # Never echo request input back (may contain passwords/PII)
-                    continue
-                if k == "ctx":
-                    # ctx values may be non-serialisable exception objects
-                    out[k] = {ck: str(cv) for ck, cv in v.items()}
-                else:
-                    out[k] = v
-            return out
+            safe_keys = {"loc", "type"}
+            return {k: v for k, v in err.items() if k in safe_keys}
 
         errors = [_safe_error(err) for err in exc.errors()]
         return JSONResponse(

@@ -183,11 +183,11 @@ def apply_fr37_cat3_metadata_defaulting(
         df["_metadata_defaulted"] = False
         df["_defaulting_rule_id"] = pd.NA
 
-    cat3_mask = (
-        df["Categoria_S3"].astype(str) == "3"
-    ) | (
-        df["Sottocategoria"].str.strip().isin(_CAT3_WTT_TND_SUBS)
-    )
+    # FR-37 defaults ("Derivato da Scope 1/2 per FR-11") are only valid for
+    # the WTT and T&D Losses subcategories — applying them to other Cat 3
+    # rows (e.g. Cat 5 waste, Cat 1 purchased goods) would falsify the
+    # provenance audit trail.  Restrict the mask to the whitelist only.
+    cat3_mask = df["Sottocategoria"].str.strip().isin(_CAT3_WTT_TND_SUBS)
     blank_mask = cat3_mask & (
         df["Fonte_Dato"].str.strip().eq("") | df["Fonte_Dato"].isna()
     )

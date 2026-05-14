@@ -114,10 +114,13 @@ merged["delta_pct"] = merged.apply(
     axis=1,
 )
 
-# Mark outliers (|Δ| > 2σ)
+# Mark outliers (|Δ - μ| > 2σ): standard z-score test.
 sigma = merged["delta_abs"].std()
 mean_delta = merged["delta_abs"].mean()
-merged["is_outlier"] = merged["delta_abs"].abs() > (mean_delta + 2 * sigma).abs()
+if sigma and not pd.isna(sigma) and sigma > 0:
+    merged["is_outlier"] = (merged["delta_abs"] - mean_delta).abs() > 2 * sigma
+else:
+    merged["is_outlier"] = False
 merged["row_color"] = merged.apply(
     lambda r: VERMILION if r["is_outlier"] else BLUISH_GREEN, axis=1
 )

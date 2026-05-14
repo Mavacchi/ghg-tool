@@ -39,10 +39,13 @@ def _get_base_url() -> str:
 
 
 def _get_headers() -> dict[str, str]:
-    # REV-WAVE3-019: import constant from lib/auth.py (single source of truth).
-    from ghg_tool.ui.streamlit_app.lib.auth import _DEMO_TOKEN
+    # Only use the demo token when demo mode is explicitly enabled; otherwise
+    # send an empty Authorization header so the API rejects (fail-closed).
+    from ghg_tool.ui.streamlit_app.lib.auth import _DEMO_MODE, _DEMO_TOKEN
 
-    token = st.session_state.get("token", _DEMO_TOKEN)
+    token = st.session_state.get("token")
+    if not token:
+        token = _DEMO_TOKEN if _DEMO_MODE else ""
     return {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
 
 

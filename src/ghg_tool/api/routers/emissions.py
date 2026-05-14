@@ -317,8 +317,12 @@ async def correct_emission(
     now = datetime.now(tz=UTC)
     repo = EmissionsRepository(session)
 
-    # Verify predecessor exists and is active
-    predecessor = await repo.get_by_id(body.supersedes_id)
+    # Verify predecessor exists, belongs to the caller's tenant, and is active.
+    # Passing tenant_id ensures a cross-tenant UUID guess returns 404 even if
+    # RLS is misconfigured.
+    predecessor = await repo.get_by_id(
+        body.supersedes_id, tenant_id=uuid.UUID(user.tenant_id)
+    )
     if predecessor is None or predecessor.valid_to is not None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -383,7 +387,7 @@ async def get_corrections(
     """
     correlation_id = get_correlation_id()
     repo = EmissionsRepository(session)
-    row = await repo.get_by_id(emission_id)
+    row = await repo.get_by_id(emission_id, tenant_id=uuid.UUID(user.tenant_id))
     if row is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
