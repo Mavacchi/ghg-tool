@@ -26,6 +26,10 @@ from typing import Any
 
 import structlog
 
+from ghg_tool.domain.value_objects.scope3_categories import (
+    S3_CATEGORY_LABELS as _S3_CAT_NAMES,
+)
+
 logger = structlog.get_logger(__name__)
 
 _TEMPLATES_DIR = Path(__file__).parent / "templates"
@@ -235,18 +239,8 @@ def _build_scope2_pairs(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return list(site_year.values())
 
 
-_S3_CAT_NAMES: dict[str, str] = {
-    "Cat1": "1 — Beni e servizi acquistati",
-    "Cat2": "2 — Beni capitali",
-    "Cat3": "3 — Combustibili/energia WTT+T&D",
-    "Cat4": "4 — Trasporto upstream",
-    "Cat5": "5 — Rifiuti in operazioni",
-    "Cat6": "6 — Viaggi di lavoro",
-    "Cat7": "7 — Pendolarismo dipendenti",
-    "Cat9": "9 — Trasporto downstream",
-    "Cat11": "11 — Uso dei prodotti venduti (Omesso — Immateriale)",
-    "Cat12": "12 — Fine vita prodotti venduti",
-}
+# _S3_CAT_NAMES is now imported at top-of-module from
+# ghg_tool.domain.value_objects.scope3_categories (S3_CATEGORY_LABELS).
 
 
 def _enrich_scope3(row: dict[str, Any]) -> dict[str, Any]:

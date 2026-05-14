@@ -173,5 +173,17 @@
   "admin_col_email": "Email",
   "admin_col_role_code": "Ruolo",
   "admin_col_is_active": "Attivo",
-  "admin_audit_note": "Tutte le creazioni utente sono tracciate in calc.audit_log."
+  "admin_audit_note": "Tutte le creazioni utente sono tracciate in calc.audit_log.",
+  "trend_chart_title": "Andamento emissioni totali · ultimi 5 anni (Scope 1 + 2 LB + 3)",
+  "drill_through": "Esamina →",
+  "hotspot_tab_title": "Hotspot Scope 3",
+  "hotspot_table_rank": "Rank",
+  "hotspot_table_category": "Categoria",
+  "hotspot_table_pct": "% Scope 3",
+  "hotspot_table_cumulative": "Cumulata %",
+  "hotspot_table_yoy": "Δ YoY %",
+  "hotspot_table_flag": "Flag",
+  "hotspot_high_concentration": "Top 5 categorie >80%: rischio di concentrazione - serve mitigazione.",
+  "hotspot_low_concentration": "Distribuzione bilanciata: nessun rischio di concentrazione sulle prime 5 categorie.",
+  "hotspot_no_data": "Nessun dato Scope 3 disponibile per l'anno selezionato."
 }

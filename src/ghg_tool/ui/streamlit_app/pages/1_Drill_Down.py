@@ -42,6 +42,156 @@ apply_brand_chrome()
 require_auth()
 lang = get_lang()
 
+
+def _render_hotspot_tab(
+    *,
+    lang: str,
+    year: int,
+    gwp_set: str,
+    selected_sites: list[str],
+) -> None:
+    """Render the Scope 3 hot-spot Pareto tab.
+
+    Pulls current-year and prior-year Scope 3 emissions, runs the pure
+    hot-spot service and renders:
+      - a Pareto bar+line chart (bars=tco2e, line=cumulative %),
+      - a table with rank, category_label, tco2e, %, cumulative %, YoY,
+      - a concentration banner when the top-5 carries > 80% of Scope 3,
+      - a vermilion outlier-flag column for entries flagged as outliers.
+    """
+    import uuid as _uuid
+    from datetime import UTC as _UTC, datetime as _dt
+    from decimal import Decimal as _D
+
+    import pandas as _pd
+    import plotly.graph_objects as _go
+
+    from ghg_tool.application.services.hotspot_service import compute_hotspots
+    from ghg_tool.domain.entities.emission_record import EmissionRecord
+    from ghg_tool.ui.streamlit_app.lib.palette import OKABE_ITO
+
+    def _to_records(rows: list[dict]) -> list[EmissionRecord]:
+        records: list[EmissionRecord] = []
+        for r in rows:
+            if int(r.get("scope", 0)) != 3:
+                continue
+            try:
+                records.append(EmissionRecord(
+                    correlation_id=_uuid.uuid4(),
+                    raw_row_id=None,
+                    scope=3,
+                    sub_scope=str(r.get("sub_scope")),
+                    codice_sito=r.get("codice_sito"),
+                    anno=int(r.get("anno", year)),
+                    tco2e=_D(str(r.get("tco2e", "0"))),
+                    factor_id=str(r.get("factor_id", "X")),
+                    factor_version=str(r.get("factor_version", "1")),
+                    factor_source=str(r.get("factor_source", "DEFRA")),
+                    gwp_set=str(r.get("gwp_set", gwp_set)),
+                    methodology=str(r.get("methodology", "activity-based")),
+                    regulatory_stream=str(r.get("regulatory_stream", "CSRD_ESRS_E1")),
+                    calc_timestamp=_dt.now(_UTC),
+                    created_by="hotspot_view",
+                ))
+            except Exception:  # noqa: BLE001 - skip malformed rows; never crash the UI
+                continue
+        return records
+
+    raw_curr = fetch_emissions(scope=3, anno=year, gwp_set=gwp_set, limit=500)
+    raw_prev = fetch_emissions(scope=3, anno=year - 1, gwp_set=gwp_set, limit=500)
+
+    if selected_sites:
+        raw_curr = [r for r in raw_curr if not r.get("codice_sito") or r.get("codice_sito") in selected_sites]
+        raw_prev = [r for r in raw_prev if not r.get("codice_sito") or r.get("codice_sito") in selected_sites]
+
+    entries = compute_hotspots(
+        emissions_current=_to_records(raw_curr),
+        emissions_prior=_to_records(raw_prev),
+        top_n=10,
+    )
+
+    if not entries:
+        st.info(_("hotspot_no_data", lang))
+        return
+
+    # Concentration banner.
+    if entries[0].flag_high_concentration:
+        st.warning(_("hotspot_high_concentration", lang))
+    else:
+        st.success(_("hotspot_low_concentration", lang))
+
+    # Pareto chart: bars = tco2e descending, line = cumulative %.
+    labels = [e.category_label for e in entries]
+    bar_color = OKABE_ITO[2] if len(OKABE_ITO) > 2 else "#0072B2"
+    line_color = OKABE_ITO[1] if len(OKABE_ITO) > 1 else "#E69F00"
+
+    fig = _go.Figure()
+    fig.add_bar(
+        x=labels,
+        y=[float(e.tco2e) for e in entries],
+        name="tCO2e",
+        marker_color=bar_color,
+    )
+    fig.add_scatter(
+        x=labels,
+        y=[float(e.cumulative_pct) for e in entries],
+        name=_("hotspot_table_cumulative", lang),
+        yaxis="y2",
+        mode="lines+markers",
+        line={"color": line_color, "width": 3},
+    )
+    fig.update_layout(
+        title=f"{_('hotspot_tab_title', lang)} · {year}",
+        yaxis={"title": "tCO2e"},
+        yaxis2={
+            "title": _("hotspot_table_cumulative", lang),
+            "overlaying": "y",
+            "side": "right",
+            "range": [0, 105],
+        },
+        xaxis={"tickangle": -30},
+        legend={"orientation": "h", "y": 1.1},
+    )
+    st.plotly_chart(fig, use_container_width=True)
+
+    # Table.
+    flag_marker_outlier = "⚠️"
+    flag_marker_ok = ""
+    table_df = _pd.DataFrame([
+        {
+            _("hotspot_table_rank", lang): e.rank,
+            _("hotspot_table_category", lang): e.category_label,
+            "tCO2e": float(e.tco2e),
+            _("hotspot_table_pct", lang): float(e.pct_of_scope3),
+            _("hotspot_table_cumulative", lang): float(e.cumulative_pct),
+            _("hotspot_table_yoy", lang): (
+                float(e.yoy_delta_pct) if e.yoy_delta_pct is not None else None
+            ),
+            _("hotspot_table_flag", lang): (
+                flag_marker_outlier if e.flag_yoy_outlier else flag_marker_ok
+            ),
+        }
+        for e in entries
+    ])
+
+    # Vermilion border-left on outlier rows via pandas Styler.
+    def _row_style(row: _pd.Series) -> list[str]:
+        flag_col = _("hotspot_table_flag", lang)
+        if row.get(flag_col) == flag_marker_outlier:
+            return ["border-left: 4px solid #D55E00"] * len(row)
+        return [""] * len(row)
+
+    try:
+        styled = table_df.style.apply(_row_style, axis=1).format({
+            "tCO2e": "{:,.2f}",
+            _("hotspot_table_pct", lang): "{:.2f}",
+            _("hotspot_table_cumulative", lang): "{:.2f}",
+            _("hotspot_table_yoy", lang): lambda v: "-" if v is None else f"{v:+.2f}",
+        })
+        st.dataframe(styled, use_container_width=True, hide_index=True)
+    except Exception:  # noqa: BLE001 - fall back if Styler unsupported
+        st.dataframe(table_df, use_container_width=True, hide_index=True)
+
 st.title(_("nav_drilldown", lang))
 
 # ---------------------------------------------------------------------------
@@ -53,9 +203,15 @@ with st.sidebar:
     selected_year = sidebar_year_filter(lang)
 
     scope_opts = [_("all_scopes", lang), "Scope 1", "Scope 2", "Scope 3"]
+    # Drill-through hint from Home: if the user clicked "Esamina" under
+    # a specific scope metric, pre-select that scope on first render.
+    _hint = st.session_state.pop("drilldown_scope_hint", None)
+    _default_idx = 0
+    if _hint in (1, 2, 3):
+        _default_idx = int(_hint)
     selected_scope_label = st.selectbox(
-        _("scope_filter", lang), scope_opts,
-        help=_help("scope1", lang),  # generic scope 1/2/3 explainer; per-scope detail in metric cards
+        _("scope_filter", lang), scope_opts, index=_default_idx,
+        help=_help("scope1", lang),
     )
     selected_scope: int | None = None
     if selected_scope_label != _("all_scopes", lang):
@@ -120,57 +276,73 @@ else:
     if df.empty:
         st.warning(_("filter_warn_material", lang))
     else:
-        # -----------------------------------------------------------------------
-        # Stacked bar chart
-        # -----------------------------------------------------------------------
-        fig = px.bar(
-            df,
-            x="codice_sito",
-            y="tco2e",
-            color="sub_scope",
-            facet_col="scope" if "scope" in df.columns else None,
-            title=f"{_('chart_title_stacked', lang)} · {selected_year}",
-            labels={
-                "tco2e": "tCO2e",
-                "codice_sito": _("table_site", lang),
-                "sub_scope": _("table_sub_scope", lang),
-            },
-            color_discrete_sequence=plotly_qualitative(),
-            custom_data=CUSTOMDATA_COLS_WITH_CI
-            if all(c in df.columns for c in CUSTOMDATA_COLS_WITH_CI)
-            else [c for c in CUSTOMDATA_COLS_WITH_CI if c in df.columns],
-        )
-        fig.update_traces(
-            hovertemplate=build_emission_hovertemplate(include_ci=False, mode="bar")
-        )
-        fig.update_layout(barmode="stack", legend_title_text=_("table_sub_scope", lang))
-        st.plotly_chart(fig, use_container_width=True)
+        _tab_chart, _tab_table, _tab_hotspot = st.tabs([
+            f"📊 {_('chart_title_stacked', lang)}",
+            f"📋 {_('table_view', lang)}",
+            f"🔥 {_('hotspot_tab_title', lang)}",
+        ])
 
-        # -----------------------------------------------------------------------
-        # Data table
-        # -----------------------------------------------------------------------
-        display_cols = [
-            c for c in [
-                "codice_sito", "anno", "scope", "sub_scope", "tco2e",
-                "factor_source", "factor_version", "gwp_set", "methodology",
-                "regulatory_stream", "calc_timestamp", "valid_from",
-            ] if c in df.columns
-        ]
-        st.dataframe(df[display_cols], use_container_width=True, hide_index=True)
+        with _tab_chart:
+            # -----------------------------------------------------------------------
+            # Stacked bar chart
+            # -----------------------------------------------------------------------
+            fig = px.bar(
+                df,
+                x="codice_sito",
+                y="tco2e",
+                color="sub_scope",
+                facet_col="scope" if "scope" in df.columns else None,
+                title=f"{_('chart_title_stacked', lang)} · {selected_year}",
+                labels={
+                    "tco2e": "tCO2e",
+                    "codice_sito": _("table_site", lang),
+                    "sub_scope": _("table_sub_scope", lang),
+                },
+                color_discrete_sequence=plotly_qualitative(),
+                custom_data=CUSTOMDATA_COLS_WITH_CI
+                if all(c in df.columns for c in CUSTOMDATA_COLS_WITH_CI)
+                else [c for c in CUSTOMDATA_COLS_WITH_CI if c in df.columns],
+            )
+            fig.update_traces(
+                hovertemplate=build_emission_hovertemplate(include_ci=False, mode="bar")
+            )
+            fig.update_layout(barmode="stack", legend_title_text=_("table_sub_scope", lang))
+            st.plotly_chart(fig, use_container_width=True)
 
-        # CSV download — defang Excel formula injection in string columns
-        from ghg_tool.ui.excel.sheets import _safe_cell_value  # noqa: PLC0415
+        with _tab_table:
+            # -----------------------------------------------------------------------
+            # Data table
+            # -----------------------------------------------------------------------
+            display_cols = [
+                c for c in [
+                    "codice_sito", "anno", "scope", "sub_scope", "tco2e",
+                    "factor_source", "factor_version", "gwp_set", "methodology",
+                    "regulatory_stream", "calc_timestamp", "valid_from",
+                ] if c in df.columns
+            ]
+            st.dataframe(df[display_cols], use_container_width=True, hide_index=True)
 
-        _csv_df = df[display_cols].copy()
-        for _col in _csv_df.select_dtypes(include=["object"]).columns:
-            _csv_df[_col] = _csv_df[_col].map(_safe_cell_value)
-        csv_data = _csv_df.to_csv(index=False).encode("utf-8")
-        st.download_button(
-            label=_("download_csv", lang),
-            data=csv_data,
-            file_name=f"ghg_emissions_{selected_year}_scope{selected_scope or 'all'}.csv",
-            mime="text/csv",
-        )
+            # CSV download (defang Excel formula injection in string columns)
+            from ghg_tool.ui.excel.sheets import _safe_cell_value  # noqa: PLC0415
+
+            _csv_df = df[display_cols].copy()
+            for _col in _csv_df.select_dtypes(include=["object"]).columns:
+                _csv_df[_col] = _csv_df[_col].map(_safe_cell_value)
+            csv_data = _csv_df.to_csv(index=False).encode("utf-8")
+            st.download_button(
+                label=_("download_csv", lang),
+                data=csv_data,
+                file_name=f"ghg_emissions_{selected_year}_scope{selected_scope or 'all'}.csv",
+                mime="text/csv",
+            )
+
+        with _tab_hotspot:
+            _render_hotspot_tab(
+                lang=lang,
+                year=selected_year,
+                gwp_set=gwp_set,
+                selected_sites=selected_sites,
+            )
 
         # -----------------------------------------------------------------------
         # Emission correction (esg_manager only, FR-21)

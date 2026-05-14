@@ -20,6 +20,7 @@ st.set_page_config(
 )
 
 from ghg_tool.ui.streamlit_app.lib.auth import get_lang, require_auth  # noqa: E402
+from ghg_tool.ui.streamlit_app.lib.exports import render_download_row  # noqa: E402
 from ghg_tool.ui.streamlit_app.lib.help import _help  # noqa: E402
 from ghg_tool.ui.streamlit_app.lib.brand import apply_brand_chrome, render_context_bar, render_role_chip  # noqa: E402
 from ghg_tool.ui.streamlit_app.lib.i18n import _  # noqa: E402
@@ -122,6 +123,12 @@ else:
             return [f"background-color: {color}; color: white;"] * len(row)
         return [""] * len(row)
 
+    render_download_row(
+        df[display_cols],
+        basename="dq_findings",
+        lang=lang,
+        key_prefix="dq",
+    )
     styled = df[display_cols].style.apply(_colour_severity, axis=1)
     st.dataframe(styled, use_container_width=True, hide_index=True)
 

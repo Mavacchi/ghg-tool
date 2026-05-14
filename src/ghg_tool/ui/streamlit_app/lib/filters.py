@@ -39,6 +39,56 @@ _GWP_KEY: Final[str] = "g_gwp"
 _YEAR_OPTIONS: Final[list[int]] = list(range(2024, 2027))
 _GWP_OPTIONS: Final[list[str]] = ["AR6", "AR5"]
 
+# Query-param keys for URL-bookmarkable filter state.
+_YEAR_QP: Final[str] = "y"
+_GWP_QP: Final[str] = "g"
+
+
+def _read_query_params_into_state() -> None:
+    """Hydrate session state from URL query params on first page load.
+
+    Lets the user bookmark a Drill-down view with a specific year + GWP set:
+    visiting ``?y=2025&g=AR6`` puts the dashboard in that state. Idempotent:
+    only writes to session state when the value is missing so it never
+    overrides an explicit in-app selection.
+    """
+    try:
+        qp = st.query_params
+    except AttributeError:  # pragma: no cover - Streamlit < 1.31 fallback
+        return
+    if _YEAR_KEY not in st.session_state:
+        raw_y = qp.get(_YEAR_QP)
+        if raw_y:
+            try:
+                year = int(raw_y)
+            except (TypeError, ValueError):
+                year = None
+            if isinstance(year, int) and year in _YEAR_OPTIONS:
+                st.session_state[_YEAR_KEY] = year
+    if _GWP_KEY not in st.session_state:
+        raw_g = qp.get(_GWP_QP)
+        if isinstance(raw_g, str) and raw_g in _GWP_OPTIONS:
+            st.session_state[_GWP_KEY] = raw_g
+
+
+def _sync_query_params_from_state() -> None:
+    """Write the active year + GWP back to the URL.
+
+    Triggered after each widget interaction so that copying the URL
+    produces a link that restores the same filter state. Skips when
+    Streamlit version is too old to expose ``st.query_params``.
+    """
+    try:
+        qp = st.query_params
+    except AttributeError:  # pragma: no cover
+        return
+    year = st.session_state.get(_YEAR_KEY)
+    gwp = st.session_state.get(_GWP_KEY)
+    if isinstance(year, int):
+        qp[_YEAR_QP] = str(year)
+    if isinstance(gwp, str):
+        qp[_GWP_QP] = gwp
+
 
 def available_years() -> list[int]:
     """Return the canonical list of selectable fiscal years.
@@ -77,26 +127,32 @@ def sidebar_year_filter(lang: str = "it") -> int:
 
     The widget reads from and writes to ``st.session_state[g_year]`` via
     Streamlit's ``key=`` mechanism, so the choice survives navigation.
+    Also synced to / from URL query params so the active filter is
+    bookmarkable (?y=2025&g=AR6).
     """
-    # Seed the session-state entry on first access so the selectbox
-    # honours the default without flickering.
+    _read_query_params_into_state()
     if _YEAR_KEY not in st.session_state:
         st.session_state[_YEAR_KEY] = _default_year()
-    return st.selectbox(
+    value = st.selectbox(
         _("year_filter", lang),
         _YEAR_OPTIONS,
         key=_YEAR_KEY,
         help=_help("anno_fiscale", lang),
     )
+    _sync_query_params_from_state()
+    return value
 
 
 def sidebar_gwp_filter(lang: str = "it") -> str:
     """Render the GWP-set selectbox in the sidebar and return the value."""
+    _read_query_params_into_state()
     if _GWP_KEY not in st.session_state:
         st.session_state[_GWP_KEY] = _GWP_OPTIONS[0]
-    return st.selectbox(
+    value = st.selectbox(
         _("gwp_filter_label", lang),
         _GWP_OPTIONS,
         key=_GWP_KEY,
         help=_help("gwp", lang),
     )
+    _sync_query_params_from_state()
+    return value

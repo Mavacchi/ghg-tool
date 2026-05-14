@@ -189,7 +189,77 @@ if not kpis or (total_lb <= 0.0 and scope2_mb_total <= 0.0):
     st.stop()
 
 # ---------------------------------------------------------------------------
-# Metric cards
+# Time-series trend: total emissions over the last 5 reporting years.
+#
+# Pulls a separate fetch_kpis(anno=year) for each year in the window
+# and aggregates Scope 1 + Scope 2 LB + Scope 3 into a single total.
+# Behind st.cache_data so re-renders are cheap.
+# ---------------------------------------------------------------------------
+import pandas as _pd  # noqa: PLC0415
+import plotly.graph_objects as _go  # noqa: PLC0415
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def _trend_for_years(years: tuple[int, ...], gwp_set: str) -> _pd.DataFrame:
+    """Return a small DataFrame with one row per year and a total column."""
+    rows: list[dict[str, float | int]] = []
+    for yr in years:
+        data = fetch_kpis(anno=yr, gwp_set=gwp_set)
+        s1 = s2_lb = s3 = 0.0
+        for r in data.get("kpis", []):
+            tco2e = float(r.get("tco2e") or 0.0)
+            sc = r.get("scope")
+            sub = r.get("sub_scope", "")
+            if sc == 1:
+                s1 += tco2e
+            elif sc == 2 and sub == "LB":
+                s2_lb += tco2e
+            elif sc == 3:
+                s3 += tco2e
+        rows.append(
+            {"year": yr, "scope1": s1, "scope2_lb": s2_lb, "scope3": s3,
+             "total": s1 + s2_lb + s3}
+        )
+    return _pd.DataFrame(rows)
+
+
+_trend_window = tuple(sorted({selected_year - i for i in range(5) if selected_year - i >= 2020}))
+_trend_df = _trend_for_years(_trend_window, selected_gwp)
+if not _trend_df.empty and _trend_df["total"].sum() > 0:
+    _fig_trend = _go.Figure()
+    _fig_trend.add_trace(
+        _go.Scatter(
+            x=_trend_df["year"],
+            y=_trend_df["total"],
+            mode="lines+markers",
+            line={"color": "#788B99", "width": 2},
+            marker={"size": 8, "color": "#788B99"},
+            name=_("total_emissions", lang),
+            hovertemplate="%{x}<br><b>%{y:,.1f} tCO2e</b><extra></extra>",
+        )
+    )
+    _fig_trend.update_layout(
+        height=220,
+        margin={"l": 0, "r": 0, "t": 30, "b": 0},
+        title=_("trend_chart_title", lang),
+        title_font={"size": 14, "color": "#1a1a1a"},
+        font={"family": "Inter, sans-serif"},
+        showlegend=False,
+        plot_bgcolor="#FFFFFF",
+        paper_bgcolor="#FFFFFF",
+        xaxis={"showgrid": False, "tickmode": "linear"},
+        yaxis={
+            "showgrid": True, "gridcolor": "#ECE5DC",
+            "title": "tCO2e",
+            "rangemode": "tozero",
+        },
+    )
+    st.plotly_chart(_fig_trend, use_container_width=True)
+
+
+# ---------------------------------------------------------------------------
+# Metric cards (drill-through enabled: a hidden "→ Drill-down" page_link
+# under each card lets the user jump to a filtered detail view.)
 # ---------------------------------------------------------------------------
 col_total, col_s1, col_s2lb, col_s2mb, col_s3 = st.columns(5)
 
@@ -200,12 +270,33 @@ with col_total:
         help=_help("tco2e", lang),
     )
 
+def _drill_link(scope: int) -> None:
+    """Render a small "Esamina" page_link below a metric card.
+
+    The target is Drill-Down with the scope filter pre-seeded via
+    session_state so the user lands on a filtered view in one click.
+    """
+    if not hasattr(st, "page_link"):
+        return
+    # The Drill-Down sidebar reads its scope selectbox from a Streamlit
+    # widget key, so we cannot pre-seed easily. We instead set a
+    # well-known session-state hint that the Drill-Down page reads as
+    # an OPT-IN default on first render.
+    if st.button(
+        _("drill_through", lang), key=f"drill_{scope}",
+        type="secondary", use_container_width=True,
+    ):
+        st.session_state["drilldown_scope_hint"] = scope
+        st.switch_page("pages/1_Drill_Down.py")
+
+
 with col_s1:
     st.metric(
         label=_("scope1_total", lang),
         value=f"{scope_totals[1]:,.1f}",
         help=_help("scope1", lang),
     )
+    _drill_link(1)
 
 with col_s2lb:
     st.metric(
@@ -213,6 +304,7 @@ with col_s2lb:
         value=f"{scope_totals[2]:,.1f}",
         help=_help("scope2_lb", lang),
     )
+    _drill_link(2)
 
 with col_s2mb:
     st.metric(
@@ -227,6 +319,7 @@ with col_s3:
         value=f"{scope_totals[3]:,.1f}",
         help=_help("scope3", lang),
     )
+    _drill_link(3)
 
 # ---------------------------------------------------------------------------
 # Biogenic memo card (ADR-007)
