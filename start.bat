@@ -121,9 +121,9 @@ REM fallback. We do NOT rely on PowerShell alone because corporate execution
 REM policies may block it.
 where curl >nul 2>&1
 if not errorlevel 1 (
-    curl -fsS --max-time 2 http://localhost:8000/health >nul 2>&1
+    curl -fsS --max-time 2 http://localhost:8000/healthz >nul 2>&1
 ) else (
-    powershell -NoProfile -ExecutionPolicy Bypass -Command "try { Invoke-WebRequest -Uri 'http://localhost:8000/health' -UseBasicParsing -TimeoutSec 2 ^| Out-Null; exit 0 } catch { exit 1 }" >nul 2>&1
+    powershell -NoProfile -ExecutionPolicy Bypass -Command "try { Invoke-WebRequest -Uri 'http://localhost:8000/healthz' -UseBasicParsing -TimeoutSec 2 ^| Out-Null; exit 0 } catch { exit 1 }" >nul 2>&1
 )
 if errorlevel 1 (
     timeout /t 2 /nobreak >nul
