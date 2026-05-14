@@ -41,12 +41,24 @@ LABEL maintainer="data-engineer-agent" \
       description="GHG Accounting Tool — CSRD ESRS E1 + EU ETS Phase IV" \
       version="0.1.0"
 
-# Runtime system dependencies for asyncpg (libssl) and weasyprint (cairo)
+# Runtime system dependencies:
+#   - libpq5, libssl3, libffi8: asyncpg / psycopg
+#   - libcairo2 + libpango* + libgdk-pixbuf + libharfbuzz + shared-mime-info +
+#     fonts-liberation: WeasyPrint PDF rendering (closes the gap that would
+#     otherwise make POST /api/v1/exports/pdf fail at runtime)
 # Kept to minimum; no dev/build tools.
 RUN apt-get update && apt-get install -y --no-install-recommends \
         libpq5 \
         libssl3 \
         libffi8 \
+        libcairo2 \
+        libpango-1.0-0 \
+        libpangocairo-1.0-0 \
+        libpangoft2-1.0-0 \
+        libgdk-pixbuf-2.0-0 \
+        libharfbuzz0b \
+        shared-mime-info \
+        fonts-liberation \
     && rm -rf /var/lib/apt/lists/*
 
 # Non-root user (NFR-21 security)
