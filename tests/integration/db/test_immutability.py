@@ -12,7 +12,7 @@ import uuid
 
 import pytest
 from sqlalchemy import text
-from sqlalchemy.exc import IntegrityError, ProgrammingError
+from sqlalchemy.exc import DBAPIError, IntegrityError, ProgrammingError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from tests.integration.conftest import assert_immutability_violation
@@ -153,7 +153,7 @@ async def test_update_on_emissions_consolidated_raises(
         factor_id=stoich_factor_id,
     )
 
-    with pytest.raises((IntegrityError, ProgrammingError)) as exc_info:
+    with pytest.raises((IntegrityError, ProgrammingError, DBAPIError)) as exc_info:
         await rls_session.execute(
             text(
                 "UPDATE calc.emissions_consolidated "
@@ -189,7 +189,7 @@ async def test_delete_on_emissions_consolidated_raises(
         factor_id=stoich_factor_id,
     )
 
-    with pytest.raises((IntegrityError, ProgrammingError)) as exc_info:
+    with pytest.raises((IntegrityError, ProgrammingError, DBAPIError)) as exc_info:
         await rls_session.execute(
             text(
                 "DELETE FROM calc.emissions_consolidated "

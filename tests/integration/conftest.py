@@ -20,7 +20,7 @@ from collections.abc import AsyncIterator
 
 import pytest_asyncio
 from sqlalchemy import text
-from sqlalchemy.exc import IntegrityError, ProgrammingError
+from sqlalchemy.exc import DBAPIError, IntegrityError, ProgrammingError
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -85,18 +85,29 @@ async def db_engine() -> AsyncIterator[AsyncEngine]:
 async def db_session(db_engine: AsyncEngine) -> AsyncIterator[AsyncSession]:
     """Yield an AsyncSession whose transaction is rolled back after the test.
 
-    The ``session.begin()`` context manager auto-rolls-back if no explicit
-    commit is issued.  This keeps each test's changes invisible to others
-    and to the persistent database.
+    ``session.begin()`` used as a context manager *commits* on a clean
+    exit and rolls back only on exception — the opposite of what is
+    needed for test isolation.  A passing test would otherwise persist
+    its rows and immediately break the natural-key uniqueness
+    assumptions of every subsequent test that touches the same scope/
+    sub_scope/sito/anno combination.
+
+    Instead, rely on SQLAlchemy autobegin (the first ``session.execute``
+    starts a transaction implicitly) and force ``rollback()`` in a
+    ``finally`` clause so the transaction is discarded whether the test
+    passes, fails, or raises.  GUCs set via ``set_config(..., true)``
+    are transaction-local and are therefore reset by the rollback.
     """
     SessionLocal = async_sessionmaker(
         db_engine,
         expire_on_commit=False,
         class_=AsyncSession,
     )
-    async with SessionLocal() as session, session.begin():
-        yield session
-        # Context manager exits without commit → automatic rollback
+    async with SessionLocal() as session:
+        try:
+            yield session
+        finally:
+            await session.rollback()
 
 
 # ---------------------------------------------------------------------------
@@ -201,18 +212,22 @@ async def rls_session(
 def assert_immutability_violation(exc: Exception, *, trigger_hint: str = "") -> None:
     """Assert *exc* is the expected immutability guard exception from M0/M1.
 
-    Accepts both ``IntegrityError`` (raised when SQLAlchemy catches a
-    constraint violation) and ``ProgrammingError`` (raised for RAISE EXCEPTION
-    in a PL/pgSQL trigger).  The error message must contain 'forbidden' or the
-    optional *trigger_hint* substring.
+    Accepts ``IntegrityError`` (SQLAlchemy-mapped constraint violation),
+    ``ProgrammingError`` (SQL-level syntax/permission errors), and the more
+    generic ``DBAPIError`` — asyncpg surfaces a PL/pgSQL ``RAISE EXCEPTION``
+    as ``asyncpg.exceptions.RaiseError`` which SQLAlchemy wraps as the base
+    ``DBAPIError`` rather than the integrity/programming subclasses.  The
+    error message must contain 'forbidden' or the optional *trigger_hint*
+    substring.
 
     Args:
         exc: The exception raised by the attempted mutation.
         trigger_hint: Optional substring to search for in the error string
             (e.g. the trigger name or part of the RAISE EXCEPTION message).
     """
-    assert isinstance(exc, IntegrityError | ProgrammingError), (
-        f"Expected IntegrityError or ProgrammingError, got {type(exc).__name__}: {exc}"
+    assert isinstance(exc, IntegrityError | ProgrammingError | DBAPIError), (
+        f"Expected IntegrityError/ProgrammingError/DBAPIError, "
+        f"got {type(exc).__name__}: {exc}"
     )
     err_str = str(exc).lower()
     if trigger_hint:

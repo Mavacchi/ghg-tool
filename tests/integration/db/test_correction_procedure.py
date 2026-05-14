@@ -31,7 +31,7 @@ import uuid
 
 import pytest
 from sqlalchemy import text
-from sqlalchemy.exc import IntegrityError, ProgrammingError
+from sqlalchemy.exc import DBAPIError, IntegrityError, ProgrammingError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 pytestmark = pytest.mark.integration
@@ -224,7 +224,7 @@ async def test_fn_emit_correction_rejects_invalid_reason_code(
         factor_id=stoich_factor_id,
     )
 
-    with pytest.raises((IntegrityError, ProgrammingError)) as exc_info:
+    with pytest.raises((IntegrityError, ProgrammingError, DBAPIError)) as exc_info:
         await rls_session.execute(
             text(
                 "SELECT calc.fn_emit_correction("
@@ -270,7 +270,7 @@ async def test_fn_emit_correction_requires_correction_guc(
         text("SELECT set_config('app.correction_in_progress', 'false', true)")
     )
 
-    with pytest.raises((IntegrityError, ProgrammingError)) as exc_info:
+    with pytest.raises((IntegrityError, ProgrammingError, DBAPIError)) as exc_info:
         await rls_session.execute(
             text(
                 "UPDATE calc.emissions_consolidated "
@@ -374,7 +374,7 @@ async def test_fn_emit_correction_audit_log_entry_created(
     assert audit_row[2] == correlation_id
 
     # Step 4: Verify audit_log is itself append-only (M1 trg_audit_log_deny_mutation)
-    with pytest.raises((IntegrityError, ProgrammingError)):
+    with pytest.raises((IntegrityError, ProgrammingError, DBAPIError)):
         await rls_session.execute(
             text(
                 "UPDATE calc.audit_log SET action = 'TAMPERED' WHERE id = CAST(:id AS uuid)"

@@ -298,21 +298,30 @@ class TestEmissionsIntegration:
 
         token = _data_steward_token(tenant_id)
 
+        # POST /api/v1/emissions/correction expects EmissionCorrectionCreate:
+        # supersedes_id (UUID of the row to close), new_record (nested
+        # EmissionCreate with the replacement data), reason_code (one of
+        # the five enum values), justification (>= 10 chars for the ISAE
+        # 3000 audit trail). Anything else at top level is rejected by the
+        # `extra="forbid"` config on the schema.
         correction_payload = {
-            "predecessor_id": row_a_id,
-            "raw_row_id": str(uuid.uuid4()),
-            "raw_scope": 1,
-            "scope": 1,
-            "sub_scope": f"corrected_{row_a_id[:8]}",
-            "codice_sito": "IANO",
-            "anno": 2023,
-            "tco2e": 9.5,
-            "factor_id": stoich_factor_id,
-            "factor_version": "2006",
-            "factor_source": "IPCC",
-            "gwp_set": "AR6",
-            "methodology": "stoichiometric",
+            "supersedes_id": row_a_id,
             "reason_code": "DATA_ERROR",
+            "justification": "Integration test: data correction for predecessor row.",
+            "new_record": {
+                "raw_row_id": str(uuid.uuid4()),
+                "raw_scope": 1,
+                "scope": 1,
+                "sub_scope": "process",
+                "codice_sito": "IANO",
+                "anno": 2023,
+                "tco2e": 9.5,
+                "factor_id": stoich_factor_id,
+                "factor_version": "2006",
+                "factor_source": "IPCC",
+                "gwp_set": "AR6",
+                "methodology": "stoichiometric",
+            },
         }
 
         async with AsyncClient(app=fastapi_app, base_url="http://testserver") as client:
@@ -514,7 +523,9 @@ class TestGoCertificateIntegration:
             "qc7_exclusivity_passed": True,
             "qc8_residual_mix_disclosed": True,
             "pdf_evidence_uri": "https://evidence.example.com/go-cert-test.pdf",
-            "validated_by": "integration_test_runner",
+            # `validated_by` is not part of the POST schema (it is set
+            # server-side from the authenticated user). Sending it triggers
+            # the schema's `extra="forbid"` check and a 422 response.
         }
 
         async with AsyncClient(app=fastapi_app, base_url="http://testserver") as client:
