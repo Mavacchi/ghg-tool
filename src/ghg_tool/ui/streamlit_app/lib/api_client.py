@@ -312,7 +312,6 @@ def trigger_excel_report(anno: int, gwp_set: str = "AR6") -> dict[str, Any]:
 
 @st.cache_data(ttl=300, show_spinner=False)
 def fetch_intensity(
-    tenant_id: str,
     denominator_type: str,
     anno_from: int | None = None,
     anno_to: int | None = None,
@@ -321,8 +320,12 @@ def fetch_intensity(
 ) -> dict[str, Any]:
     """Fetch intensity metrics from ``GET /api/v1/intensity``.
 
+    SEC-P0-003: ``tenant_id`` is no longer accepted as a parameter.
+    The backend sources tenant isolation exclusively from the JWT claim.
+    Passing ``tenant_id`` in the query string would be silently ignored
+    by the server — this client no longer sends it.
+
     Args:
-        tenant_id: Tenant UUID string.
         denominator_type: One of 'EUR_revenue', 'm2_production', 'FTE', 'kg_product'.
         anno_from: First reporting year (inclusive).
         anno_to: Last reporting year (inclusive).
@@ -333,7 +336,6 @@ def fetch_intensity(
         IntensityResponse JSON dict.  Returns empty dict on network/auth error.
     """
     params: dict[str, Any] = {
-        "tenant_id": tenant_id,
         "denominator_type": denominator_type,
         "gwp_set": gwp_set,
     }

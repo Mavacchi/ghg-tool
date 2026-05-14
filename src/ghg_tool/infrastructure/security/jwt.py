@@ -13,6 +13,10 @@ env.  Token claims carry: ``sub``, ``role``, ``tenant_id``, ``jti``,
 
 Access token TTL: 3600 s (1 h) — NFR-05.
 Refresh token TTL: 86400 s (24 h) — NFR-05.
+
+SEC-P0-001: ``GHG_JWT_SECRET`` is mandatory in production/staging.
+In development/test a deterministic fallback is used with a WARNING.
+The secret must be >= 32 characters regardless of environment.
 """
 
 from __future__ import annotations
@@ -20,16 +24,71 @@ from __future__ import annotations
 import os
 import uuid
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, Final
 
+import structlog
 from jose import JWTError, jwt  # type: ignore[import-untyped]
 from jose.exceptions import ExpiredSignatureError  # type: ignore[import-untyped]
+
+_log = structlog.get_logger(__name__)
+
+# ---------------------------------------------------------------------------
+# SEC-P0-001: Secure JWT secret loading
+# ---------------------------------------------------------------------------
+
+_PRODUCTION_LIKE_ENVS: Final[frozenset[str]] = frozenset({"production", "staging"})
+# Named "test-only" so that any accidental prod use is immediately obvious in
+# audit logs and grep searches.  It is >= 32 chars to satisfy the length guard.
+_TEST_FALLBACK_SECRET: Final[str] = (
+    "test-only-jwt-secret-min-32-chars-not-for-prod-xx"
+)
+_MIN_SECRET_LENGTH: Final[int] = 32
+
+
+def _load_jwt_secret() -> str:
+    """Load ``GHG_JWT_SECRET`` with environment-aware validation.
+
+    In production/staging the variable MUST be set; absence raises
+    ``RuntimeError`` to prevent a silent insecure startup.
+    In development/test a deterministic but clearly-named fallback is used,
+    and a WARNING is emitted at module load.
+    The secret must be >= 32 characters regardless of environment.
+
+    Returns:
+        The validated secret string.
+
+    Raises:
+        RuntimeError: If the environment is production/staging and the secret
+            is absent, or if the secret is shorter than 32 characters.
+    """
+    secret = os.environ.get("GHG_JWT_SECRET", "")
+    env = os.environ.get("GHG_ENVIRONMENT", "development").lower()
+    if not secret:
+        if env in _PRODUCTION_LIKE_ENVS:
+            raise RuntimeError(
+                "GHG_JWT_SECRET must be set when GHG_ENVIRONMENT is "
+                f"{env!r}; refusing to start with insecure default."
+            )
+        # development / test fallback — emit WARNING so it cannot be missed.
+        _log.warning(
+            "jwt_secret_using_test_fallback",
+            env=env,
+            advisory="Set GHG_JWT_SECRET for non-test deployments.",
+        )
+        secret = _TEST_FALLBACK_SECRET
+    if len(secret) < _MIN_SECRET_LENGTH:
+        raise RuntimeError(
+            f"GHG_JWT_SECRET must be at least {_MIN_SECRET_LENGTH} chars; "
+            f"got {len(secret)}."
+        )
+    return secret
+
 
 # ---------------------------------------------------------------------------
 # Configuration from environment
 # ---------------------------------------------------------------------------
 _JWT_ALGORITHM = os.environ.get("GHG_JWT_ALGORITHM", "HS256").upper()
-_JWT_SECRET = os.environ.get("GHG_JWT_SECRET", "dev-insecure-secret-replace-me")
+_JWT_SECRET: Final[str] = _load_jwt_secret()
 _JWT_PUBLIC_KEY_PATH = os.environ.get("GHG_JWT_PUBLIC_KEY_PATH", "")
 _JWT_PRIVATE_KEY_PATH = os.environ.get("GHG_JWT_PRIVATE_KEY_PATH", "")
 _JWT_ISSUER = os.environ.get("GHG_JWT_ISSUER", "")

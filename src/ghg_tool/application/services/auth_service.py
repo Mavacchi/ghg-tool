@@ -6,10 +6,15 @@ implement the cryptographic primitives itself.
 
 Database access is optional in tests — the service accepts a repository-style
 callable for user lookup to support dependency injection.
+
+SEC-P0-005: Usernames are never emitted in log records.  A 16-char
+SHA-256 prefix is used instead (``username_hash``) for SIEM correlation
+without PII leakage (NFR-08 / SG-07).
 """
 
 from __future__ import annotations
 
+import hashlib
 from collections.abc import Awaitable, Callable
 from typing import Any, Final, Protocol
 
@@ -23,6 +28,11 @@ from ghg_tool.infrastructure.security import jwt as jwt_module
 from ghg_tool.infrastructure.security.password import verify_password
 
 logger = structlog.get_logger(__name__)
+
+
+def _hash_username(username: str) -> str:
+    """Return 16-char SHA-256 prefix for SIEM correlation without PII leakage."""
+    return hashlib.sha256(username.encode("utf-8")).hexdigest()[:16]
 
 # ---------------------------------------------------------------------------
 # Timing-attack defence (REV-WAVE3-001)
@@ -85,7 +95,12 @@ async def authenticate_user(
         A ``TokenResponse`` on success; ``None`` if credentials are invalid
         or the user is inactive.
     """
-    log = logger.bind(correlation_id=correlation_id, username=username)
+    # SEC-P0-005: never log plain username — use 16-char SHA-256 prefix.
+    # This pattern is used for all log lines in this service.
+    log = logger.bind(
+        correlation_id=correlation_id,
+        username_hash=_hash_username(username),  # 16-char SHA-256 prefix, no PII
+    )
 
     user = await lookup_user(username)
     if user is None:

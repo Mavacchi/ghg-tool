@@ -39,8 +39,9 @@ from ghg_tool.api.main import app  # noqa: E402
 
 _TENANT_ID = str(uuid.uuid4())
 
+# SEC-P0-003: tenant_id is no longer a query parameter (sourced from JWT).
+# Tests no longer pass tenant_id in params; the JWT fixture supplies it.
 _VALID_PARAMS: dict[str, Any] = {
-    "tenant_id": _TENANT_ID,
     "denominator_type": "EUR_revenue",
     "anno_from": 2023,
     "anno_to": 2025,
@@ -254,8 +255,14 @@ class TestGetIntensity:
 
         assert resp.status_code == 403, resp.text
 
-    def test_422_missing_tenant_id(self) -> None:
-        """Missing required tenant_id → 422."""
+    def test_tenant_id_sourced_from_jwt_not_query_string(self) -> None:
+        """SEC-P0-003: tenant_id is sourced from JWT, not the query string.
+
+        The endpoint no longer accepts tenant_id as a query parameter; it is
+        silently ignored if passed (or treated as an unknown param, yielding 200).
+        Omitting tenant_id from params should return 200 (no 422) because the
+        tenant is taken from the JWT user fixture (_TENANT_ID).
+        """
         app.dependency_overrides[get_current_user] = _auth_override("data_steward")
         app.dependency_overrides[get_db] = _mock_db_empty()
 
@@ -267,7 +274,8 @@ class TestGetIntensity:
 
         _teardown()
 
-        assert resp.status_code == 422, resp.text
+        # tenant_id is no longer a query param — request succeeds with JWT tenant
+        assert resp.status_code == 200, resp.text
 
     def test_422_missing_denominator_type(self) -> None:
         """Missing required denominator_type → 422."""

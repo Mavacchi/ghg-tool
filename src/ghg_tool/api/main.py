@@ -5,12 +5,16 @@ Constructs the ``FastAPI`` app with:
 - RFC 7807 error handler middleware
 - Correlation-ID middleware (FR-22)
 - Rate-limit middleware (SG-10, NFR-11)
+- CORS middleware (SEC-P1-001) — origins from GHG_CORS_ORIGINS env var
+- Security-headers middleware (SEC-P1-002) — HSTS, CSP, X-Frame-Options, …
 - 10 routers + health endpoints
 - OpenAPI 3.1 metadata; Swagger UI available only in non-production
 
 Environment variables consumed:
   GHG_ENVIRONMENT (default 'development') — disables /docs in production.
   GHG_JWT_ALGORITHM / GHG_JWT_SECRET / GHG_JWT_PUBLIC_KEY_PATH / … (see security.jwt)
+  GHG_CORS_ORIGINS — comma-separated HTTPS origins; empty = no CORS (SEC-P1-001).
+    NEVER set to "*" in production. Example: https://dashboard.example.com
   SQLALCHEMY_URL (default postgresql+asyncpg://… — see db/session.py)
 
 NFR-09 A02: no stack traces in error responses.
@@ -22,15 +26,18 @@ from __future__ import annotations
 import os
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
+from typing import Final
 
 import structlog
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from ghg_tool.api.middleware.correlation_id import CorrelationIdMiddleware
 from ghg_tool.api.middleware.error_handler import ErrorHandlerMiddleware
 from ghg_tool.api.middleware.rate_limit import RateLimitMiddleware
+from ghg_tool.api.middleware.security_headers import SecurityHeadersMiddleware
 from ghg_tool.api.routers import (
     audit_trail,
     auth,
@@ -51,6 +58,14 @@ _ENVIRONMENT = os.environ.get("GHG_ENVIRONMENT", "development")
 _VERSION = "0.1.0"
 
 _PROBLEM_CONTENT_TYPE = "application/problem+json"
+
+# SEC-P1-001: CORS origins — comma-separated HTTPS origins from env.
+# NEVER use ["*"] — wildcard CORS is explicitly forbidden (SG-07).
+# Production MUST set GHG_CORS_ORIGINS=https://dashboard.example.com
+_CORS_ORIGINS_RAW: Final[str] = os.environ.get("GHG_CORS_ORIGINS", "")
+_CORS_ORIGINS: Final[list[str]] = [
+    o.strip() for o in _CORS_ORIGINS_RAW.split(",") if o.strip()
+]
 
 
 @asynccontextmanager
@@ -101,6 +116,18 @@ def _create_app() -> FastAPI:
     app.add_middleware(ErrorHandlerMiddleware)
     app.add_middleware(RateLimitMiddleware)
     app.add_middleware(CorrelationIdMiddleware)
+
+    # SEC-P1-002: Security response headers (HSTS, CSP, X-Frame-Options, …)
+    app.add_middleware(SecurityHeadersMiddleware)
+
+    # SEC-P1-001: CORS — driven by GHG_CORS_ORIGINS env var; never wildcard.
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=_CORS_ORIGINS,
+        allow_credentials=False,
+        allow_methods=["GET", "POST", "OPTIONS"],
+        allow_headers=["Authorization", "Content-Type", "X-Correlation-Id"],
+    )
 
     # ------------------------------------------------------------------
     # Custom exception handlers

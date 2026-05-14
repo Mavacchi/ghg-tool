@@ -135,15 +135,43 @@ class TestAuthRouter:
         assert resp.status_code == 401
 
     def test_refresh_with_valid_refresh_token(self) -> None:
-        """POST /auth/refresh with a valid refresh token returns 200 + new access token."""
+        """POST /auth/refresh with a valid refresh token returns 200 + new access token.
+
+        SEC-P0-004: the refresh endpoint now re-fetches the role from the DB.
+        We mock get_db_no_auth (used by the refresh route) to return a
+        synthetic row with role='data_steward'.
+        """
+        from collections.abc import AsyncGenerator
+        from typing import Any
+        from unittest.mock import AsyncMock, MagicMock
+
+        from ghg_tool.api.dependencies.db import get_db_no_auth
+
         sub = str(uuid.uuid4())
         tenant = str(uuid.uuid4())
         refresh_token = create_refresh_token(sub=sub, tenant_id=tenant)
+
+        # Build a mock DB row for the re-fetch
+        mock_row = MagicMock()
+        mock_row.is_active = True
+        mock_row.role_code = "data_steward"
+
+        mock_result = MagicMock()
+        mock_result.fetchone = MagicMock(return_value=mock_row)
+
+        async def _mock_db() -> AsyncGenerator[Any, None]:
+            session = AsyncMock()
+            session.execute = AsyncMock(return_value=mock_result)
+            yield session
+
+        app.dependency_overrides[get_db_no_auth] = _mock_db
         with TestClient(app, raise_server_exceptions=False) as client:
             resp = client.post(
                 "/api/v1/auth/refresh",
                 json={"refresh_token": refresh_token},
             )
+        app.dependency_overrides.pop(get_db_no_auth, None)
+
         assert resp.status_code == 200
         data = resp.json()
         assert "access_token" in data

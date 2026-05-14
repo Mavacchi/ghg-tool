@@ -1,9 +1,9 @@
 """KPIs router — GET /api/v1/kpis — dashboard-feed JSON (FR-29).
 
-Reads from the ``calc.mv_kpi_summary`` materialised view produced by the
-data-analyst-agent's calculation pipeline.  In v1 (wave 2), the MV may not
-yet exist; a stub response is returned when the view is absent so that the
-endpoint is testable without a live database.
+Reads from the ``calc.v_kpi_summary`` security-barrier view (M7), which
+wraps ``calc.mv_kpi_summary`` with a per-request tenant filter sourced
+from ``current_setting('app.tenant_id', true)::uuid``. SEC-P0-002:
+direct MV access is REVOKEd from the application role.
 """
 
 from __future__ import annotations
@@ -33,7 +33,7 @@ router = APIRouter(prefix="/api/v1/kpis", tags=["kpis"])
     summary="Dashboard KPI feed (all scopes, both years)",
     description=(
         "Returns aggregated KPIs for the GHG dashboard. Reads from "
-        "calc.mv_kpi_summary materialised view. All authenticated roles may read. "
+        "calc.v_kpi_summary materialised view. All authenticated roles may read. "
         "Filters: anno (optional), gwp_set (optional, default AR6)."
     ),
     response_model=KpiSummaryResponse,
@@ -67,7 +67,7 @@ async def get_kpis(
 
     try:
         query = text(
-            "SELECT * FROM calc.mv_kpi_summary "
+            "SELECT * FROM calc.v_kpi_summary "
             "WHERE (:gwp IS NULL OR gwp_set = :gwp) "
             "AND (:anno IS NULL OR reporting_year = :anno)"
         )
@@ -90,5 +90,5 @@ async def get_kpis(
             gwp_set=gwp_set,
             correlation_id=correlation_id or "",
             as_of=datetime.now(tz=UTC),
-            note="calc.mv_kpi_summary not yet available — created in wave 3",
+            note="calc.v_kpi_summary not yet available — created in wave 3",
         )

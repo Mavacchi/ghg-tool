@@ -23,6 +23,10 @@ from ghg_tool.api.middleware.error_handler import build_problem_response
 _RATE_LIMIT_REQUESTS: int = 100
 _RATE_LIMIT_WINDOW_S: int = 60  # 1 minute sliding window
 
+# SEC-P1-003: Stricter rate limit for /auth/login — 5 attempts per minute per IP
+_LOGIN_RATE_LIMIT_REQUESTS: int = 5
+_LOGIN_RATE_LIMIT_WINDOW_S: int = 60
+
 # Exempt paths (no auth, no rate limiting)
 _EXEMPT_PREFIXES: frozenset[str] = frozenset({"/healthz", "/readyz", "/openapi", "/docs"})
 
@@ -66,10 +70,21 @@ class _SlidingWindowCounter:
             bucket.append(now)
             return True
 
+    def reset(self) -> None:
+        """Clear all rate-limit counters.  Intended for use in test fixtures only."""
+        with self._lock:
+            self._buckets.clear()
+
 
 _counter = _SlidingWindowCounter(
     window_s=_RATE_LIMIT_WINDOW_S,
     limit=_RATE_LIMIT_REQUESTS,
+)
+
+# SEC-P1-003: separate stricter counter for the login endpoint
+login_limiter = _SlidingWindowCounter(
+    window_s=_LOGIN_RATE_LIMIT_WINDOW_S,
+    limit=_LOGIN_RATE_LIMIT_REQUESTS,
 )
 
 

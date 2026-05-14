@@ -23,7 +23,6 @@ import streamlit as st
 st.set_page_config(page_title="Intensity Metrics — GHG", layout="wide")
 
 import datetime as dt  # noqa: E402
-import os  # noqa: E402
 
 import pandas as pd  # noqa: E402
 import plotly.express as px  # noqa: E402
@@ -102,14 +101,14 @@ with st.sidebar:
 # Fetch data from API
 # ---------------------------------------------------------------------------
 
-tenant_id: str = st.session_state.get("tenant_id", os.environ.get("GHG_TENANT_ID", ""))
+# SEC-P0-003: tenant_id is no longer passed to fetch_intensity.
+# The backend sources tenant isolation exclusively from the JWT claim.
 # When site filter is used, fetch per-site (first site only in single-select mode).
 # For multi-site aggregate, pass codice_sito=None.
 fetch_site: str | None = selected_sites[0] if len(selected_sites) == 1 else None
 
 with st.spinner(_("loading", lang)):
     raw = fetch_intensity(
-        tenant_id=tenant_id,
         denominator_type=denominator_type,
         anno_from=anno_from,
         anno_to=anno_to,
