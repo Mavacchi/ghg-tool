@@ -57,13 +57,13 @@ echo e buildare le immagini. Le volte successive sara' pronto
 echo in meno di 30 secondi.
 echo.
 
-docker compose -f docker-compose.yml -f docker-compose.quickstart.yml up -d --build
+docker compose -f docker-compose.yml -f docker-compose.quickstart.yml --profile app up -d --build
 
 if errorlevel 1 (
     echo.
     echo [ERRORE] Avvio fallito.
     echo Per vedere i log:
-    echo   docker compose -f docker-compose.yml -f docker-compose.quickstart.yml logs
+    echo   docker compose -f docker-compose.yml -f docker-compose.quickstart.yml --profile app logs
     echo.
     pause
     exit /b 1
@@ -121,7 +121,7 @@ exit /b 0
 echo.
 echo [AVVISO] L'API non risponde entro 90 secondi.
 echo Per controllare cosa e' successo:
-echo   docker compose -f docker-compose.yml -f docker-compose.quickstart.yml logs app
+echo   docker compose -f docker-compose.yml -f docker-compose.quickstart.yml --profile app logs app
 echo.
 pause
 exit /b 1

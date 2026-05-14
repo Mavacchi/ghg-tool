@@ -8,7 +8,7 @@ echo  Arresto GHG Tool
 echo ===============================================
 echo.
 
-docker compose -f docker-compose.yml -f docker-compose.quickstart.yml down
+docker compose -f docker-compose.yml -f docker-compose.quickstart.yml --profile app down
 
 if errorlevel 1 (
     echo.
@@ -23,7 +23,7 @@ echo I dati nel database restano salvati nel volume Docker 'ghg_pgdata'
 echo e saranno ancora li' al prossimo avvio con start.bat.
 echo.
 echo Per cancellare anche i dati del database aggiungi -v:
-echo   docker compose -f docker-compose.yml -f docker-compose.quickstart.yml down -v
+echo   docker compose -f docker-compose.yml -f docker-compose.quickstart.yml --profile app down -v
 echo.
 pause
 exit /b 0

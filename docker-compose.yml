@@ -12,8 +12,6 @@
 #   docker compose up                 # full stack (requires app image built)
 #   docker compose down -v            # stop + remove volumes
 
-version: "3.9"
-
 services:
   # ---------------------------------------------------------------------------
   # PostgreSQL 15
