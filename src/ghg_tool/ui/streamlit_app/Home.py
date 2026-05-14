@@ -19,15 +19,27 @@ from ghg_tool.ui.streamlit_app.lib.constants import (
     COMPANY_SHORT,
     DASHBOARD_ID,
     DASHBOARD_VERSION,
+    FAVICON_PATH,
     KNOWN_SITES,
+    LOGO_PATH,
+    PRODUCT_NAME,
 )
 
+# Favicon falls back to a Unicode glyph if the PNG is missing in the
+# runtime image (e.g. tests run from a partial checkout).
+_page_icon: str | object = str(FAVICON_PATH) if FAVICON_PATH.exists() else "🏭"
+
 st.set_page_config(
-    page_title=f"GHG Dashboard — {COMPANY_SHORT}",
-    page_icon="🏭",
+    page_title=f"{PRODUCT_NAME} — {COMPANY_SHORT}",
+    page_icon=_page_icon,
     layout="wide",
     initial_sidebar_state="expanded",
 )
+
+# Show the Gresmalt logo top-left + collapsed-sidebar icon.
+# ``st.logo`` is a no-op pre-1.35; guarded for older Streamlit just in case.
+if hasattr(st, "logo") and LOGO_PATH.exists():
+    st.logo(str(LOGO_PATH), icon_image=str(FAVICON_PATH) if FAVICON_PATH.exists() else None)
 
 # Must import after set_page_config
 from ghg_tool.ui.streamlit_app.lib.auth import (  # noqa: E402
@@ -85,9 +97,10 @@ with st.sidebar:
 require_auth(lang)
 
 # ---------------------------------------------------------------------------
-# Page title
+# Page title — "Carbontrace · Gresmalt"
 # ---------------------------------------------------------------------------
-st.title(_("app_title", lang).format(company_name=COMPANY_NAME))
+st.title(f"{PRODUCT_NAME} · {COMPANY_SHORT}")
+st.caption(COMPANY_NAME)
 st.subheader(f"{_('nav_home', lang)} — {selected_year}")
 
 # Demo-mode banner (visible only when GHG_DEMO_MODE is enabled and the

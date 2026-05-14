@@ -76,6 +76,11 @@ COPY alembic.ini ./alembic.ini
 # Copy data directories (read-only at runtime)
 COPY data/ ./data/
 
+# Streamlit theme config — read at runtime from the CWD's .streamlit/ dir.
+# Carries the Gresmalt chrome palette; absent ➜ Streamlit falls back to
+# its default theme, the app still works.
+COPY .streamlit/ ./.streamlit/
+
 # Ensure non-root ownership
 RUN chown -R ghg:ghg /app
 
