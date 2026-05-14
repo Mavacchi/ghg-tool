@@ -233,19 +233,36 @@ if diff_result:
 
         # ----- full deltas dataframe (sorted by magnitude) -----
         st.markdown(f"### {_('recon_all_deltas', lang)}")
+        # threshold_pct_used is optional: present when the API exposes the
+        # per-row sigma threshold from the multi-year history baseline.
+        # Older API revisions return rows without this column.
         display_cols = [
-            "scope",
-            "sub_scope",
-            "codice_sito",
-            "anno",
-            "prior_tco2e",
-            "current_tco2e",
-            "abs_delta",
-            "pct_delta",
-            "cause_category",
-            "material",
+            c for c in (
+                "scope",
+                "sub_scope",
+                "codice_sito",
+                "anno",
+                "prior_tco2e",
+                "current_tco2e",
+                "abs_delta",
+                "pct_delta",
+                "threshold_pct_used",
+                "cause_category",
+                "material",
+            ) if c in df.columns
         ]
         df_display = df.sort_values("abs_delta_magnitude", ascending=False)[display_cols]
+        if "threshold_pct_used" in df.columns:
+            _thr_unique = df["threshold_pct_used"].astype(str).unique().tolist()
+            if len(_thr_unique) == 1:
+                st.caption(
+                    f"Per-row pct threshold: {_thr_unique[0]}% (static fallback)"
+                )
+            else:
+                st.caption(
+                    "Per-row pct threshold: sigma-based per (scope, sub_scope, site) "
+                    "when 4+ years of history are available, fallback otherwise."
+                )
         st.dataframe(df_display, use_container_width=True, hide_index=True)
 
     # ----- cause breakdown donut -----

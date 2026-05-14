@@ -38,9 +38,11 @@ from ghg_tool.api.middleware.correlation_id import CorrelationIdMiddleware
 from ghg_tool.api.middleware.error_handler import ErrorHandlerMiddleware
 from ghg_tool.api.middleware.rate_limit import RateLimitMiddleware
 from ghg_tool.api.middleware.security_headers import SecurityHeadersMiddleware
+from ghg_tool.api.middleware.session_check import SessionCheckMiddleware
 from ghg_tool.api.routers import (
     audit_trail,
     auth,
+    calc,
     dq_findings,
     emissions,
     excel_import,
@@ -53,6 +55,8 @@ from ghg_tool.api.routers import (
     reconciliation,
     reports,
     sbti,
+    sessions,
+    totp,
     users,
 )
 
@@ -213,6 +217,9 @@ def _create_app() -> FastAPI:
     # explicit 405 on append-only emission rows is observable by browsers.
     # ------------------------------------------------------------------
     app.add_middleware(ErrorHandlerMiddleware)
+    # SessionCheckMiddleware runs inside RateLimitMiddleware so rate-limited
+    # requests are rejected before a DB lookup is attempted.
+    app.add_middleware(SessionCheckMiddleware)
     app.add_middleware(RateLimitMiddleware)
     app.add_middleware(CorrelationIdMiddleware)
 
@@ -295,6 +302,9 @@ def _create_app() -> FastAPI:
     # ------------------------------------------------------------------
     app.include_router(health.router)
     app.include_router(auth.router)
+    app.include_router(totp.router)
+    app.include_router(sessions.router)
+    app.include_router(calc.router)
     app.include_router(emissions.router)
     app.include_router(excel_import.router)
     app.include_router(kpis.router)

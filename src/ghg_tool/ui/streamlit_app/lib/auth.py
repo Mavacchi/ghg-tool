@@ -36,6 +36,10 @@ _ROLE_KEY = "role"
 _USER_KEY = "user_sub"
 _TENANT_KEY = "tenant_id"
 _LANG_KEY = "lang"
+# TOTP flow keys -- partial_token is stored until the challenge is completed;
+# it is NEVER promoted to _TOKEN_KEY.
+_PARTIAL_TOKEN_KEY = "totp_partial_token"
+_TOTP_PENDING_KEY = "totp_pending"
 
 # Demo/fallback tenant and token for environments without live auth.
 # Demo mode is OPT-IN only — must be explicitly enabled via env var.
@@ -98,7 +102,8 @@ def get_tenant_id() -> str:
 
 def logout() -> None:
     """Clear all auth-related session state keys."""
-    for key in (_TOKEN_KEY, _ROLE_KEY, _USER_KEY, _TENANT_KEY):
+    for key in (_TOKEN_KEY, _ROLE_KEY, _USER_KEY, _TENANT_KEY,
+                _PARTIAL_TOKEN_KEY, _TOTP_PENDING_KEY):
         st.session_state.pop(key, None)
 
 
@@ -190,14 +195,23 @@ def _do_login(username: str, password: str) -> bool:
             token = data["access_token"]
             claims = _decode_jwt_claims(token)
             st.session_state[_TOKEN_KEY] = token
-            # Read role and tenant from the JWT — the API enforces them
+            # Read role and tenant from the JWT -- the API enforces them
             # server-side; the UI uses these only to gate menu visibility.
             role_claim = claims.get("role")
             tenant_claim = claims.get("tenant_id") or claims.get("tenant")
             st.session_state[_ROLE_KEY] = str(role_claim) if role_claim else "esg_manager"
-            st.session_state[_USER_KEY] = username[:8]  # truncated · no full PII
+            st.session_state[_USER_KEY] = username[:8]  # truncated -- no full PII
             st.session_state[_TENANT_KEY] = str(tenant_claim) if tenant_claim else _DEMO_TENANT
             return True
+        if resp.status_code == 202:
+            # TOTP challenge required: store the partial token in dedicated key,
+            # NOT in _TOKEN_KEY so it cannot be used as a Bearer elsewhere.
+            data = resp.json()
+            if data.get("requires_totp"):
+                st.session_state[_PARTIAL_TOKEN_KEY] = data["partial_token"]
+                st.session_state[_TOTP_PENDING_KEY] = True
+                st.session_state[_USER_KEY] = username[:8]
+                return True  # caller will detect _TOTP_PENDING_KEY
         if resp.status_code == 503 and _DEMO_MODE:
             _enable_demo_session(username)
             return True
@@ -275,7 +289,72 @@ def render_login_form(lang: str = "it") -> None:
                 st.rerun()
             else:
                 st.error(_("login_error", lang))
+
+    # Second screen: TOTP challenge (only shown when partial token is pending).
+    if st.session_state.get(_TOTP_PENDING_KEY):
+        _render_totp_challenge_form(lang, api_base=st.session_state.get("api_base_url", "http://localhost:8000"))
+
     st.stop()
+
+
+def _render_totp_challenge_form(lang: str, api_base: str) -> None:
+    """Render the 6-digit OTP input for the TOTP challenge step.
+
+    The partial_token is read from session_state and NEVER promoted to
+    the full token key until the challenge succeeds.
+    """
+    import httpx as _httpx  # noqa: PLC0415 -- lazy import; auth.py is already module-level OK
+
+    st.divider()
+    st.markdown("#### Verifica identita: inserisci il codice 2FA")
+    st.caption("Apri la tua app Google Authenticator (o compatibile) e inserisci il codice.")
+
+    with st.form("totp_challenge_form"):
+        otp = st.text_input(
+            "Codice OTP (6 cifre)",
+            max_chars=8,
+            placeholder="123456",
+            autocomplete="one-time-code",
+        )
+        submitted = st.form_submit_button("Verifica", type="primary")
+
+    if submitted:
+        partial_token = st.session_state.get(_PARTIAL_TOKEN_KEY, "")
+        if not partial_token:
+            st.error("Sessione scaduta. Effettua nuovamente il login.")
+            st.session_state.pop(_TOTP_PENDING_KEY, None)
+            st.rerun()
+            return
+        if not otp.strip().isdigit() or len(otp.strip()) < 6:
+            st.error("Inserisci un codice OTP valido (6 cifre).")
+            return
+        try:
+            resp = _httpx.post(
+                f"{api_base}/api/v1/auth/totp/challenge",
+                json={"partial_token": partial_token, "otp": otp.strip()},
+                timeout=10.0,
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                full_token = data["access_token"]
+                claims = _decode_jwt_claims(full_token)
+                st.session_state[_TOKEN_KEY] = full_token
+                role_claim = claims.get("role")
+                tenant_claim = claims.get("tenant_id") or claims.get("tenant")
+                st.session_state[_ROLE_KEY] = str(role_claim) if role_claim else "esg_manager"
+                st.session_state[_TENANT_KEY] = str(tenant_claim) if tenant_claim else ""
+                st.session_state.pop(_PARTIAL_TOKEN_KEY, None)
+                st.session_state.pop(_TOTP_PENDING_KEY, None)
+                st.rerun()
+            else:
+                st.error("Codice OTP non valido o scaduto. Riprova.")
+        except (_httpx.ConnectError, _httpx.TimeoutException):
+            st.error("Impossibile raggiungere il server. Riprova.")
+
+    if st.button("Torna al login"):
+        for key in (_PARTIAL_TOKEN_KEY, _TOTP_PENDING_KEY, _USER_KEY):
+            st.session_state.pop(key, None)
+        st.rerun()
 
 
 def require_auth(lang: str = "it") -> None:

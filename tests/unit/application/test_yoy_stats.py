@@ -70,20 +70,32 @@ def test_constant_yoy_yields_zero_sigma() -> None:
 
 
 def test_missing_year_skips_transition() -> None:
-    """A key missing from intermediate years simply skips those deltas."""
-    key = (2, "elec_LB", "S1")
+    """A key missing from a single year still skips transitions touching it.
+
+    The helper walks consecutive existing-years and only counts a YoY when
+    BOTH endpoints actually carry the key.  When the key is absent in one
+    of the years, the transition is dropped entirely (it does not silently
+    bridge over the gap).
+    """
+    key_a = (2, "elec_LB", "S1")
+    key_b = (2, "elec_LB", "S2")
     history = {
-        2020: {key: Decimal("100")},
-        # 2021 missing -> 2020->2021 and 2021->2022 transitions skipped
-        2022: {key: Decimal("110")},
-        2023: {key: Decimal("121")},
+        2020: {key_a: Decimal("100"), key_b: Decimal("100")},
+        # key_a missing in 2021
+        2021: {key_b: Decimal("110")},
+        2022: {key_a: Decimal("110"), key_b: Decimal("121")},
+        2023: {key_a: Decimal("121"), key_b: Decimal("133.1")},
     }
     out = compute_yoy_baseline(history)
-    bl = out[key]
-    # Only one valid transition: 2022->2023 (=10%).
-    assert bl.sample_size == 1
-    assert bl.is_reliable is False
-    assert bl.mean_pct == Decimal("10")
+    # key_a appears in 2020 / 2022 / 2023 -> consecutive-year transitions
+    # 2020->2021 and 2021->2022 require 2021 (missing) -> dropped;
+    # 2022->2023 valid -> 1 delta only.
+    assert out[key_a].sample_size == 1
+    assert out[key_a].is_reliable is False
+    assert out[key_a].mean_pct == Decimal("10")
+    # key_b is present in every year -> 3 deltas, reliable.
+    assert out[key_b].sample_size == 3
+    assert out[key_b].is_reliable is True
 
 
 def test_threshold_returns_fallback_when_none() -> None:

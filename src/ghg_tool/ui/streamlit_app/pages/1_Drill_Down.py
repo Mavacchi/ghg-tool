@@ -104,10 +104,32 @@ def _render_hotspot_tab(
         raw_curr = [r for r in raw_curr if not r.get("codice_sito") or r.get("codice_sito") in selected_sites]
         raw_prev = [r for r in raw_prev if not r.get("codice_sito") or r.get("codice_sito") in selected_sites]
 
+    # Fetch up to 3 additional prior years for sigma-based outlier threshold.
+    # The shared yoy_stats helper needs >= 3 YoY deltas (== 4 years) to
+    # produce a reliable per-key sigma; below that the service silently
+    # falls back to the +/- 20% static threshold.
+    historical_by_year: dict[int, dict[str, _D]] = {}
+    for _yr in (year - 4, year - 3, year - 2, year - 1, year):
+        try:
+            _rows = fetch_emissions(scope=3, anno=_yr, gwp_set=gwp_set, limit=500)
+        except Exception:  # noqa: BLE001 - UI must not crash on partial history
+            continue
+        if selected_sites:
+            _rows = [r for r in _rows if not r.get("codice_sito") or r.get("codice_sito") in selected_sites]
+        _agg: dict[str, _D] = {}
+        for _r in _rows:
+            if int(_r.get("scope", 0)) != 3:
+                continue
+            _sub = str(_r.get("sub_scope"))
+            _agg[_sub] = _agg.get(_sub, _D("0")) + _D(str(_r.get("tco2e", "0")))
+        if _agg:
+            historical_by_year[_yr] = _agg
+
     entries = compute_hotspots(
         emissions_current=_to_records(raw_curr),
         emissions_prior=_to_records(raw_prev),
         top_n=10,
+        historical_by_year=historical_by_year or None,
     )
 
     if not entries:
@@ -119,6 +141,19 @@ def _render_hotspot_tab(
         st.warning(_("hotspot_high_concentration", lang))
     else:
         st.success(_("hotspot_low_concentration", lang))
+
+    # Threshold provenance caption: surface what kind of YoY-outlier
+    # threshold each row used so auditors can see "sigma vs fallback".
+    _unique_thresholds = {str(e.outlier_threshold_pct) for e in entries}
+    if len(_unique_thresholds) == 1:
+        st.caption(
+            f"YoY outlier threshold: ±{float(entries[0].outlier_threshold_pct):.2f}% "
+            f"({'sigma-based' if historical_by_year and len(historical_by_year) >= 4 else 'static fallback'})"
+        )
+    else:
+        st.caption(
+            "YoY outlier threshold: per-category (sigma-based when 4+ years of history available)"
+        )
 
     # Pareto chart: bars = tco2e descending, line = cumulative %.
     labels = [e.category_label for e in entries]

@@ -237,3 +237,82 @@ def test_methodology_flag_overrides() -> None:
         methodology_flags=[(1, "comb", "A", 2024)],
     )
     assert res.rows[0].cause_category == "methodology"
+
+
+# ---------------------------------------------------------------------------
+# Sigma-based per-row threshold (multi-year history).
+# ---------------------------------------------------------------------------
+def test_sigma_threshold_flags_more_rows_when_history_stable() -> None:
+    """A stable historical YoY (sigma ~0) sets a tighter per-row threshold.
+
+    A +3% jump that is below the global materiality_pct (5%) is normally
+    not material; with a reliable per-key sigma threshold at ~0% the row
+    IS flagged when its abs_delta crosses the floor.
+
+    Note: the spec says the sigma threshold can only flag MORE rows,
+    never fewer; the implementation enforces this with
+    ``row_threshold = min(sigma_threshold, materiality_pct)``.
+    """
+    key = (1, "comb", "A")
+    history = {
+        2020: {key: Decimal("1000")},
+        2021: {key: Decimal("1000")},
+        2022: {key: Decimal("1000")},
+        2023: {key: Decimal("1000")},  # sigma == 0, mean == 0
+    }
+    prior = [_row(scope=1, sub_scope="comb", codice_sito="A", anno=2024,
+                  tco2e="1000")]
+    curr = [_row(scope=1, sub_scope="comb", codice_sito="A", anno=2024,
+                 tco2e="1030")]  # +3% jump, abs_delta = 30
+    res = reconcile(
+        snapshot_emissions=prior,
+        current_emissions=curr,
+        materiality_tco2e=Decimal("10"),  # ensure the abs floor is crossed
+        historical_by_year=history,
+    )
+    d = res.rows[0]
+    assert d.pct_delta == Decimal("3")
+    # threshold_pct_used must be the per-key 0% (clamped to <= materiality_pct).
+    assert d.threshold_pct_used <= Decimal("5")
+    assert d.threshold_pct_used == Decimal("0")
+    # 3% > 0% AND abs_delta=30 >= floor=10 -> material
+    assert d.material is True
+
+
+def test_legacy_threshold_used_when_history_insufficient() -> None:
+    """With <3 historical YoY deltas, the row threshold falls back to materiality_pct."""
+    key = (1, "comb", "A")
+    history = {
+        2022: {key: Decimal("1000")},
+        2023: {key: Decimal("1000")},
+    }  # only 1 YoY delta -> not reliable
+    prior = [_row(scope=1, sub_scope="comb", codice_sito="A", anno=2024,
+                  tco2e="1000")]
+    curr = [_row(scope=1, sub_scope="comb", codice_sito="A", anno=2024,
+                 tco2e="1030")]  # +3%, below 5% fallback
+    res = reconcile(
+        snapshot_emissions=prior,
+        current_emissions=curr,
+        materiality_tco2e=Decimal("10"),
+        historical_by_year=history,
+    )
+    d = res.rows[0]
+    assert d.threshold_pct_used == Decimal("5")
+    # 3% < 5% -> not material under fallback (legacy behaviour)
+    assert d.material is False
+
+
+def test_no_history_argument_preserves_legacy_behaviour() -> None:
+    """Omitting historical_by_year keeps the 5% per-row materiality (regression)."""
+    prior = [_row(scope=1, sub_scope="comb", codice_sito="A", anno=2024,
+                  tco2e="1000")]
+    curr = [_row(scope=1, sub_scope="comb", codice_sito="A", anno=2024,
+                 tco2e="1030")]
+    res = reconcile(
+        snapshot_emissions=prior,
+        current_emissions=curr,
+        materiality_tco2e=Decimal("10"),
+    )
+    d = res.rows[0]
+    assert d.threshold_pct_used == Decimal("5")
+    assert d.material is False
