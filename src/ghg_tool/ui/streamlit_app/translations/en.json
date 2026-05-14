@@ -231,5 +231,19 @@
   "recon_justification_text": "Justification (min 20 chars)",
   "recon_submit_justification": "Record justification",
   "recon_justification_recorded": "Justification recorded in session.",
-  "recon_go_to_data_entry": "Go to *Data Entry* to apply the correction on each affected row."
+  "recon_go_to_data_entry": "Go to *Data Entry* to apply the correction on each affected row.",
+  "compare_title": "Comparison",
+  "compare_caption": "Power-user view: two slices side-by-side with deltas. For the typical year-over-year comparison across the whole perimeter, use the YoY Comparison page.",
+  "compare_mode_label": "Mode",
+  "compare_mode_year_vs_year": "Year vs year (same site)",
+  "compare_mode_site_vs_site": "Site vs site (same year)",
+  "compare_year_a": "Year A",
+  "compare_year_b": "Year B",
+  "compare_year_filter": "Year",
+  "compare_site_filter": "Site",
+  "compare_site_a": "Site A",
+  "compare_site_b": "Site B",
+  "compare_delta_label": "Absolute Δ",
+  "compare_delta_pct_label": "Δ %",
+  "compare_no_data": "No data for the two selections."
 }

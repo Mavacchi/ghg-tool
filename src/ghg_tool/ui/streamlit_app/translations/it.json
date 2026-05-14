@@ -231,5 +231,19 @@
   "recon_justification_text": "Giustificazione (min 20 caratteri)",
   "recon_submit_justification": "Registra giustificazione",
   "recon_justification_recorded": "Giustificazione registrata in sessione.",
-  "recon_go_to_data_entry": "Vai a *Inserimento dati* per applicare la correzione su ogni riga interessata."
+  "recon_go_to_data_entry": "Vai a *Inserimento dati* per applicare la correzione su ogni riga interessata.",
+  "compare_title": "Confronto",
+  "compare_caption": "Vista power-user: due slice affiancati con delta. Per il confronto tipico anno-su-anno sull'intero perimetro, usa la pagina YoY Comparison.",
+  "compare_mode_label": "Modalità",
+  "compare_mode_year_vs_year": "Anno vs anno (stesso sito)",
+  "compare_mode_site_vs_site": "Sito vs sito (stesso anno)",
+  "compare_year_a": "Anno A",
+  "compare_year_b": "Anno B",
+  "compare_year_filter": "Anno",
+  "compare_site_filter": "Sito",
+  "compare_site_a": "Sito A",
+  "compare_site_b": "Sito B",
+  "compare_delta_label": "Δ assoluto",
+  "compare_delta_pct_label": "Δ %",
+  "compare_no_data": "Nessun dato per le due selezioni."
 }
