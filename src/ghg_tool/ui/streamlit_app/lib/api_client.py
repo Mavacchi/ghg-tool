@@ -554,6 +554,118 @@ def import_excel(file_bytes: bytes) -> dict[str, Any]:
         return {"error": str(exc)}
 
 
+def _safe_patch(url: str, body: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Perform a PATCH request with auth; return parsed JSON or error dict.
+
+    Args:
+        url: Full URL to request.
+        body: Optional JSON-serialisable request body.
+
+    Returns:
+        Parsed JSON response or ``{"error": "...", "status_code": int}`` on failure.
+    """
+    try:
+        resp = httpx.patch(
+            url,
+            headers=_get_headers(),
+            json=body if body is not None else {},
+            timeout=_TIMEOUT,
+        )
+        resp.raise_for_status()
+        return resp.json()
+    except httpx.HTTPStatusError as exc:
+        return {"error": str(exc), "status_code": exc.response.status_code}
+    except httpx.RequestError as exc:
+        return {"error": str(exc)}
+
+
+def list_chart_annotations(
+    chart_key: str,
+    anchor_year: int | None = None,
+    include_hidden: bool = False,
+) -> list[dict[str, Any]]:
+    """Fetch visible chart annotations from GET /api/v1/chart-annotations.
+
+    Args:
+        chart_key: Logical chart identifier (required by the API).
+        anchor_year: Optional year filter; omit to retrieve all years.
+        include_hidden: When True, request hidden annotations (requires
+            esg_manager or auditor role server-side).
+
+    Returns:
+        List of annotation dicts, or empty list on network/auth error.
+    """
+    params: dict[str, Any] = {"chart_key": chart_key}
+    if anchor_year is not None:
+        params["anchor_year"] = anchor_year
+    if include_hidden:
+        params["include_hidden"] = "true"
+    raw = _safe_get(f"{_get_base_url()}/api/v1/chart-annotations/", params=params)
+    # API returns a JSON array directly (not wrapped in a key).
+    if isinstance(raw, list):
+        return raw
+    return []
+
+
+def create_chart_annotation(
+    chart_key: str,
+    title: str,
+    body: str,
+    severity: str = "INFO",
+    anchor_year: int | None = None,
+    anchor_label: str | None = None,
+    extra: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """POST a new annotation to /api/v1/chart-annotations.
+
+    Args:
+        chart_key: Logical chart identifier (e.g. 'drilldown_scope').
+        title: Short annotation title (max 120 chars).
+        body: Full narrative text (max 2000 chars).
+        severity: INFO, WARNING, or CRITICAL (default INFO).
+        anchor_year: Optional year the annotation is attached to.
+        anchor_label: Optional free-text label for the anchor.
+        extra: Optional freeform JSON metadata.
+
+    Returns:
+        The created annotation dict on success, or
+        ``{"error": "...", "status_code": int}`` on failure.
+    """
+    payload: dict[str, Any] = {
+        "chart_key": chart_key,
+        "title": title,
+        "body": body,
+        "severity": severity,
+    }
+    if anchor_year is not None:
+        payload["anchor_year"] = anchor_year
+    if anchor_label is not None:
+        payload["anchor_label"] = anchor_label
+    if extra is not None:
+        payload["extra"] = extra
+    return _safe_post(f"{_get_base_url()}/api/v1/chart-annotations/", body=payload)
+
+
+def toggle_annotation_visibility(
+    annotation_id: str,
+    is_visible: bool,
+) -> dict[str, Any]:
+    """PATCH the visibility flag of a chart annotation.
+
+    Args:
+        annotation_id: UUID string of the annotation to update.
+        is_visible: New visibility value.
+
+    Returns:
+        The updated annotation dict on success, or
+        ``{"error": "...", "status_code": int}`` on failure.
+    """
+    return _safe_patch(
+        f"{_get_base_url()}/api/v1/chart-annotations/{annotation_id}/visibility",
+        body={"is_visible": is_visible},
+    )
+
+
 def emissions_to_dataframe(rows: list[dict[str, Any]]) -> pd.DataFrame:
     """Convert a list of EmissionResponse dicts to a pandas DataFrame.
 

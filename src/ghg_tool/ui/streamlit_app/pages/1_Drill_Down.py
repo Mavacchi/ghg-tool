@@ -34,6 +34,9 @@ from ghg_tool.ui.streamlit_app.lib.api_client import (  # noqa: E402
     fetch_emissions,
     emissions_to_dataframe,
     post_correction,
+    list_chart_annotations,
+    create_chart_annotation,
+    toggle_annotation_visibility,
 )
 from ghg_tool.ui.streamlit_app.lib.palette import plotly_qualitative, SCOPE_COLOURS  # noqa: E402
 from ghg_tool.ui.streamlit_app.lib.tooltips import build_emission_hovertemplate, CUSTOMDATA_COLS_WITH_CI  # noqa: E402
@@ -41,6 +44,99 @@ from ghg_tool.ui.streamlit_app.lib.tooltips import build_emission_hovertemplate,
 apply_brand_chrome()
 require_auth()
 lang = get_lang()
+
+_WRITE_ROLES = {"data_steward", "esg_manager"}
+
+
+def _render_annotations_panel(
+    *,
+    lang: str,
+    chart_key: str,
+    anchor_year: int | None,
+    role: str,
+) -> None:
+    """Render the chart annotations expander panel below a chart.
+
+    Displays visible annotations as ``st.info`` / ``st.warning`` / ``st.error``
+    boxes colour-coded by severity. Users with write access (data_steward,
+    esg_manager) see an inline form to add a new note.
+
+    Note: hidden annotations are not requested here; the UI only surfaces
+    visible ones to avoid clutter. Managers and auditors may use the API
+    directly to inspect hidden entries.
+
+    Args:
+        lang: Active UI language code.
+        chart_key: Logical chart identifier used to filter annotations.
+        anchor_year: Year to filter annotations by (may be None for all years).
+        role: The authenticated user's role code.
+    """
+    _NOTE_SEVERITIES = {
+        "INFO": st.info,
+        "WARNING": st.warning,
+        "CRITICAL": st.error,
+    }
+
+    with st.expander("Note sul grafico", expanded=False):
+        annotations = list_chart_annotations(chart_key, anchor_year=anchor_year)
+
+        if not annotations:
+            st.caption("Nessuna nota presente per questo grafico e anno.")
+        else:
+            for ann in annotations:
+                sev = ann.get("severity", "INFO").upper()
+                _render = _NOTE_SEVERITIES.get(sev, st.info)
+                ts = ann.get("created_at", "")[:10] if ann.get("created_at") else ""
+                label = ann.get("anchor_label") or ""
+                header = f"{ann.get('title', '')} ({ts})"
+                if label:
+                    header = f"{header} · {label}"
+                _render(f"**{header}**\n\n{ann.get('body', '')}")
+
+                # Visibility toggle for editors
+                if role in _WRITE_ROLES:
+                    ann_id = ann.get("id", "")
+                    vis = ann.get("is_visible", True)
+                    btn_label = "Nascondi nota" if vis else "Mostra nota"
+                    if st.button(btn_label, key=f"vis_{ann_id}"):
+                        result = toggle_annotation_visibility(ann_id, not vis)
+                        if "error" in result:
+                            st.error(f"Errore aggiornamento visibilita: {result['error']}")
+                        else:
+                            st.success("Visibilita aggiornata.")
+                            st.rerun()
+
+        # Add-note form for write roles
+        if role in _WRITE_ROLES:
+            st.divider()
+            st.markdown("**Aggiungi nota**")
+            with st.form(key=f"add_annotation_{chart_key}_{anchor_year}"):
+                note_title = st.text_input("Titolo nota", max_chars=120)
+                note_body = st.text_area("Testo nota", max_chars=2000)
+                note_severity = st.selectbox(
+                    "Livello", ["INFO", "WARNING", "CRITICAL"]
+                )
+                note_label = st.text_input(
+                    "Etichetta ancoraggio (opzionale)", max_chars=80
+                )
+                submitted = st.form_submit_button("Salva nota")
+                if submitted:
+                    if not note_title.strip() or not note_body.strip():
+                        st.error("Titolo e testo nota sono obbligatori.")
+                    else:
+                        result = create_chart_annotation(
+                            chart_key=chart_key,
+                            title=note_title.strip(),
+                            body=note_body.strip(),
+                            severity=note_severity,
+                            anchor_year=anchor_year,
+                            anchor_label=note_label.strip() or None,
+                        )
+                        if "error" in result:
+                            st.error(f"Errore salvataggio nota: {result['error']}")
+                        else:
+                            st.success("Nota salvata.")
+                            st.rerun()
 
 
 def _render_hotspot_tab(
@@ -343,6 +439,16 @@ else:
             )
             fig.update_layout(barmode="stack", legend_title_text=_("table_sub_scope", lang))
             st.plotly_chart(fig, use_container_width=True)
+
+            # -----------------------------------------------------------------------
+            # Annotazioni grafico (M17): note operative visibili sotto il grafico
+            # -----------------------------------------------------------------------
+            _render_annotations_panel(
+                lang=lang,
+                chart_key="drilldown_scope",
+                anchor_year=selected_year,
+                role=st.session_state.get("role", "auditor"),
+            )
 
         with _tab_table:
             # -----------------------------------------------------------------------
