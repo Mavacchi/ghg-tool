@@ -14,9 +14,16 @@ from __future__ import annotations
 
 import streamlit as st
 
-st.set_page_config(page_title="Drill-down — GHG", layout="wide")
+from ghg_tool.ui.streamlit_app.lib.constants import (
+    DASHBOARD_ID, DASHBOARD_VERSION, PRODUCT_NAME, page_icon,
+)
 
-from ghg_tool.ui.streamlit_app.lib.constants import DASHBOARD_ID, DASHBOARD_VERSION  # noqa: E402
+st.set_page_config(
+    page_title=f"Drill-down — {PRODUCT_NAME}",
+    page_icon=page_icon(),
+    layout="wide",
+)
+
 from ghg_tool.ui.streamlit_app.lib.auth import get_lang, require_auth  # noqa: E402
 from ghg_tool.ui.streamlit_app.lib.banner import render_viano_banner, should_show_viano_banner  # noqa: E402
 from ghg_tool.ui.streamlit_app.lib.help import _help  # noqa: E402

@@ -20,14 +20,21 @@ from __future__ import annotations
 
 import streamlit as st
 
-st.set_page_config(page_title="Intensity Metrics — GHG", layout="wide")
+from ghg_tool.ui.streamlit_app.lib.constants import (
+    DASHBOARD_ID, DASHBOARD_VERSION, PRODUCT_NAME, page_icon,
+)
+
+st.set_page_config(
+    page_title=f"Intensity Metrics — {PRODUCT_NAME}",
+    page_icon=page_icon(),
+    layout="wide",
+)
 
 import datetime as dt  # noqa: E402
 
 import pandas as pd  # noqa: E402
 import plotly.express as px  # noqa: E402
 
-from ghg_tool.ui.streamlit_app.lib.constants import DASHBOARD_ID, DASHBOARD_VERSION  # noqa: E402
 from ghg_tool.ui.streamlit_app.lib.api_client import fetch_intensity  # noqa: E402
 from ghg_tool.ui.streamlit_app.lib.auth import get_lang, require_auth  # noqa: E402
 from ghg_tool.ui.streamlit_app.lib.banner import render_viano_banner, should_show_viano_banner  # noqa: E402

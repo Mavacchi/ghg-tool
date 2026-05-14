@@ -1,0 +1,29 @@
+# Streamlit theme — Gresmalt chrome palette (sampled from gresmalt.it).
+#
+# Only the *chrome* (page bg, sidebar, headings, body type) is themed.
+# Chart series and status badges continue to use Okabe-Ito (see
+# src/ghg_tool/ui/streamlit_app/lib/palette.py) so colorblind users
+# keep getting accessible visualisations and the methodology-level
+# scope colour mapping is preserved.
+
+[theme]
+# Accent — used by widgets (selected option highlight, sliders, links).
+# The Gresmalt site uses #788B99 as the single accent against a mostly
+# neutral beige/sand chrome.
+primaryColor = "#788B99"
+
+# Page background — off-white (not pure #FFFFFF, matches gresmalt.it body).
+backgroundColor = "#F6F6F6"
+
+# Sidebar + cards / hero panels — warm beige.
+secondaryBackgroundColor = "#F0EBE5"
+
+# Headings + body text — near-black/graphite.
+textColor = "#202020"
+
+# Font — sans serif keeps the editorial/architectural feel of the brand.
+font = "sans serif"
+
+[server]
+# Quickstart only — the production runbook sets these from env.
+headless = true

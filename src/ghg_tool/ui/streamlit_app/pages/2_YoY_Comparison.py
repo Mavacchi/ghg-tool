@@ -16,9 +16,16 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
-st.set_page_config(page_title="YoY Comparison — GHG", layout="wide")
+from ghg_tool.ui.streamlit_app.lib.constants import (
+    DASHBOARD_ID, DASHBOARD_VERSION, PRODUCT_NAME, page_icon,
+)
 
-from ghg_tool.ui.streamlit_app.lib.constants import DASHBOARD_ID, DASHBOARD_VERSION  # noqa: E402
+st.set_page_config(
+    page_title=f"YoY Comparison — {PRODUCT_NAME}",
+    page_icon=page_icon(),
+    layout="wide",
+)
+
 from ghg_tool.ui.streamlit_app.lib.auth import get_lang, require_auth  # noqa: E402
 from ghg_tool.ui.streamlit_app.lib.banner import render_viano_banner, should_show_viano_banner  # noqa: E402
 from ghg_tool.ui.streamlit_app.lib.help import _help  # noqa: E402

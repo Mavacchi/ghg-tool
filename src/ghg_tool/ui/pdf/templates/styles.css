@@ -1,10 +1,14 @@
-/* ESG-grade print stylesheet — A4 — CSRD ESRS E1-6/E1-7 */
+/* ESG-grade print stylesheet — A4 — CSRD ESRS E1-6/E1-7
+ * Chrome: Gresmalt brand palette (#202020 / #F6F6F6 / #F0EBE5 /
+ * #E9E2D8 / #788B99). Status badges (severity-*, biogenic-memo,
+ * viano-banner) keep Okabe-Ito for accessibility — they signal risk
+ * and need colorblind-safe contrast, not brand consistency. */
 
 @page {
   size: A4;
   margin: 20mm 15mm 20mm 15mm;
   @top-center {
-    content: "Gruppo Ceramiche Gresmalt S.p.A. — GHG Report ESRS E1";
+    content: "Carbontrace — Gruppo Ceramiche Gresmalt S.p.A. — GHG Report ESRS E1";
     font-size: 8pt;
     color: #555;
   }
@@ -14,7 +18,7 @@
     color: #555;
   }
   @bottom-left {
-    content: "GHG Accounting Tool v1";
+    content: "Carbontrace v1";
     font-size: 8pt;
     color: #555;
   }
@@ -24,24 +28,24 @@
 body {
   font-family: Arial, Helvetica, sans-serif;
   font-size: 9pt;
-  color: #111;
+  color: #202020;  /* Gresmalt ink */
   line-height: 1.4;
 }
 
-/* Headings */
+/* Headings — Gresmalt accent */
 h1 {
   font-size: 16pt;
   font-weight: bold;
-  color: #0072B2;  /* Okabe-Ito Blue */
+  color: #788B99;  /* Gresmalt accent (blu-grigio polveroso) */
   margin-bottom: 4mm;
-  border-bottom: 1px solid #0072B2;
+  border-bottom: 1px solid #788B99;
   padding-bottom: 2mm;
 }
 
 h2 {
   font-size: 12pt;
   font-weight: bold;
-  color: #0072B2;
+  color: #788B99;
   margin-top: 6mm;
   margin-bottom: 2mm;
 }
@@ -49,12 +53,12 @@ h2 {
 h3 {
   font-size: 10pt;
   font-weight: bold;
-  color: #333;
+  color: #202020;
   margin-top: 4mm;
   margin-bottom: 1mm;
 }
 
-/* Tables */
+/* Tables — Gresmalt warm beige zebra, brand accent header */
 table {
   width: 100%;
   border-collapse: collapse;
@@ -64,19 +68,19 @@ table {
 }
 
 thead tr {
-  background-color: #0072B2;  /* Okabe-Ito Blue */
-  color: white;
+  background-color: #788B99;  /* Gresmalt accent */
+  color: #FFFFFF;
   font-weight: bold;
 }
 
 thead th {
   padding: 2mm 3mm;
   text-align: left;
-  border: 1px solid #004D80;
+  border: 1px solid #5A6F7C;
 }
 
 tbody tr:nth-child(odd) {
-  background-color: #F5F9FF;
+  background-color: #F0EBE5;  /* Gresmalt warm beige */
 }
 
 tbody tr:nth-child(even) {
@@ -85,7 +89,7 @@ tbody tr:nth-child(even) {
 
 tbody td {
   padding: 1.5mm 3mm;
-  border: 1px solid #CCE0F0;
+  border: 1px solid #E9E2D8;  /* Gresmalt sand */
   vertical-align: top;
 }
 
@@ -128,7 +132,7 @@ td.numeric, th.numeric {
 .report-header .company-name {
   font-size: 14pt;
   font-weight: bold;
-  color: #0072B2;
+  color: #202020;  /* Gresmalt ink — company name reads as primary identity */
 }
 
 .report-header .report-subtitle {
