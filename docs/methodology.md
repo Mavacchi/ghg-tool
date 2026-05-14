@@ -373,6 +373,23 @@ and N2O CO2e conversion differs (AR6 CH4=27.9 vs AR5 CH4=28; AR6 N2O=273 vs AR5 
 The MRR XML submission format is deferred to v2 (see `docs/roadmap.md`). The underlying
 tCO2e values are reproducible from this tool's AR5 output.
 
+### 11.1 Dual-track run requirement (FR-34 operational constraint)
+
+**Both the CSRD/AR6 run and the EU ETS/AR5 run MUST complete before any EU ETS filing.**
+This is mandated by:
+- **Reg. UE 2018/2066** (Monitoring and Reporting Regulation) Art. 12 — the operator must
+  ensure the monitoring plan produces values consistent with the MRR before submitting to
+  the Competent Authority.
+- **Reg. UE 2018/2067** (Accreditation and Verification Regulation) Art. 6 — the verifier
+  checks that AR5-based CO2e totals are reproduced from the same underlying activity data as
+  the CSRD report, so both tracks must derive from the same raw ingestion snapshot.
+
+Operators must trigger dual-track runs using either:
+- CLI: `python -m scripts.run_calc --anno <year> --dual`
+- API: `POST /api/v1/calc/run-dual` (esg_manager role required)
+
+Running only the CSRD track before an EU ETS filing is a compliance defect.
+
 ---
 
 ## 12. EU Taxonomy and SFDR Scope
