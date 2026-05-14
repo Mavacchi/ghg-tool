@@ -38,8 +38,9 @@ import plotly.express as px  # noqa: E402
 from ghg_tool.ui.streamlit_app.lib.api_client import fetch_intensity  # noqa: E402
 from ghg_tool.ui.streamlit_app.lib.auth import get_lang, require_auth  # noqa: E402
 from ghg_tool.ui.streamlit_app.lib.banner import render_viano_banner, should_show_viano_banner  # noqa: E402
-from ghg_tool.ui.streamlit_app.lib.help import _help  # noqa: E402
 from ghg_tool.ui.streamlit_app.lib.brand import apply_brand_chrome  # noqa: E402
+from ghg_tool.ui.streamlit_app.lib.filters import sidebar_gwp_filter  # noqa: E402
+from ghg_tool.ui.streamlit_app.lib.help import _help  # noqa: E402
 from ghg_tool.ui.streamlit_app.lib.i18n import _  # noqa: E402
 from ghg_tool.ui.streamlit_app.lib.palette import (  # noqa: E402
     BLUE,
@@ -84,10 +85,7 @@ _DENOM_HELP_KEYS: dict[str, str] = {
 }
 
 with st.sidebar:
-    gwp_set = st.selectbox(
-        "GWP Set", ["AR6", "AR5"], key="intensity_gwp",
-        help=_help("gwp", lang),
-    )
+    gwp_set = sidebar_gwp_filter(lang)
 
     denom_label = st.selectbox(
         _("intensity_denominator", lang),

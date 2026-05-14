@@ -26,8 +26,9 @@ st.set_page_config(
 
 from ghg_tool.ui.streamlit_app.lib.auth import get_lang, require_auth  # noqa: E402
 from ghg_tool.ui.streamlit_app.lib.banner import render_viano_banner, should_show_viano_banner  # noqa: E402
-from ghg_tool.ui.streamlit_app.lib.help import _help  # noqa: E402
 from ghg_tool.ui.streamlit_app.lib.brand import apply_brand_chrome  # noqa: E402
+from ghg_tool.ui.streamlit_app.lib.filters import sidebar_gwp_filter, sidebar_year_filter  # noqa: E402
+from ghg_tool.ui.streamlit_app.lib.help import _help  # noqa: E402
 from ghg_tool.ui.streamlit_app.lib.i18n import _  # noqa: E402
 from ghg_tool.ui.streamlit_app.lib.api_client import (  # noqa: E402
     fetch_emissions,
@@ -49,11 +50,7 @@ st.title(_("nav_drilldown", lang))
 with st.sidebar:
     st.header("Filtri / Filters")
 
-    year_opts = list(range(2024, 2027))
-    selected_year = st.selectbox(
-        _("year_filter", lang), year_opts, index=0,
-        help=_help("anno_fiscale", lang),
-    )
+    selected_year = sidebar_year_filter(lang)
 
     scope_opts = [_("all_scopes", lang), "Scope 1", "Scope 2", "Scope 3"]
     selected_scope_label = st.selectbox(
@@ -73,10 +70,7 @@ with st.sidebar:
 
     selected_sub_scope = st.text_input(_("sub_scope_filter", lang), value="")
 
-    gwp_set = st.selectbox(
-        "GWP Set", ["AR6", "AR5"],
-        help=_help("gwp", lang),
-    )
+    gwp_set = sidebar_gwp_filter(lang)
 
 # ---------------------------------------------------------------------------
 # VIANO banner

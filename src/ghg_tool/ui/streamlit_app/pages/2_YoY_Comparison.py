@@ -28,8 +28,9 @@ st.set_page_config(
 
 from ghg_tool.ui.streamlit_app.lib.auth import get_lang, require_auth  # noqa: E402
 from ghg_tool.ui.streamlit_app.lib.banner import render_viano_banner, should_show_viano_banner  # noqa: E402
-from ghg_tool.ui.streamlit_app.lib.help import _help  # noqa: E402
 from ghg_tool.ui.streamlit_app.lib.brand import apply_brand_chrome  # noqa: E402
+from ghg_tool.ui.streamlit_app.lib.filters import sidebar_gwp_filter  # noqa: E402
+from ghg_tool.ui.streamlit_app.lib.help import _help  # noqa: E402
 from ghg_tool.ui.streamlit_app.lib.i18n import _  # noqa: E402
 from ghg_tool.ui.streamlit_app.lib.api_client import fetch_emissions, emissions_to_dataframe  # noqa: E402
 from ghg_tool.ui.streamlit_app.lib.palette import (  # noqa: E402
@@ -54,10 +55,7 @@ with st.sidebar:
         _("select_year_compare", lang), [2024, 2025], index=1,
         help=_help("yoy_delta_abs", lang),
     )
-    gwp_set = st.selectbox(
-        "GWP Set", ["AR6", "AR5"],
-        help=_help("gwp", lang),
-    )
+    gwp_set = sidebar_gwp_filter(lang)
 
     st.divider()
     revenue_meur_base = st.number_input(

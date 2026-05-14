@@ -36,7 +36,7 @@ st.title(_("nav_factor_catalog", lang))
 # Sidebar filters
 # ---------------------------------------------------------------------------
 with st.sidebar:
-    scope_opts = ["Tutti / All", "1", "2", "3"]
+    scope_opts = [_("all_label", lang), "1", "2", "3"]
     scope_label = st.selectbox(
         _("scope_filter", lang), scope_opts,
         help=_help("scope1", lang),

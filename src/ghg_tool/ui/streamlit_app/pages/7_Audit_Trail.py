@@ -35,13 +35,14 @@ st.title(_("nav_audit_trail", lang))
 # Sidebar
 # ---------------------------------------------------------------------------
 with st.sidebar:
+    _all = _("all_label", lang)
     year_opts: list[int | None] = [None, 2024, 2025]
-    year_labels = ["Tutti / All"] + [str(y) for y in year_opts[1:]]
+    year_labels = [_all] + [str(y) for y in year_opts[1:]]
     year_choice = st.selectbox(
         _("year_filter", lang), year_labels,
         help=_help("audit_correlation_id", lang),
     )
-    anno_filter: int | None = int(year_choice) if year_choice != "Tutti / All" else None
+    anno_filter: int | None = int(year_choice) if year_choice != _all else None
 
     site_opts = ["", "IANO", "VIANO", "VIANO_GARGOLA", "CASALGRANDE",
                  "FIORANO", "SASSUOLO", "FRASSINORO"]
