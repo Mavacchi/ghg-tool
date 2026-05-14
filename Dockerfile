@@ -81,6 +81,13 @@ COPY data/ ./data/
 # its default theme, the app still works.
 COPY .streamlit/ ./.streamlit/
 
+# Operational scripts (seed_demo_data, create_user). Not bundled in the
+# wheel because they are admin-side CLI tools, but the API container
+# imports `scripts.seed_demo_data` from its lifespan hook to auto-seed
+# demo data on first launch when GHG_DEMO_MODE=true.
+COPY scripts/ ./scripts/
+ENV PYTHONPATH="/app:${PYTHONPATH}"
+
 # Ensure non-root ownership
 RUN chown -R ghg:ghg /app
 

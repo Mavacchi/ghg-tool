@@ -252,6 +252,37 @@ def post_waiver(finding_id: str, reason_code: str, justification: str) -> dict[s
     )
 
 
+def create_emission(payload: dict[str, Any]) -> dict[str, Any]:
+    """POST a new emission row to /api/v1/emissions (data_steward role).
+
+    Args:
+        payload: ``EmissionCreate`` dict (must include all mandatory
+            provenance fields; server fills id, calc_timestamp, etc.).
+
+    Returns:
+        ``EmissionCreateResponse`` dict with ``id``, ``correlation_id``,
+        ``created_at`` on success, or ``{"error": "...", "status_code": ...}``.
+    """
+    return _safe_post(f"{_get_base_url()}/api/v1/emissions/", body=payload)
+
+
+def create_factor(payload: dict[str, Any]) -> dict[str, Any]:
+    """POST a new factor version to /api/v1/factor-catalog (data_steward).
+
+    Forces ``is_published=False`` client-side: only the publish workflow
+    (not yet implemented) may flip that flag, and once flipped the DB
+    trigger MG-02 freezes the row.
+
+    Args:
+        payload: ``FactorCatalogCreate`` dict.
+
+    Returns:
+        Created ``FactorCatalogResponse`` dict, or error dict.
+    """
+    payload = {**payload, "is_published": False}
+    return _safe_post(f"{_get_base_url()}/api/v1/factor-catalog/", body=payload)
+
+
 def post_correction(
     supersedes_id: str,
     new_record: dict[str, Any],

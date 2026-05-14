@@ -21,6 +21,7 @@ import streamlit as st
 
 from ghg_tool.ui.streamlit_app.lib.constants import (
     FAVICON_PATH,
+    LOGO_COLLAPSED_PATH,
     LOGO_PATH,
 )
 
@@ -54,15 +55,22 @@ def _inject_css() -> None:
 
 def _register_logo() -> None:
     """Wire ``st.logo()`` so the brand logo appears in the top-left of
-    the sidebar (and collapses to the favicon in the header bar).
+    the sidebar, with the reduced wordmark shown when the sidebar is
+    collapsed.
 
-    ``st.logo`` was added in 1.35; older versions silently skip this
-    branch. CSS in ``assets/brand.css`` enlarges the sidebar variant so
-    the wordmark reads at a proper editorial size.
+    Asset precedence for ``icon_image`` (the collapsed-sidebar variant):
+    the reduced Gresmalt wordmark when available, otherwise the favicon,
+    otherwise nothing. ``st.logo`` was added in Streamlit 1.35; older
+    versions silently skip this branch.
     """
     if not (hasattr(st, "logo") and LOGO_PATH.exists()):
         return
-    icon = str(FAVICON_PATH) if FAVICON_PATH.exists() else None
+    if LOGO_COLLAPSED_PATH.exists():
+        icon = str(LOGO_COLLAPSED_PATH)
+    elif FAVICON_PATH.exists():
+        icon = str(FAVICON_PATH)
+    else:
+        icon = None
     st.logo(str(LOGO_PATH), icon_image=icon)
 
 

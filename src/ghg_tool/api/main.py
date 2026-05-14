@@ -68,6 +68,65 @@ _CORS_ORIGINS: Final[list[str]] = [
 ]
 
 
+def _demo_mode_enabled() -> bool:
+    """Return True iff GHG_DEMO_MODE is set to a truthy value."""
+    return os.environ.get("GHG_DEMO_MODE", "").lower() in ("1", "true", "yes")
+
+
+async def _seed_demo_data_if_empty() -> None:
+    """Auto-seed the staging tables on first launch in demo mode.
+
+    Guards (defense in depth, integrity-critical for a CSRD ledger):
+      1. ``GHG_ENVIRONMENT`` must NOT be 'production' - a mis-set demo flag
+         must never auto-seed a real production DB.
+      2. ``GHG_DEMO_MODE`` must be truthy.
+      3. ``raw.scope1_ingestions`` must be empty.
+
+    Failures are logged but never abort startup.
+    """
+    if _ENVIRONMENT == "production":
+        logger.info("demo_seed_skipped_production_environment")
+        return
+    if not _demo_mode_enabled():
+        return
+    try:
+        # Local imports keep these heavy deps off the import-time graph
+        # of the API process when demo mode is disabled.
+        import asyncio  # noqa: PLC0415
+        from sqlalchemy import text  # noqa: PLC0415
+
+        from ghg_tool.infrastructure.db.session import AsyncSessionFactory  # noqa: PLC0415
+
+        async with AsyncSessionFactory() as session:
+            result = await session.execute(
+                text("SELECT COUNT(*) FROM raw.scope1_ingestions")
+            )
+            count = result.scalar_one()
+        if count and int(count) > 0:
+            logger.info("demo_seed_skipped_already_populated", row_count=int(count))
+            return
+
+        logger.info("demo_seed_starting", reason="empty_raw_tables")
+
+        def _run_seed() -> int:
+            from scripts.seed_demo_data import main as seed_main  # noqa: PLC0415
+
+            # No CLI args: defaults to data/raw/ and CERAMIC_TILE_CO tenant.
+            return seed_main([])
+
+        # The seed script uses sync psycopg, so run it in a worker thread
+        # to avoid blocking the asyncio event loop.
+        exit_code = await asyncio.to_thread(_run_seed)
+        logger.info("demo_seed_finished", exit_code=exit_code)
+    except (ImportError, FileNotFoundError, OSError, RuntimeError) as exc:
+        logger.warning(
+            "demo_seed_failed",
+            error_type=type(exc).__name__,
+            # Do NOT include the raw message: it may contain DSN / paths
+            # we don't want in container logs.
+        )
+
+
 @asynccontextmanager
 async def _lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """FastAPI lifespan context — startup and shutdown hooks.
@@ -82,7 +141,9 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         "GHG API starting",
         version=_VERSION,
         environment=_ENVIRONMENT,
+        demo_mode=_demo_mode_enabled(),
     )
+    await _seed_demo_data_if_empty()
     yield
     logger.info("GHG API shutting down")
 
