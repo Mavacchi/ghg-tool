@@ -19,6 +19,10 @@ Objects created
 
 Permission changes
 ------------------
+  Ensure the application DB role ``ghg_app`` exists (created NOLOGIN if
+  missing — the role is normally provisioned by POSTGRES_USER in Docker,
+  but the CI service container uses a different user so the GRANTs below
+  would otherwise fail on a fresh CI database).
   GRANT SELECT on both views to the application DB role ``ghg_app``.
   REVOKE SELECT on the underlying MVs from ``ghg_app`` so that all
   application-path queries MUST go through the security-barrier views.
@@ -96,7 +100,31 @@ def upgrade() -> None:
     )
 
     # -------------------------------------------------------------------------
-    # 3. Grant SELECT on the new views to the application DB role.
+    # 3. Ensure the application DB role exists.
+    #
+    # In production the role is provisioned implicitly by the Postgres image
+    # via POSTGRES_USER=ghg_app (see docker-compose.yml).  In CI the service
+    # container uses POSTGRES_USER=ghg_test, so ``ghg_app`` does not exist
+    # and the GRANTs below would fail with ``UndefinedObject: role "ghg_app"
+    # does not exist``.  Create it idempotently as a NOLOGIN role: the
+    # connecting user differs per environment, but the GRANT target name
+    # must always resolve.  Existing roles (LOGIN, with password, owned by
+    # POSTGRES_USER in Docker) are left untouched by ``IF NOT EXISTS``.
+    # -------------------------------------------------------------------------
+    op.execute(
+        """
+        DO $$
+        BEGIN
+            IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'ghg_app') THEN
+                CREATE ROLE ghg_app NOLOGIN;
+            END IF;
+        END
+        $$;
+        """
+    )
+
+    # -------------------------------------------------------------------------
+    # 4. Grant SELECT on the new views to the application DB role.
     #
     # M4 uses RLS policies (not named DB roles) for data_steward / esg_manager
     # / auditor — those are JWT claim codes, not PostgreSQL role names.  The
@@ -106,7 +134,7 @@ def upgrade() -> None:
     op.execute("GRANT SELECT ON calc.v_intensity_metrics TO ghg_app;")
 
     # -------------------------------------------------------------------------
-    # 4. Revoke direct MV access from the application role.
+    # 5. Revoke direct MV access from the application role.
     #
     # Application paths MUST go through the security-barrier views.
     # The MV refresh job (ops.refresh_mv_kpi_summary / refresh_mv_intensity_metrics
