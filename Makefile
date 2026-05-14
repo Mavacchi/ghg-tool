@@ -13,6 +13,7 @@
 
 .PHONY: all install lint test test-unit test-integration \
         db-up db-down migrate etl py-compile \
+        seed-user seed-data \
         pre-commit-install help
 
 # ---------------------------------------------------------------------------
@@ -153,6 +154,36 @@ etl:
 	@echo "Wave 3 will implement: $(PYTHON) -m ghg_tool.etl.orchestrator run ..."
 
 # ---------------------------------------------------------------------------
+# Operational seed scripts (run inside the `app` container)
+# ---------------------------------------------------------------------------
+# Usage:
+#   USERNAME=marco EMAIL=marco@example.com ROLE=esg_manager make seed-user
+#   make seed-data
+#
+# Variables (override on command line):
+#   USERNAME  ROLE  EMAIL  TENANT_CODE  (seed-user)
+#   DATA_DIR  TENANT_CODE                (seed-data)
+USERNAME    ?= admin
+EMAIL       ?= admin@example.com
+ROLE        ?= esg_manager
+TENANT_CODE ?= CERAMIC_TILE_CO
+DATA_DIR    ?= data/raw
+
+seed-user:
+	@echo "==> Creating user '$(USERNAME)' (role=$(ROLE), tenant=$(TENANT_CODE))..."
+	$(PYTHON) -m scripts.create_user \
+		--username "$(USERNAME)" \
+		--email    "$(EMAIL)" \
+		--role     "$(ROLE)" \
+		--tenant-code "$(TENANT_CODE)"
+
+seed-data:
+	@echo "==> Seeding raw.scope*_ingestions from $(DATA_DIR)/ ..."
+	$(PYTHON) -m scripts.seed_demo_data \
+		--data-dir    "$(DATA_DIR)" \
+		--tenant-code "$(TENANT_CODE)"
+
+# ---------------------------------------------------------------------------
 # Pre-commit
 # ---------------------------------------------------------------------------
 pre-commit-install:
@@ -180,6 +211,8 @@ help:
 	@echo "  migrate-status     Show current Alembic revision"
 	@echo "  migrate-rollback   Downgrade one step"
 	@echo "  etl                ETL pipeline (wave 3 placeholder)"
+	@echo "  seed-user          Create a user (USERNAME=... EMAIL=... ROLE=...)"
+	@echo "  seed-data          Ingest data/raw/ CSVs into raw.scope*_ingestions"
 	@echo "  pre-commit-run     Run all pre-commit hooks"
 	@echo ""
 	@echo "Variables (override on command line):"
