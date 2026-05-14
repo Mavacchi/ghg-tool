@@ -27,6 +27,13 @@ _RATE_LIMIT_WINDOW_S: int = 60  # 1 minute sliding window
 _LOGIN_RATE_LIMIT_REQUESTS: int = 5
 _LOGIN_RATE_LIMIT_WINDOW_S: int = 60
 
+# Per-route bucket for /factor-catalog/.../publish.
+# Factor publication is a low-frequency, high-impact operation (the row
+# becomes immutable after the call). 10/min per user is generous for any
+# legitimate workflow and gives SIEM a clear signal on burst attempts.
+_PUBLISH_RATE_LIMIT_REQUESTS: int = 10
+_PUBLISH_RATE_LIMIT_WINDOW_S: int = 60
+
 # Exempt paths (no auth, no rate limiting)
 _EXEMPT_PREFIXES: frozenset[str] = frozenset({"/healthz", "/readyz", "/openapi", "/docs"})
 
@@ -85,6 +92,12 @@ _counter = _SlidingWindowCounter(
 login_limiter = _SlidingWindowCounter(
     window_s=_LOGIN_RATE_LIMIT_WINDOW_S,
     limit=_LOGIN_RATE_LIMIT_REQUESTS,
+)
+
+# Per-route counter for factor publication (POST /factor-catalog/.../publish).
+publish_limiter = _SlidingWindowCounter(
+    window_s=_PUBLISH_RATE_LIMIT_WINDOW_S,
+    limit=_PUBLISH_RATE_LIMIT_REQUESTS,
 )
 
 

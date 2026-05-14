@@ -26,7 +26,7 @@ st.set_page_config(
 
 from ghg_tool.ui.streamlit_app.lib.auth import get_lang, require_auth  # noqa: E402
 from ghg_tool.ui.streamlit_app.lib.banner import render_viano_banner, should_show_viano_banner  # noqa: E402
-from ghg_tool.ui.streamlit_app.lib.brand import apply_brand_chrome, render_context_bar  # noqa: E402
+from ghg_tool.ui.streamlit_app.lib.brand import apply_brand_chrome, render_context_bar, render_role_chip  # noqa: E402
 from ghg_tool.ui.streamlit_app.lib.filters import sidebar_gwp_filter, sidebar_year_filter  # noqa: E402
 from ghg_tool.ui.streamlit_app.lib.help import _help  # noqa: E402
 from ghg_tool.ui.streamlit_app.lib.i18n import _  # noqa: E402
@@ -70,6 +70,8 @@ with st.sidebar:
     selected_sub_scope = st.text_input(_("sub_scope_filter", lang), value="")
 
     gwp_set = sidebar_gwp_filter(lang)
+
+render_role_chip(st.session_state.get("role"), lang)
 
 render_context_bar(
     lang=lang,

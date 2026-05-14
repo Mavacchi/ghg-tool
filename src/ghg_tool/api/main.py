@@ -50,6 +50,7 @@ from ghg_tool.api.routers import (
     intensity,
     kpis,
     reports,
+    users,
 )
 
 logger = structlog.get_logger(__name__)
@@ -280,6 +281,7 @@ def _create_app() -> FastAPI:
     app.include_router(go_certificates.router)
     app.include_router(reports.router)
     app.include_router(exports.router)
+    app.include_router(users.router)
 
     return app
 

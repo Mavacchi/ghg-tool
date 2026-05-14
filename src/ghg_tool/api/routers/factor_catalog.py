@@ -15,6 +15,7 @@ from ghg_tool.api.dependencies.auth import CurrentUser
 from ghg_tool.api.dependencies.db import get_db
 from ghg_tool.api.dependencies.pagination import encode_cursor
 from ghg_tool.api.middleware.correlation_id import get_correlation_id
+from ghg_tool.api.middleware.rate_limit import publish_limiter
 from ghg_tool.api.middleware.rbac import require_permission
 from ghg_tool.api.schemas.common import CursorPage
 from ghg_tool.api.schemas.factor_schemas import (
@@ -188,13 +189,11 @@ async def create_factor(
         applicability_note=body.applicability_note,
         pdf_source_uri=body.pdf_source_uri,
         biogenic_co2_kg_per_unit=body.biogenic_co2_kg_per_unit,
-        # ``published_by`` is NOT NULL at the DB level, so it must be set even
-        # for drafts.  On creation it records the *creator* (the user who
-        # proposed the factor); a future publish endpoint will overwrite it
-        # with the actual publisher when ``is_published`` flips to True.  The
-        # ``is_published=False`` flag below preserves the audit-trail
-        # distinction between proposed and published factors.
-        published_by=user.sub,
+        # MG-03: draft rows must have published_at=None and published_by=None.
+        # Both columns are nullable after migration 0010_M9.  created_at is
+        # set by the DB server_default (func.now()); do not pass it here.
+        published_at=None,
+        published_by=None,
         is_published=False,
         is_tbc=False,
     )
@@ -287,6 +286,21 @@ async def publish_factor(
         user_agent=user_agent,
         factor_uuid=str(factor_uuid),
     )
+
+    # Per-route rate limit (10/min per user). Publishing is a low-frequency,
+    # high-impact operation; a burst signals scripted misuse worth a 429.
+    if not publish_limiter.is_allowed(f"publish:user:{user.sub}"):
+        log.warning("publish_factor_rate_limited")
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail={
+                "type": "about:blank",
+                "title": "Too Many Requests",
+                "status": 429,
+                "detail": "Factor publication rate limit exceeded: 10 per minute per user.",
+                "correlation_id": correlation_id,
+            },
+        )
 
     repo = FactorCatalogRepository(session)
     factor = await repo.get_by_uuid(

@@ -41,7 +41,7 @@ from ghg_tool.ui.streamlit_app.lib.auth import (  # noqa: E402
     require_auth,
 )
 from ghg_tool.ui.streamlit_app.lib.banner import render_viano_banner, should_show_viano_banner  # noqa: E402
-from ghg_tool.ui.streamlit_app.lib.brand import apply_brand_chrome, render_context_bar  # noqa: E402
+from ghg_tool.ui.streamlit_app.lib.brand import apply_brand_chrome, render_context_bar, render_role_chip  # noqa: E402
 from ghg_tool.ui.streamlit_app.lib.filters import sidebar_gwp_filter, sidebar_year_filter  # noqa: E402
 from ghg_tool.ui.streamlit_app.lib.help import _help  # noqa: E402
 from ghg_tool.ui.streamlit_app.lib.i18n import _  # noqa: E402
@@ -66,6 +66,8 @@ with st.sidebar:
 # users don't see disabled filters they cannot use yet.
 # ---------------------------------------------------------------------------
 require_auth(lang)
+
+render_role_chip(st.session_state.get("role"), lang)
 
 with st.sidebar:
     st.divider()

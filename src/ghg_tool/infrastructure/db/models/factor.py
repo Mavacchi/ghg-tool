@@ -1,4 +1,4 @@
-"""ORM model for ref.factor_catalog — versioned emission factors."""
+"""ORM model for ref.factor_catalog -- versioned emission factors."""
 
 from __future__ import annotations
 
@@ -17,6 +17,13 @@ class FactorCatalog(Base):
 
     Immutable post-publish: ``is_published=True`` triggers the
     ``trg_factor_immutable`` DB trigger (MG-02).
+
+    MG-03 (migration 0010_M9): ``created_at`` records the true INSERT
+    timestamp.  ``published_at`` and ``published_by`` are NULL for draft rows
+    (``is_published=False``) and are set only when the factor is published via
+    the publish endpoint.  A DB CHECK constraint enforces consistency: when
+    ``is_published=True`` both columns must be non-NULL; when False both may
+    be NULL.
 
     ADR-007: ``biogenic_co2_kg_per_unit`` carries the biogenic CO2 companion
     value for cardboard / pallet factors (ECOINV_CARDBOARD_V3_10,
@@ -50,8 +57,11 @@ class FactorCatalog(Base):
     valid_to: Mapped[date | None] = mapped_column(Date)
     applicability_note: Mapped[str | None] = mapped_column(String)
     pdf_source_uri: Mapped[str | None] = mapped_column(String)
-    published_at: Mapped[datetime] = mapped_column(
+    created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
-    published_by: Mapped[str] = mapped_column(String(120), nullable=False)
+    published_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    published_by: Mapped[str | None] = mapped_column(String(120), nullable=True)
     is_published: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)

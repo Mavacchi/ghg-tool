@@ -144,6 +144,61 @@ def render_context_bar(
     )
 
 
+# Mapping from DB role codes to user-facing chip labels per language.
+# Three profile tiers: viewer / editor / admin. Keep the keys aligned
+# with the DB role codes returned by the auth API; do not invent new
+# role names here - the backend authoritative source is rbac.py.
+_ROLE_CHIP_PRESENTATION: dict[str, dict[str, str]] = {
+    "auditor": {
+        "tier": "viewer",
+        "label_it": "Sola lettura",
+        "label_en": "Read-only",
+        "caption_it": "Puoi consultare i dati e gli audit trail, ma non modificarli.",
+        "caption_en": "You can view data and audit trails, but not modify them.",
+    },
+    "data_steward": {
+        "tier": "editor",
+        "label_it": "Modifica dati",
+        "label_en": "Editor",
+        "caption_it": "Inserisci dati, proponi fattori in bozza, registri correzioni.",
+        "caption_en": "Add data, propose draft factors, record corrections.",
+    },
+    "esg_manager": {
+        "tier": "admin",
+        "label_it": "Amministratore",
+        "label_en": "Administrator",
+        "caption_it": "Pubblichi fattori, firmi report ESRS E1, gestisci gli utenti.",
+        "caption_en": "Publish factors, sign ESRS E1 reports, manage users.",
+    },
+}
+
+
+def render_role_chip(role: str | None, lang: str = "it") -> None:
+    """Render a friendly role chip + a one-line caption in the sidebar.
+
+    Maps the DB role code (``auditor`` / ``data_steward`` / ``esg_manager``)
+    to one of three user-facing tiers (Viewer / Editor / Admin) with a
+    plain-language caption explaining the privileges.
+
+    Args:
+        role: The role code from session_state, or None for unauthenticated.
+        lang: Active language code ('it' / 'en').
+    """
+    if not role or role not in _ROLE_CHIP_PRESENTATION:
+        return
+    cfg = _ROLE_CHIP_PRESENTATION[role]
+    label = cfg[f"label_{lang}"] if lang in ("it", "en") else cfg["label_it"]
+    caption = cfg[f"caption_{lang}"] if lang in ("it", "en") else cfg["caption_it"]
+    st.sidebar.markdown(
+        f'<div class="ct-role-chip" data-role="{cfg["tier"]}" role="status">'
+        f'<span class="ct-role-chip-dot" aria-hidden="true"></span>'
+        f'<span>{label}</span>'
+        f'</div>'
+        f'<div class="ct-role-caption">{caption}</div>',
+        unsafe_allow_html=True,
+    )
+
+
 def apply_brand_chrome(lang: str | None = None) -> None:
     """One-call brand setup. Call near the top of every page script.
 

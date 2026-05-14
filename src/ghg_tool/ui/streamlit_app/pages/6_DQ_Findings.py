@@ -21,7 +21,7 @@ st.set_page_config(
 
 from ghg_tool.ui.streamlit_app.lib.auth import get_lang, require_auth  # noqa: E402
 from ghg_tool.ui.streamlit_app.lib.help import _help  # noqa: E402
-from ghg_tool.ui.streamlit_app.lib.brand import apply_brand_chrome, render_context_bar  # noqa: E402
+from ghg_tool.ui.streamlit_app.lib.brand import apply_brand_chrome, render_context_bar, render_role_chip  # noqa: E402
 from ghg_tool.ui.streamlit_app.lib.i18n import _  # noqa: E402
 from ghg_tool.ui.streamlit_app.lib.api_client import fetch_dq_findings, post_waiver  # noqa: E402
 from ghg_tool.ui.streamlit_app.lib.palette import SEVERITY_COLOURS, STATUS_COLOURS, VERMILION, ORANGE, BLUISH_GREEN  # noqa: E402
@@ -52,6 +52,8 @@ with st.sidebar:
     status_filter = None if status_label == _all else status_label
 
     rule_id_filter = st.text_input(_("dq_rule", lang), value="")
+
+render_role_chip(st.session_state.get("role"), lang)
 
 render_context_bar(
     lang=lang,

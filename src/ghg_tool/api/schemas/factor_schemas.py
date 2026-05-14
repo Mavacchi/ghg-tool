@@ -1,9 +1,9 @@
-"""Pydantic v2 schemas for /factor-catalog endpoints (FR-04, MG-01/02)."""
+"""Pydantic v2 schemas for /factor-catalog endpoints (FR-04, MG-01/02/03)."""
 
 from __future__ import annotations
 
 from datetime import date, datetime
-from typing import Literal
+from typing import Literal, Optional
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -18,6 +18,11 @@ GwpSetLiteral = Literal["AR6", "AR5", "n/a"]
 
 class FactorCatalogResponse(BaseModel):
     """Response schema for a factor catalog entry.
+
+    MG-03: ``created_at`` is always present (row INSERT timestamp).
+    ``published_at`` and ``published_by`` are None for draft rows
+    (``is_published=False``) and non-None only after the publish endpoint
+    transitions the row to published.
 
     Attributes:
         id: Primary key UUID.
@@ -37,8 +42,9 @@ class FactorCatalogResponse(BaseModel):
         valid_to: Date on which this version was superseded (None if current).
         applicability_note: Free-text applicability description.
         pdf_source_uri: Object-store path to the source PDF.
-        published_at: Timestamp when this version was published.
-        published_by: Username who published it.
+        created_at: Timestamp of the original INSERT (always set).
+        published_at: Timestamp when this version was published (None if draft).
+        published_by: Username who published it (None if draft).
         is_published: False until explicitly published; immutable after.
         biogenic_co2_kg_per_unit: Companion biogenic CO2 value (ADR-007).
     """
@@ -62,8 +68,9 @@ class FactorCatalogResponse(BaseModel):
     valid_to: date | None = None
     applicability_note: str | None = None
     pdf_source_uri: str | None = None
-    published_at: datetime
-    published_by: str
+    created_at: datetime
+    published_at: Optional[datetime] = None
+    published_by: Optional[str] = None
     is_published: bool
     biogenic_co2_kg_per_unit: float | None = None
 
@@ -184,19 +191,13 @@ class FactorCatalogPublishRequest(BaseModel):
 class FactorCatalogPublishResponse(FactorCatalogResponse):
     """Response schema for a successful publish operation.
 
-    Extends ``FactorCatalogResponse`` with no additional fields — the full
+    Extends ``FactorCatalogResponse`` with no additional fields.  The full
     updated row is returned so the client sees ``is_published=True``,
-    ``published_by``, and ``published_at`` in one response.
+    ``published_by`` (non-None), ``published_at`` (non-None), and
+    ``created_at`` (original INSERT time) in one response.
 
-    NOTE (follow-up MG-03): ``published_at`` currently reflects the row
-    INSERT timestamp (DB DEFAULT now()) because the column is ``NOT NULL
-    DEFAULT now()`` and is set on draft creation.  After this publish call
-    the column is overwritten with the actual publish time, so the returned
-    value IS the true publish timestamp.  However, for rows created before
-    this endpoint existed the draft ``published_at`` was already set to the
-    creation time and was NOT meaningful as a "published" timestamp.  A future
-    migration should add a separate ``created_at`` column so the two events
-    can be tracked independently.
+    MG-03 resolved: ``published_at`` is now NULL on drafts and is set only
+    at publish time.  ``created_at`` carries the original INSERT timestamp.
     """
 
 
