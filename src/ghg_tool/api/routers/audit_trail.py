@@ -12,7 +12,7 @@ from decimal import Decimal
 from uuid import UUID
 
 import structlog
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -54,7 +54,7 @@ async def get_audit_trail(
     correlation_id_filter: UUID | None = None,
     anno: int | None = None,
     codice_sito: str | None = None,
-    limit: int = 100,
+    limit: int = Query(default=100, ge=1, le=1000),
     user: CurrentUser = Depends(require_permission("audit_trail", "read")),
     session: AsyncSession = Depends(get_db),
 ) -> AuditTrailResponse:

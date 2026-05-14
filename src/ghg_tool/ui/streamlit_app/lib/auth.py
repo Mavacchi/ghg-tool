@@ -16,8 +16,10 @@ No PII stored in logs.  Token value is never logged.
 
 from __future__ import annotations
 
+import base64
+import json
 import os
-from typing import Final
+from typing import Any, Final
 
 import streamlit as st
 
@@ -70,6 +72,33 @@ def logout() -> None:
         st.session_state.pop(key, None)
 
 
+def _decode_jwt_claims(token: str) -> dict[str, Any]:
+    """Decode an unverified JWT payload to read role/tenant claims.
+
+    Signature verification is the API's responsibility — every protected
+    endpoint already re-validates the token server-side. The UI only needs
+    the unverified payload to decide which menu items to render. Returns an
+    empty dict if the token is malformed.
+
+    Args:
+        token: Raw JWT string ('header.payload.signature').
+
+    Returns:
+        Decoded payload claims dict, or {} on parse failure.
+    """
+    try:
+        parts = token.split(".")
+        if len(parts) < 2:
+            return {}
+        payload_b64 = parts[1]
+        padding = "=" * (-len(payload_b64) % 4)
+        payload_bytes = base64.urlsafe_b64decode(payload_b64 + padding)
+        claims = json.loads(payload_bytes)
+        return claims if isinstance(claims, dict) else {}
+    except (ValueError, TypeError, json.JSONDecodeError):
+        return {}
+
+
 def _enable_demo_session(username: str) -> None:
     """Populate session_state with demo credentials. REV-WAVE3-003.
 
@@ -110,10 +139,16 @@ def _do_login(username: str, password: str) -> bool:
         )
         if resp.status_code == 200:
             data = resp.json()
-            st.session_state[_TOKEN_KEY] = data["access_token"]
-            st.session_state[_ROLE_KEY] = "esg_manager"  # decoded from JWT in prod
+            token = data["access_token"]
+            claims = _decode_jwt_claims(token)
+            st.session_state[_TOKEN_KEY] = token
+            # Read role and tenant from the JWT — the API enforces them
+            # server-side; the UI uses these only to gate menu visibility.
+            role_claim = claims.get("role")
+            tenant_claim = claims.get("tenant_id") or claims.get("tenant")
+            st.session_state[_ROLE_KEY] = str(role_claim) if role_claim else "esg_manager"
             st.session_state[_USER_KEY] = username[:8]  # truncated — no full PII
-            st.session_state[_TENANT_KEY] = _DEMO_TENANT
+            st.session_state[_TENANT_KEY] = str(tenant_claim) if tenant_claim else _DEMO_TENANT
             return True
         if resp.status_code == 503 and _DEMO_MODE:
             _enable_demo_session(username)

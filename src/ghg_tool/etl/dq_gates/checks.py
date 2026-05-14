@@ -294,7 +294,7 @@ def check_warn_01_viano_electricity(df_s2: pd.DataFrame) -> tuple[bool, list[Fin
     for _, row in viano_go.iterrows():
         yr = str(row["Anno"])
         qty = float(row["Quantità"]) if pd.notna(row["Quantità"]) else 0.0
-        qty_by_year[yr] = qty
+        qty_by_year[yr] = qty_by_year.get(yr, 0.0) + qty
 
     if "2024" in qty_by_year and "2025" in qty_by_year and qty_by_year["2024"] > 0:
         ratio = qty_by_year["2025"] / qty_by_year["2024"]

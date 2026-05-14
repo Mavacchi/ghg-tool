@@ -190,8 +190,16 @@ def _bootstrap_ci(point_estimate: Decimal) -> tuple[Decimal, Decimal]:
     # Clamp non-negative — emissions cannot be negative.
     samples = [max(s, 0.0) for s in samples]
     samples.sort()
-    lower_idx = int(_CI_LOWER_PCT / 100.0 * _BOOTSTRAP_RESAMPLES)
-    upper_idx = int(_CI_UPPER_PCT / 100.0 * _BOOTSTRAP_RESAMPLES) - 1
+    # Symmetric percentile indexing: both bounds use ``int(p × N) - 1`` so the
+    # 2.5th and 97.5th percentiles map to the 25th and 975th sorted elements
+    # respectively (1-based). Using mixed conventions for lower vs upper
+    # produced an asymmetric CI; with N=1000 this is at most one index of
+    # noise but is still wrong on principle.
+    lower_idx = max(int(_CI_LOWER_PCT / 100.0 * _BOOTSTRAP_RESAMPLES) - 1, 0)
+    upper_idx = min(
+        int(_CI_UPPER_PCT / 100.0 * _BOOTSTRAP_RESAMPLES) - 1,
+        _BOOTSTRAP_RESAMPLES - 1,
+    )
     lower = Decimal(str(samples[lower_idx]))
     upper = Decimal(str(samples[upper_idx]))
     return lower, upper

@@ -19,6 +19,7 @@ from decimal import Decimal
 
 from ghg_tool.domain.entities.emission_record import EmissionRecord
 from ghg_tool.domain.entities.intensity_metric import IntensityMetric
+from ghg_tool.domain.exceptions.calc_errors import InvalidIntensityDenominatorError
 
 
 @dataclass(frozen=True, slots=True)
@@ -160,6 +161,21 @@ def _build_kpis(  # noqa: PLR0913 — explicit kwargs make the call-site self-do
         f"scope2_variant={variant}."
     )
     fte_dec = Decimal(ref.fte)
+    # Guard against degenerate denominators before division so a domain-typed
+    # exception surfaces instead of decimal.DivisionByZero / ZeroDivisionError.
+    if ref.production_tonnes <= Decimal("0"):
+        raise InvalidIntensityDenominatorError(
+            f"production_tonnes must be > 0; got {ref.production_tonnes} "
+            f"(anno={ref.anno})"
+        )
+    if ref.revenue_meur <= Decimal("0"):
+        raise InvalidIntensityDenominatorError(
+            f"revenue_meur must be > 0; got {ref.revenue_meur} (anno={ref.anno})"
+        )
+    if fte_dec <= Decimal("0"):
+        raise InvalidIntensityDenominatorError(
+            f"fte must be > 0; got {ref.fte} (anno={ref.anno})"
+        )
     return [
         IntensityMetric(
             correlation_id=correlation_id,

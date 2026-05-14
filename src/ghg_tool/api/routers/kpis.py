@@ -9,6 +9,7 @@ direct MV access is REVOKEd from the application role.
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from typing import Literal
 
 import structlog
 from fastapi import APIRouter, Depends, status
@@ -45,7 +46,7 @@ router = APIRouter(prefix="/api/v1/kpis", tags=["kpis"])
 )
 async def get_kpis(
     anno: int | None = None,
-    gwp_set: str = "AR6",
+    gwp_set: Literal["AR6", "AR5"] = "AR6",
     user: CurrentUser = Depends(require_permission("kpis", "read")),
     session: AsyncSession = Depends(get_db),
 ) -> KpiSummaryResponse:
