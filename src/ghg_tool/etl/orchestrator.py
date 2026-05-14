@@ -235,12 +235,20 @@ def run_ingestion_pipeline(
     all_findings.extend(_run_warn_checks(df1, df2, dq_report_version))
 
     # -- Step 8: Build staging rows -------------------------------------------
-    scope1_rows = build_scope1_rows(df1, batch_id=batch_id, tenant_id=tenant_id,
-                                    ingested_by=ingested_by)
-    scope2_rows = build_scope2_rows(df2, batch_id=batch_id, tenant_id=tenant_id,
-                                    ingested_by=ingested_by)
-    scope3_rows = build_scope3_rows(df3, batch_id=batch_id, tenant_id=tenant_id,
-                                    ingested_by=ingested_by)
+    # Defence-in-depth: when CRIT gates fail, return empty staging lists so a
+    # caller that forgets to honour ``pipeline_blocked`` cannot accidentally
+    # persist poisoned rows. The CRIT findings + DLQ entries remain available.
+    if crit_passed:
+        scope1_rows = build_scope1_rows(df1, batch_id=batch_id, tenant_id=tenant_id,
+                                        ingested_by=ingested_by)
+        scope2_rows = build_scope2_rows(df2, batch_id=batch_id, tenant_id=tenant_id,
+                                        ingested_by=ingested_by)
+        scope3_rows = build_scope3_rows(df3, batch_id=batch_id, tenant_id=tenant_id,
+                                        ingested_by=ingested_by)
+    else:
+        scope1_rows = []
+        scope2_rows = []
+        scope3_rows = []
 
     # -- Step 9: Cat 3 FR-11 reconciliation -----------------------------------
     all_findings.extend(_tag_findings(compute_cat3_reconciliation(df1, df3), dq_report_version))

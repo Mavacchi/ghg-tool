@@ -16,9 +16,28 @@ from __future__ import annotations
 
 import hashlib
 import uuid
+from decimal import Decimal
 from typing import Any
 
 import pandas as pd
+
+
+def _to_decimal(value: Any) -> Decimal:
+    """Coerce a CSV-derived numeric value to ``Decimal`` without float artefacts.
+
+    The pandera schemas coerce ``Quantità`` to ``float`` for validation, but
+    the destination columns ``raw.scope{1,2,3}_ingestions.quantita`` are
+    ``Numeric(20, 6)``.  Routing through ``Decimal(str(...))`` preserves the
+    exact decimal representation and avoids IEEE-754 binary-fraction noise
+    such as ``Decimal(0.1) == 0.1000000000000000055511151231257827021181583404541015625``.
+
+    Args:
+        value: Numeric value from a pandera-validated DataFrame.
+
+    Returns:
+        Equivalent ``Decimal`` value.
+    """
+    return Decimal(str(value))
 
 
 def _build_idempotency_key(parts: list[str]) -> str:
@@ -70,7 +89,7 @@ def build_scope1_rows(
                 "codice_sito": str(row["Codice_Sito"]),
                 "categoria_s1": str(row["Categoria_S1"]),
                 "combustibile": str(row["Combustibile"]),
-                "quantita": float(row["Quantità"]),
+                "quantita": _to_decimal(row["Quantità"]),
                 "unita": str(row["Unità"]),
                 "fonte_dato": str(row.get("Fonte_Dato", "")),
                 "qualita_dato": str(row.get("Qualità_Dato", "")),
@@ -120,7 +139,7 @@ def build_scope2_rows(
                 "anno": int(row["Anno"]),
                 "codice_sito": str(row["Codice_Sito"]),
                 "voce_s2": str(row["Voce_S2"]),
-                "quantita": float(row["Quantità"]),
+                "quantita": _to_decimal(row["Quantità"]),
                 "unita": str(row["Unità"]),
                 "strumento_mb": str(row["Strumento_MB"])
                     if pd.notna(row.get("Strumento_MB")) else None,
@@ -174,7 +193,7 @@ def build_scope3_rows(
                 "sottocategoria": str(row["Sottocategoria"]),
                 "metodo": str(row["Metodo"]),
                 "combustibile": combustibile or None,
-                "quantita": float(row["Quantità"]),
+                "quantita": _to_decimal(row["Quantità"]),
                 "unita": str(row["Unità"]),
                 "fonte_dato": str(row.get("Fonte_Dato", "")),
                 "qualita_dato": str(row.get("Qualità_Dato", "")),

@@ -34,7 +34,7 @@ scope1_schema = DataFrameSchema(
         ),
         "Codice_Sito": Column(
             str,
-            pa.Check.isin(_VALID_SITI + ["VIANO_GARGOLA"]),
+            pa.Check.isin(_VALID_SITI),
         ),
         "Categoria_S1": Column(str, pa.Check.str_length(min_value=1)),
         "Combustibile": Column(str, pa.Check.str_length(min_value=1)),

@@ -25,6 +25,30 @@ _HEADER_FILL = PatternFill(fill_type="solid", fgColor=EXCEL_HEADER_FILL)
 _HEADER_FONT = Font(bold=True, color="FFFFFFFF")
 _HEADER_ALIGN = Alignment(horizontal="center", vertical="center", wrap_text=True)
 
+# CSV / Excel formula-injection prefixes (OWASP — "CSV Injection").  When a
+# free-text cell value starts with one of these characters, Excel will
+# interpret the cell as a formula on open. We defang by prefixing with a
+# single apostrophe so the cell renders as a literal string.
+_FORMULA_INJECTION_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
+
+
+def _safe_cell_value(value: Any) -> Any:
+    """Defang potential Excel formula injection in string cell values.
+
+    Numbers, dates, booleans and ``None`` pass through unchanged.  Strings
+    starting with a formula-trigger character are prefixed with ``'`` so
+    Excel treats them as literal text instead of evaluating them.
+
+    Args:
+        value: Raw cell value to write.
+
+    Returns:
+        The same value, or a defanged string when injection is detected.
+    """
+    if isinstance(value, str) and value.startswith(_FORMULA_INJECTION_PREFIXES):
+        return "'" + value
+    return value
+
 
 def _write_header(ws: Any, columns: list[str]) -> None:
     """Write a bold header row with Okabe-Ito Blue fill.
@@ -343,11 +367,17 @@ def write_factor_catalog_sheet(wb: Workbook, report_data: dict[str, Any]) -> Non
 
     for f in factors:
         ws.append([
-            f.get("factor_id"), f.get("version"), f.get("substance"),
-            f.get("scope"), f.get("category"), f.get("source"),
-            f.get("value"), f.get("unit"), f.get("gwp_set"),
+            _safe_cell_value(f.get("factor_id")),
+            _safe_cell_value(f.get("version")),
+            _safe_cell_value(f.get("substance")),
+            f.get("scope"),
+            _safe_cell_value(f.get("category")),
+            _safe_cell_value(f.get("source")),
+            f.get("value"),
+            _safe_cell_value(f.get("unit")),
+            _safe_cell_value(f.get("gwp_set")),
             str(f.get("valid_from", "")),
-            f.get("applicability_note", ""),
+            _safe_cell_value(f.get("applicability_note", "")),
         ])
     _auto_width(ws)
 

@@ -30,6 +30,7 @@ from ghg_tool.api.schemas.report_schemas import (
     ReportJobStatus,
 )
 from ghg_tool.application.services.export_service import (
+    _internal_to_wire,
     create_report_job,
     get_job_status,
 )
@@ -179,7 +180,7 @@ async def get_report_status(
         )
     return ReportJobStatus(
         job_id=uuid.UUID(job["job_id"]),
-        status=job["status"],
+        status=_internal_to_wire(job["status"]),
         download_url=job.get("download_url"),
         error_message=job.get("error_message"),
         correlation_id=uuid.UUID(correlation_id) if correlation_id else uuid.uuid4(),

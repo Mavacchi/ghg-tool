@@ -53,19 +53,17 @@ class KpiSummaryResponse(BaseModel):
         note: Optional note (e.g. when MV is not yet available).
     """
 
-    model_config = ConfigDict(from_attributes=True, frozen=True)
+    model_config = ConfigDict(
+        from_attributes=True,
+        frozen=True,
+        populate_by_name=True,
+    )
 
     kpis: list[Any] = Field(default_factory=list)
     gwp_set: str
     correlation_id: str
     as_of: datetime
     note: str | None = Field(default=None, alias="_note")
-
-    model_config = ConfigDict(
-        from_attributes=True,
-        frozen=True,
-        populate_by_name=True,
-    )
 
     def model_dump(self, **kwargs: Any) -> dict[str, Any]:
         """Override model_dump to serialise ``note`` as ``_note`` in JSON output."""
