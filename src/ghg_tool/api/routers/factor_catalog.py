@@ -1,4 +1,10 @@
-"""Factor catalog router — GET + POST for /api/v1/factor-catalog (FR-04)."""
+"""Factor catalog router - GET + POST for /api/v1/factor-catalog (FR-04).
+
+Includes two-eyes approval workflow for factor publication (FR-12,
+ISAE 3000 §A99): a draft factor requires a second esg_manager to approve
+before it can be published. The proposer and approver cannot be the same
+user.
+"""
 
 from __future__ import annotations
 
@@ -8,7 +14,8 @@ from typing import Annotated, Any
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Request, status
-from sqlalchemy import select, update
+from pydantic import BaseModel, ConfigDict, Field
+from sqlalchemy import select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ghg_tool.api.dependencies.auth import CurrentUser
@@ -27,6 +34,7 @@ from ghg_tool.api.schemas.factor_schemas import (
 )
 from ghg_tool.infrastructure.db.models.audit_log import AuditLog
 from ghg_tool.infrastructure.db.models.factor import FactorCatalog
+from ghg_tool.infrastructure.db.models.factor_publish_approval import FactorPublishApproval
 from ghg_tool.infrastructure.db.repositories.factor_catalog_repository import (
     FactorCatalogRepository,
 )
@@ -36,6 +44,309 @@ logger = structlog.get_logger(__name__)
 
 router = APIRouter(prefix="/api/v1/factor-catalog", tags=["factor-catalog"])
 
+
+# ---------------------------------------------------------------------------
+# Schemas for approval workflow responses
+# ---------------------------------------------------------------------------
+
+class ApprovalRequestedResponse(BaseModel):
+    """Response body when a publish request creates a new approval row.
+
+    Returned with HTTP 202 when the first esg_manager calls /publish.
+
+    Attributes:
+        approval_id: UUID of the newly created approval row.
+        message: Human-readable status message for the caller.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    approval_id: uuid.UUID
+    message: str
+
+
+class PendingApprovalItem(BaseModel):
+    """One pending approval entry returned by the list endpoint.
+
+    Attributes:
+        approval_id: UUID of the approval row.
+        factor_id: UUID of the factor awaiting approval.
+        factor_string_id: String factor identifier (e.g. 'WTT_GAS_NAT_DEFRA_2025').
+        proposed_by: UUID of the esg_manager who proposed.
+        proposed_at: Timestamp of the proposal.
+        reason_code: The publish reason code supplied at proposal time.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    approval_id: uuid.UUID
+    factor_id: uuid.UUID
+    factor_string_id: str
+    proposed_by: uuid.UUID
+    proposed_at: datetime
+    reason_code: str | None
+
+
+class ApprovalRejectRequest(BaseModel):
+    """Body for ``POST /api/v1/factor-catalog/approvals/{approval_uuid}/reject``.
+
+    Attributes:
+        rejection_reason: Mandatory explanation (10-2000 chars).
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    rejection_reason: str = Field(min_length=10, max_length=2000)
+
+
+class ApprovalRejectResponse(BaseModel):
+    """Response after a successful rejection.
+
+    Attributes:
+        approval_id: UUID of the rejected approval.
+        decision: Always 'REJECTED'.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    approval_id: uuid.UUID
+    decision: str
+
+
+# ---------------------------------------------------------------------------
+# Internal helpers
+# ---------------------------------------------------------------------------
+
+def _problem(
+    status_code: int,
+    title: str,
+    detail: str,
+    error_code: str,
+    correlation_id: str | None,
+) -> HTTPException:
+    """Build an RFC 7807 problem+json HTTPException.
+
+    Args:
+        status_code: HTTP status code.
+        title: Short title.
+        detail: Human-readable detail message.
+        error_code: Machine-readable error code.
+        correlation_id: Request correlation UUID string.
+
+    Returns:
+        HTTPException with RFC 7807 body.
+    """
+    return HTTPException(
+        status_code=status_code,
+        detail={
+            "type": "about:blank",
+            "title": title,
+            "status": status_code,
+            "error_code": error_code,
+            "detail": detail,
+            "correlation_id": correlation_id,
+        },
+    )
+
+
+async def _get_pending_approval(
+    session: AsyncSession,
+    factor_db_id: uuid.UUID,
+    tenant_id: uuid.UUID,
+) -> FactorPublishApproval | None:
+    """Fetch an existing PENDING approval for the given factor and tenant.
+
+    Args:
+        session: Async DB session.
+        factor_db_id: Factor primary key UUID.
+        tenant_id: Caller's tenant UUID.
+
+    Returns:
+        The FactorPublishApproval ORM row if found; None otherwise.
+    """
+    stmt = select(FactorPublishApproval).where(
+        FactorPublishApproval.factor_id == factor_db_id,
+        FactorPublishApproval.tenant_id == tenant_id,
+        FactorPublishApproval.decision == "PENDING",
+    )
+    result = await session.execute(stmt)
+    return result.scalar_one_or_none()
+
+
+# ---------------------------------------------------------------------------
+# Shared publish pre-condition checks (extracted to avoid duplication)
+# ---------------------------------------------------------------------------
+
+def _assert_publishable(factor: FactorCatalog, correlation_id: str | None) -> None:
+    """Raise 422 if the factor fails any publish pre-condition.
+
+    Args:
+        factor: The FactorCatalog ORM row to validate.
+        correlation_id: Request trace ID for error bodies.
+
+    Raises:
+        HTTPException: 422 if is_tbc=True or value is NULL on a non-licence factor.
+    """
+    if factor.is_tbc:
+        raise _problem(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            "Unprocessable Entity",
+            (
+                f"Factor {factor.factor_id}/{factor.version} is marked as TBC "
+                "(to-be-confirmed). Pin the numeric value before publishing."
+            ),
+            "tbc_factor",
+            correlation_id,
+        )
+
+    if factor.value is None and not factor.is_licence_only:
+        raise _problem(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            "Unprocessable Entity",
+            (
+                f"Factor {factor.factor_id}/{factor.version} has a NULL value "
+                "but is_licence_only=False. Set a numeric value or mark as "
+                "is_licence_only before publishing."
+            ),
+            "null_value",
+            correlation_id,
+        )
+
+
+async def _do_publish(
+    *,
+    session: AsyncSession,
+    factor: FactorCatalog,
+    user: CurrentUser,
+    body: FactorCatalogPublishRequest,
+    approval: FactorPublishApproval,
+    correlation_id: str,
+    client_ip: str | None,
+    user_agent: str | None,
+    log: Any,
+) -> FactorCatalogPublishResponse:
+    """Execute the actual False->True publish transition and write audit rows.
+
+    Called only when a second esg_manager approves an existing PENDING row.
+    Runs entirely within the caller's DB session (same transaction as the
+    approval UPDATE).
+
+    Args:
+        session: Async DB session (shared transaction).
+        factor: Draft FactorCatalog ORM row.
+        user: Authenticated approving esg_manager.
+        body: Publish request body (not used for reason_code here; recorded
+            on the original proposal row).
+        approval: The PENDING FactorPublishApproval row being approved.
+        correlation_id: Request trace ID.
+        client_ip: Caller IP address for audit.
+        user_agent: Caller user-agent header for audit.
+        log: Bound structlog logger.
+
+    Returns:
+        FactorCatalogPublishResponse with is_published=True.
+
+    Raises:
+        HTTPException: 409 if a concurrent publisher won the race.
+    """
+    now_utc = datetime.now(tz=UTC)
+
+    # Conditional UPDATE guards against concurrent publishers.
+    update_stmt = (
+        update(FactorCatalog)
+        .where(
+            FactorCatalog.id == factor.id,
+            FactorCatalog.tenant_id == uuid.UUID(user.tenant_id),
+            FactorCatalog.is_published.is_(False),
+        )
+        .values(
+            is_published=True,
+            published_by=user.sub,
+            published_at=now_utc,
+        )
+    )
+    result = await session.execute(update_stmt)
+    if result.rowcount != 1:
+        log.warning("publish_factor_race_lost")
+        raise _problem(
+            status.HTTP_409_CONFLICT,
+            "Conflict",
+            (
+                f"Factor {factor.factor_id}/{factor.version} was published "
+                "by another user concurrently. No action taken."
+            ),
+            "already_published",
+            correlation_id,
+        )
+
+    # Mark the approval row as APPROVED.
+    approval.decision = "APPROVED"
+    approval.approved_by = uuid.UUID(user.sub)
+    approval.approved_at = now_utc
+
+    await session.refresh(factor)
+
+    after_state: dict[str, Any] = {
+        "factor_id": factor.factor_id,
+        "version": factor.version,
+        "gwp_set": factor.gwp_set,
+        "source": factor.source,
+        "scope": factor.scope,
+        "published_by": user.sub,
+        "published_at": now_utc.isoformat(),
+        "reason_code": approval.reason_code,
+        "approved_by": user.sub,
+        "approval_id": str(approval.id),
+    }
+    session.add(
+        AuditLog(
+            tenant_id=uuid.UUID(user.tenant_id),
+            correlation_id=uuid.UUID(correlation_id),
+            user_role=user.role,
+            action="factor_published",
+            resource="factor_catalog",
+            resource_id=factor.id,
+            request_method="POST",
+            request_path=f"/api/v1/factor-catalog/{factor.id}/publish",
+            status_code=200,
+            ip_address=client_ip,
+            user_agent=user_agent,
+            after_state=after_state,
+        )
+    )
+    await session.flush()
+
+    log.info(
+        "factor_published",
+        factor_id=factor.factor_id,
+        version=factor.version,
+        gwp_set=factor.gwp_set,
+        published_by=user.sub,
+        reason_code=approval.reason_code,
+        approval_id=str(approval.id),
+    )
+
+    siem.emit(
+        event="factor_published",
+        correlation_id=correlation_id,
+        tenant_id=user.tenant_id,
+        user_sub=user.sub,
+        severity="INFO",
+        payload={
+            "factor_id": factor.factor_id,
+            "version": factor.version,
+            "gwp_set": factor.gwp_set,
+            "reason_code": approval.reason_code,
+            "approval_id": str(approval.id),
+        },
+    )
+
+    return FactorCatalogPublishResponse.model_validate(factor)
+
+
+# ---------------------------------------------------------------------------
+# GET /
+# ---------------------------------------------------------------------------
 
 @router.get(
     "/",
@@ -94,6 +405,10 @@ async def list_factors(
     return CursorPage(items=items, next_cursor=next_cursor)
 
 
+# ---------------------------------------------------------------------------
+# GET /{factor_id}/versions
+# ---------------------------------------------------------------------------
+
 @router.get(
     "/{factor_id}/versions",
     response_model=list[FactorCatalogResponse],
@@ -133,6 +448,10 @@ async def list_factor_versions(
     return [FactorCatalogResponse.model_validate(r) for r in rows]
 
 
+# ---------------------------------------------------------------------------
+# POST /
+# ---------------------------------------------------------------------------
+
 @router.post(
     "/",
     response_model=FactorCatalogResponse,
@@ -145,7 +464,7 @@ async def list_factor_versions(
     responses={
         201: {"description": "Factor created"},
         401: {"description": "Not authenticated"},
-        403: {"description": "Insufficient role — data_steward required"},
+        403: {"description": "Insufficient role - data_steward required"},
         422: {"description": "Validation error"},
     },
 )
@@ -203,39 +522,244 @@ async def create_factor(
     return FactorCatalogResponse.model_validate(persisted)
 
 
-@router.post(
-    "/{factor_uuid}/publish",
-    response_model=FactorCatalogPublishResponse,
+# ---------------------------------------------------------------------------
+# GET /pending-approvals  (must be declared BEFORE /{uuid}/publish to avoid
+# FastAPI treating "pending-approvals" as a path parameter value)
+# ---------------------------------------------------------------------------
+
+@router.get(
+    "/pending-approvals",
+    response_model=list[PendingApprovalItem],
     status_code=status.HTTP_200_OK,
-    summary="Publish a draft factor (esg_manager only)",
+    summary="List pending factor publish approvals (esg_manager only)",
     description=(
-        "Transitions a draft factor (``is_published=False``) to published "
-        "(``is_published=True``). Once published the DB trigger "
-        "``trg_factor_immutable`` (MG-02) makes the row permanently immutable.\n\n"
-        "**Required body**: a controlled ``reason_code`` from "
-        "``{INITIAL_PUBLICATION, VERSION_BUMP, METHODOLOGY_UPDATE, "
-        "SOURCE_REVISION, CORRECTION_REPLACEMENT}`` plus optional "
-        "``publish_notes`` (max 2000 chars).\n\n"
-        "**Pre-conditions** (all checked before the UPDATE fires):\n"
-        "- Row must exist and belong to the caller's tenant — 404 otherwise.\n"
-        "- Row must not already be published — 409 if ``is_published`` is already True.\n"
-        "- ``is_tbc`` must be False — 422 if True (TBC factors have no pinned value).\n"
-        "- ``value`` must not be NULL unless ``is_licence_only=True`` — 422 otherwise.\n\n"
-        "On success returns HTTP 200 with the full updated factor row.\n\n"
-        "**Audit**: writes a row to ``calc.audit_log`` in the same transaction "
-        "(action=``factor_published``, ip_address, user_agent, reason_code in "
-        "``after_state``) and emits a structured log entry.\n\n"
-        "**Idempotency / race safety**: the UPDATE is conditional on "
-        "``is_published=false``; concurrent publishers see ``rowcount==0`` and "
-        "get a 409 (``already_published``)."
+        "Returns all factor approval requests in the PENDING state for the "
+        "caller's tenant. esg_manager only."
     ),
     responses={
-        200: {"description": "Factor successfully published"},
+        200: {"description": "List of pending approvals"},
         401: {"description": "Not authenticated"},
-        403: {"description": "Insufficient role — esg_manager required"},
+        403: {"description": "Insufficient role - esg_manager required"},
+    },
+)
+async def list_pending_approvals(
+    user: CurrentUser = Depends(require_permission("factor_catalog", "approve")),
+    session: AsyncSession = Depends(get_db),
+) -> list[PendingApprovalItem]:
+    """Return all PENDING approval rows for the caller's tenant.
+
+    Joins to calc.factor_catalog to include the human-readable factor_id
+    string alongside the UUID.
+
+    Args:
+        user: Authenticated esg_manager from JWT.
+        session: Async DB session.
+
+    Returns:
+        List of ``PendingApprovalItem`` records.
+    """
+    correlation_id = get_correlation_id()
+    log = logger.bind(
+        correlation_id=correlation_id,
+        tenant_id=user.tenant_id,
+        user=user.sub[:8],
+    )
+    log.info("list_pending_approvals")
+
+    result = await session.execute(
+        text(
+            "SELECT a.id, a.factor_id, f.factor_id AS factor_string_id, "
+            "       a.proposed_by, a.proposed_at, a.reason_code "
+            "FROM calc.factor_publish_approvals a "
+            "JOIN calc.factor_catalog f ON f.id = a.factor_id "
+            "WHERE a.tenant_id = CAST(:tenant AS uuid) "
+            "  AND a.decision = 'PENDING' "
+            "ORDER BY a.proposed_at ASC"
+        ),
+        {"tenant": user.tenant_id},
+    )
+    rows = result.fetchall()
+    return [
+        PendingApprovalItem(
+            approval_id=row.id,
+            factor_id=row.factor_id,
+            factor_string_id=row.factor_string_id,
+            proposed_by=row.proposed_by,
+            proposed_at=row.proposed_at,
+            reason_code=row.reason_code,
+        )
+        for row in rows
+    ]
+
+
+# ---------------------------------------------------------------------------
+# POST /approvals/{approval_uuid}/reject
+# ---------------------------------------------------------------------------
+
+@router.post(
+    "/approvals/{approval_uuid}/reject",
+    response_model=ApprovalRejectResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Reject a pending factor publish approval (esg_manager only)",
+    description=(
+        "Marks the approval as REJECTED with mandatory decision_notes. "
+        "The factor remains in DRAFT state. Writes an audit_log row and "
+        "emits a SIEM event at severity WARN."
+    ),
+    responses={
+        200: {"description": "Approval rejected, factor remains DRAFT"},
+        401: {"description": "Not authenticated"},
+        403: {"description": "Insufficient role - esg_manager required"},
+        404: {"description": "Approval not found or belongs to a different tenant"},
+        422: {"description": "rejection_reason too short (min 10 chars)"},
+    },
+)
+async def reject_approval(
+    approval_uuid: uuid.UUID,
+    request: Request,
+    body: ApprovalRejectRequest,
+    user: CurrentUser = Depends(require_permission("factor_catalog", "approve")),
+    session: AsyncSession = Depends(get_db),
+) -> ApprovalRejectResponse:
+    """Reject a PENDING approval; factor stays in DRAFT.
+
+    Args:
+        approval_uuid: UUID of the approval row from the URL path.
+        request: HTTP request (for audit metadata).
+        body: ``ApprovalRejectRequest`` with mandatory rejection_reason.
+        user: Authenticated esg_manager from JWT.
+        session: Async DB session.
+
+    Returns:
+        ``ApprovalRejectResponse`` confirming the rejection.
+
+    Raises:
+        HTTPException: 404 if not found or belongs to a different tenant.
+        HTTPException: 409 if the approval is not in PENDING state.
+    """
+    correlation_id = get_correlation_id()
+    client_ip = request.client.host if request.client else None
+    user_agent = request.headers.get("user-agent")
+    log = logger.bind(
+        correlation_id=correlation_id,
+        tenant_id=user.tenant_id,
+        user=user.sub[:8],
+        ip_address=client_ip,
+        user_agent=user_agent,
+        approval_uuid=str(approval_uuid),
+    )
+
+    stmt = select(FactorPublishApproval).where(
+        FactorPublishApproval.id == approval_uuid,
+        FactorPublishApproval.tenant_id == uuid.UUID(user.tenant_id),
+    )
+    result = await session.execute(stmt)
+    approval = result.scalar_one_or_none()
+
+    if approval is None:
+        log.warning("reject_approval_not_found")
+        raise _problem(
+            status.HTTP_404_NOT_FOUND,
+            "Not Found",
+            f"Approval {approval_uuid} not found.",
+            "approval_not_found",
+            correlation_id,
+        )
+
+    if approval.decision != "PENDING":
+        log.warning("reject_approval_not_pending", decision=approval.decision)
+        raise _problem(
+            status.HTTP_409_CONFLICT,
+            "Conflict",
+            f"Approval {approval_uuid} is already {approval.decision} and cannot be rejected.",
+            "approval_not_pending",
+            correlation_id,
+        )
+
+    now_utc = datetime.now(tz=UTC)
+    approval.decision = "REJECTED"
+    approval.approved_by = uuid.UUID(user.sub)
+    approval.approved_at = now_utc
+    approval.decision_notes = body.rejection_reason
+
+    session.add(
+        AuditLog(
+            tenant_id=uuid.UUID(user.tenant_id),
+            correlation_id=uuid.UUID(correlation_id),
+            user_role=user.role,
+            action="factor_approval_rejected",
+            resource="factor_catalog",
+            resource_id=approval.factor_id,
+            request_method="POST",
+            request_path=f"/api/v1/factor-catalog/approvals/{approval_uuid}/reject",
+            status_code=200,
+            ip_address=client_ip,
+            user_agent=user_agent,
+            after_state={
+                "approval_id": str(approval_uuid),
+                "decision": "REJECTED",
+                "rejected_by": user.sub,
+                "rejected_at": now_utc.isoformat(),
+            },
+        )
+    )
+
+    await session.flush()
+
+    log.info(
+        "factor_approval_rejected",
+        approval_id=str(approval_uuid),
+        factor_id=str(approval.factor_id),
+    )
+
+    siem.emit(
+        event="factor_approval_rejected",
+        correlation_id=correlation_id,
+        tenant_id=user.tenant_id,
+        user_sub=user.sub,
+        severity="WARN",
+        payload={
+            "approval_id": str(approval_uuid),
+            "factor_id": str(approval.factor_id),
+        },
+    )
+
+    return ApprovalRejectResponse(approval_id=approval_uuid, decision="REJECTED")
+
+
+# ---------------------------------------------------------------------------
+# POST /{factor_uuid}/publish  (two-eyes workflow)
+# ---------------------------------------------------------------------------
+
+@router.post(
+    "/{factor_uuid}/publish",
+    status_code=status.HTTP_200_OK,
+    summary="Publish a draft factor - two-eyes approval (esg_manager only)",
+    description=(
+        "Implements the ISAE 3000 §A99 two-eyes principle:\n\n"
+        "1. First esg_manager calls /publish -> 202: approval row created "
+        "(PENDING), reason_code captured.\n"
+        "2. Same esg_manager calls /publish again -> 409 self_approval_forbidden.\n"
+        "3. Different esg_manager calls /publish -> 200: factor published, "
+        "approval marked APPROVED.\n"
+        "4. If already APPROVED (published) -> 409 already_published.\n\n"
+        "The body's ``reason_code`` is captured on the INITIAL call only; "
+        "the second call's body is accepted but reason_code is ignored.\n\n"
+        "**Rate limit**: 10 publish calls per user per minute."
+    ),
+    responses={
+        200: {"description": "Factor published (second esg_manager approved)"},
+        202: {"description": "Approval requested, awaiting second esg_manager"},
+        401: {"description": "Not authenticated"},
+        403: {"description": "Insufficient role - esg_manager required"},
         404: {"description": "Factor not found or belongs to a different tenant"},
-        409: {"description": "Factor is already published (already_published)"},
-        422: {"description": "Factor cannot be published: is_tbc=True or value=NULL on non-licence factor"},
+        409: {
+            "description": (
+                "self_approval_forbidden: same proposer cannot approve; "
+                "already_published: factor already published."
+            )
+        },
+        422: {"description": "Factor cannot be published: is_tbc=True or value=NULL"},
     },
 )
 async def publish_factor(
@@ -244,37 +768,24 @@ async def publish_factor(
     body: FactorCatalogPublishRequest,
     user: CurrentUser = Depends(require_permission("factor_catalog", "publish")),
     session: AsyncSession = Depends(get_db),
-) -> FactorCatalogPublishResponse:
-    """Publish a draft emission factor (esg_manager only).
+) -> Any:
+    """Two-eyes approval publish endpoint.
 
-    Fetches the draft row by UUID and tenant, validates publish pre-conditions,
-    then performs the False -> True transition on ``is_published`` via a
-    conditional UPDATE so concurrent publishers can't race past the in-memory
-    check. The DB trigger ``ops.deny_factor_mutation`` guards against any
-    mutation where ``OLD.is_published`` is already True (MG-02); since we
-    require the WHERE clause ``is_published=false`` on the UPDATE, only the
-    first writer of two concurrent requests sees ``rowcount==1``.
-
-    Also writes an ``calc.audit_log`` row (ISAE 3000 / CSRD ESRS 1 §85
-    verifiability) in the same transaction as the UPDATE so the trail
-    survives container log rotation.
+    State machine:
+    - No approval row + draft factor -> create PENDING row -> 202.
+    - PENDING row + same proposer -> 409 self_approval_forbidden.
+    - PENDING row + different esg_manager -> publish + APPROVED -> 200.
+    - Factor already published (or APPROVED approval exists) -> 409.
 
     Args:
         factor_uuid: UUID primary key of the draft factor row.
-        request: HTTP request (used to capture client IP + User-Agent).
+        request: HTTP request (for audit metadata).
         body: Required publish payload with ``reason_code`` + optional notes.
-        user: Authenticated esg_manager user.
-        session: Authenticated DB session.
+        user: Authenticated esg_manager from JWT.
+        session: Async DB session.
 
     Returns:
-        The updated ``FactorCatalogPublishResponse`` with ``is_published=True``.
-
-    Raises:
-        HTTPException: 404 if not found or wrong tenant.
-        HTTPException: 409 if already published OR if a concurrent publisher
-            won the race to flip the flag (``error_code: "already_published"``
-            in both cases - the client treats both identically).
-        HTTPException: 422 if ``is_tbc=True`` or value is NULL on a non-licence factor.
+        ``ApprovalRequestedResponse`` (202) or ``FactorCatalogPublishResponse`` (200).
     """
     correlation_id = get_correlation_id()
     client_ip = request.client.host if request.client else None
@@ -283,13 +794,11 @@ async def publish_factor(
         correlation_id=correlation_id,
         user=user.sub[:8],
         tenant_id=user.tenant_id,
-        client_ip=client_ip,
+        ip_address=client_ip,
         user_agent=user_agent,
         factor_uuid=str(factor_uuid),
     )
 
-    # Per-route rate limit (10/min per user). Publishing is a low-frequency,
-    # high-impact operation; a burst signals scripted misuse worth a 429.
     if not publish_limiter.is_allowed(f"publish:user:{user.sub}"):
         log.warning("publish_factor_rate_limited")
         raise HTTPException(
@@ -311,182 +820,126 @@ async def publish_factor(
 
     if factor is None:
         log.warning("publish_factor_not_found")
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail={
-                "type": "about:blank",
-                "title": "Not Found",
-                "status": 404,
-                "detail": f"Factor {factor_uuid} not found.",
-                "correlation_id": correlation_id,
-            },
+        raise _problem(
+            status.HTTP_404_NOT_FOUND,
+            "Not Found",
+            f"Factor {factor_uuid} not found.",
+            "factor_not_found",
+            correlation_id,
         )
 
+    # 4. If already published -> 409 regardless of approval state.
     if factor.is_published:
-        log.warning(
-            "publish_factor_already_published",
-            factor_id=factor.factor_id,
-            version=factor.version,
-        )
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail={
-                "type": "about:blank",
-                "title": "Conflict",
-                "status": 409,
-                "error_code": "already_published",
-                "detail": (
-                    f"Factor {factor.factor_id}/{factor.version} is already published "
-                    "and immutable. No action taken."
-                ),
-                "correlation_id": correlation_id,
-            },
+        log.warning("publish_factor_already_published")
+        raise _problem(
+            status.HTTP_409_CONFLICT,
+            "Conflict",
+            (
+                f"Factor {factor.factor_id}/{factor.version} is already published "
+                "and immutable. No action taken."
+            ),
+            "already_published",
+            correlation_id,
         )
 
-    if factor.is_tbc:
-        log.warning(
-            "publish_factor_rejected_tbc",
-            factor_id=factor.factor_id,
-            version=factor.version,
-        )
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail={
-                "type": "about:blank",
-                "title": "Unprocessable Entity",
-                "status": 422,
-                "error_code": "tbc_factor",
-                "detail": (
-                    f"Factor {factor.factor_id}/{factor.version} is marked as TBC "
-                    "(to-be-confirmed). Pin the numeric value before publishing."
-                ),
-                "correlation_id": correlation_id,
-            },
-        )
+    # Run publish pre-conditions (tbc / null value) before touching approvals.
+    _assert_publishable(factor, correlation_id)
 
-    if factor.value is None and not factor.is_licence_only:
-        log.warning(
-            "publish_factor_rejected_null_value",
-            factor_id=factor.factor_id,
-            version=factor.version,
-        )
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail={
-                "type": "about:blank",
-                "title": "Unprocessable Entity",
-                "status": 422,
-                "error_code": "null_value",
-                "detail": (
-                    f"Factor {factor.factor_id}/{factor.version} has a NULL value "
-                    "but is_licence_only=False. Set a numeric value or mark as "
-                    "is_licence_only before publishing."
-                ),
-                "correlation_id": correlation_id,
-            },
-        )
-
-    # All in-memory pre-conditions passed - perform the False->True transition
-    # via a conditional UPDATE so two concurrent publishers cannot both win.
-    # The DB trigger ops.deny_factor_mutation only raises when OLD.is_published
-    # is True; the WHERE clause below guarantees we only target rows that are
-    # still drafts at UPDATE time, so the trigger does NOT block this write.
-    now_utc = datetime.now(tz=UTC)
-    update_stmt = (
-        update(FactorCatalog)
-        .where(
-            FactorCatalog.id == factor.id,
-            FactorCatalog.tenant_id == uuid.UUID(user.tenant_id),
-            FactorCatalog.is_published.is_(False),
-        )
-        .values(
-            is_published=True,
-            published_by=user.sub,
-            published_at=now_utc,
-        )
+    # Fetch existing PENDING approval (if any).
+    pending = await _get_pending_approval(
+        session, factor.id, uuid.UUID(user.tenant_id)
     )
-    result = await session.execute(update_stmt)
-    if result.rowcount != 1:
-        # A concurrent esg_manager flipped the flag between our SELECT and
-        # our UPDATE. Treat it as a redundant publish (semantically the row
-        # IS published; the client's intent is satisfied) but return 409 so
-        # the audit trail records the loser of the race separately.
-        log.warning(
-            "publish_factor_race_lost",
-            factor_id=factor.factor_id,
-            version=factor.version,
-        )
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail={
-                "type": "about:blank",
-                "title": "Conflict",
-                "status": 409,
-                "error_code": "already_published",
-                "detail": (
-                    f"Factor {factor.factor_id}/{factor.version} was published "
-                    "by another user concurrently. No action taken."
-                ),
-                "correlation_id": correlation_id,
-            },
-        )
 
-    # Refresh ORM state so the response carries the new is_published/...
-    await session.refresh(factor)
-
-    # Audit-log row in the SAME transaction (CSRD ESRS 1 §85 - verifiability;
-    # ISAE 3000 §40 - audit trail must live with the data, not only in stdout).
-    after_state: dict[str, Any] = {
-        "factor_id": factor.factor_id,
-        "version": factor.version,
-        "gwp_set": factor.gwp_set,
-        "source": factor.source,
-        "scope": factor.scope,
-        "published_by": user.sub,
-        "published_at": now_utc.isoformat(),
-        "reason_code": body.reason_code,
-        "publish_notes": body.publish_notes,
-    }
-    session.add(
-        AuditLog(
+    if pending is None:
+        # State 1: No PENDING row -> create it, return 202.
+        new_approval = FactorPublishApproval(
+            id=uuid.uuid4(),
             tenant_id=uuid.UUID(user.tenant_id),
-            correlation_id=uuid.UUID(correlation_id) if correlation_id else uuid.uuid4(),
-            user_role=user.role,
-            action="factor_published",
-            resource="factor_catalog",
-            resource_id=factor.id,
-            request_method="POST",
-            request_path=f"/api/v1/factor-catalog/{factor.id}/publish",
-            status_code=200,
-            ip_address=client_ip,
-            user_agent=user_agent,
-            after_state=after_state,
+            factor_id=factor.id,
+            proposed_by=uuid.UUID(user.sub),
+            decision="PENDING",
+            correlation_id=uuid.UUID(correlation_id),
+            reason_code=body.reason_code,
         )
-    )
-    await session.flush()
+        session.add(new_approval)
 
-    log.info(
-        "factor_published",
-        factor_id=factor.factor_id,
-        version=factor.version,
-        gwp_set=factor.gwp_set,
-        published_by=user.sub,
-        reason_code=body.reason_code,
-        publish_notes=body.publish_notes,
-    )
-    # Forward to SIEM (no-op when GHG_SIEM_WEBHOOK_URL is unset).
-    siem.emit(
-        event="factor_published",
+        session.add(
+            AuditLog(
+                tenant_id=uuid.UUID(user.tenant_id),
+                correlation_id=uuid.UUID(correlation_id),
+                user_role=user.role,
+                action="factor_approval_requested",
+                resource="factor_catalog",
+                resource_id=factor.id,
+                request_method="POST",
+                request_path=f"/api/v1/factor-catalog/{factor.id}/publish",
+                status_code=202,
+                ip_address=client_ip,
+                user_agent=user_agent,
+                after_state={
+                    "approval_id": str(new_approval.id),
+                    "factor_id": factor.factor_id,
+                    "version": factor.version,
+                    "reason_code": body.reason_code,
+                    "proposed_by": user.sub,
+                },
+            )
+        )
+
+        await session.flush()
+
+        log.info(
+            "factor_approval_requested",
+            approval_id=str(new_approval.id),
+            factor_id=factor.factor_id,
+            reason_code=body.reason_code,
+        )
+
+        siem.emit(
+            event="factor_approval_requested",
+            correlation_id=correlation_id,
+            tenant_id=user.tenant_id,
+            user_sub=user.sub,
+            severity="INFO",
+            payload={
+                "factor_id": factor.factor_id,
+                "approval_id": str(new_approval.id),
+                "reason_code": body.reason_code,
+            },
+        )
+
+        from fastapi.responses import JSONResponse  # noqa: PLC0415
+        return JSONResponse(
+            status_code=status.HTTP_202_ACCEPTED,
+            content={
+                "approval_id": str(new_approval.id),
+                "message": "Approval requested, awaiting second esg_manager",
+            },
+        )
+
+    # State 2: PENDING row exists + same proposer -> 409.
+    if str(pending.proposed_by) == user.sub:
+        log.warning("publish_factor_self_approval_blocked")
+        raise _problem(
+            status.HTTP_409_CONFLICT,
+            "Conflict",
+            (
+                "The same esg_manager who proposed the approval cannot also "
+                "approve it (ISAE 3000 two-eyes principle)."
+            ),
+            "self_approval_forbidden",
+            correlation_id,
+        )
+
+    # State 3: PENDING row + different esg_manager -> approve and publish.
+    return await _do_publish(
+        session=session,
+        factor=factor,
+        user=user,
+        body=body,
+        approval=pending,
         correlation_id=correlation_id,
-        tenant_id=user.tenant_id,
-        user_sub=user.sub,
-        severity="INFO",
-        payload={
-            "factor_id": factor.factor_id,
-            "version": factor.version,
-            "gwp_set": factor.gwp_set,
-            "reason_code": body.reason_code,
-        },
+        client_ip=client_ip,
+        user_agent=user_agent,
+        log=log,
     )
-
-    return FactorCatalogPublishResponse.model_validate(factor)
