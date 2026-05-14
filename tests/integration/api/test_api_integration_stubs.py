@@ -287,7 +287,12 @@ class TestEmissionsIntegration:
           3. Assert: response status is 201 or 200.
           4. Assert: row A now has valid_to IS NOT NULL in the database.
         """
-        # Insert predecessor row directly — avoids unique-index collision
+        # Insert predecessor row directly — avoids unique-index collision.
+        # We must commit here: the HTTP POST below goes through FastAPI's
+        # `get_db` dependency which opens an independent DB session and
+        # therefore cannot see uncommitted rows from `rls_session`. Without
+        # the commit, the correction endpoint looks up the predecessor by
+        # id, finds nothing, and returns 404.
         row_a_id = await _sql_insert_emission(
             rls_session,
             tenant_id=tenant_id,
@@ -295,6 +300,7 @@ class TestEmissionsIntegration:
             anno=2023,
             tco2e=8.0,
         )
+        await rls_session.commit()
 
         token = _data_steward_token(tenant_id)
 

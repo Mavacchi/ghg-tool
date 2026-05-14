@@ -105,7 +105,7 @@ async def get_audit_trail(
         FROM calc.emissions_consolidated e
         LEFT JOIN ref.factor_catalog f ON f.id = e.factor_id
         WHERE 1=1
-          AND (:cid IS NULL OR e.correlation_id = :cid::uuid)
+          AND (:cid IS NULL OR e.correlation_id = CAST(:cid AS uuid))
           AND (:anno IS NULL OR e.anno = :anno)
           AND (:site IS NULL OR e.codice_sito = :site)
         ORDER BY e.calc_timestamp DESC

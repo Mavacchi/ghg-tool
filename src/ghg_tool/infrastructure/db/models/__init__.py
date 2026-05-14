@@ -13,6 +13,7 @@ from ghg_tool.infrastructure.db.models.raw_scope2 import RawScope2Ingestion
 from ghg_tool.infrastructure.db.models.raw_scope3 import RawScope3Ingestion
 from ghg_tool.infrastructure.db.models.role import Role
 from ghg_tool.infrastructure.db.models.site import Site
+from ghg_tool.infrastructure.db.models.tenant import Tenant
 from ghg_tool.infrastructure.db.models.user import User
 
 __all__ = [
@@ -29,5 +30,6 @@ __all__ = [
     "RawScope3Ingestion",
     "Role",
     "Site",
+    "Tenant",
     "User",
 ]
