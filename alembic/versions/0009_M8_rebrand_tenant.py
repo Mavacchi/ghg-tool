@@ -31,66 +31,59 @@ depends_on: str | None = None
 
 _M0_CODE = "CERAMIC_TILE_CO"
 _M0_LEGAL_NAME = "Ceramic Tile Manufacturer S.p.A."
+# Default target rebrand applied when no env var override is provided.
+# This makes a fresh `alembic upgrade head` automatically rename the M0
+# placeholder to the launch-customer brand.
+_LAUNCH_CODE = "GRESMALT"
+_LAUNCH_LEGAL_NAME = "Gruppo Ceramiche Gresmalt S.p.A."
 
 
 def upgrade() -> None:
-    """Apply branding from env vars to the rebranded tenant row."""
+    """Apply branding to the rebranded tenant row.
+
+    Env vars take precedence; otherwise the launch-customer defaults
+    (``_LAUNCH_CODE`` / ``_LAUNCH_LEGAL_NAME``) are applied so the M0
+    placeholder ``CERAMIC_TILE_CO`` row is renamed automatically.
+    """
     old_code = os.getenv("GHG_TENANT_OLD_CODE", _M0_CODE)
-    new_code = os.getenv("GHG_TENANT_CODE")
-    new_legal_name = os.getenv("GHG_COMPANY_NAME")
-
-    if not new_code and not new_legal_name:
-        # No-op: keep the M0 default branding.
-        return
-
-    set_clauses: list[str] = []
-    params: dict[str, str] = {"old_code": old_code}
-    if new_code:
-        set_clauses.append("code = :new_code")
-        params["new_code"] = new_code
-    if new_legal_name:
-        set_clauses.append("legal_name = :new_legal_name")
-        params["new_legal_name"] = new_legal_name
+    new_code = os.getenv("GHG_TENANT_CODE") or _LAUNCH_CODE
+    new_legal_name = os.getenv("GHG_COMPANY_NAME") or _LAUNCH_LEGAL_NAME
 
     from sqlalchemy import text  # local import — Alembic env already loads SA
 
     bind = op.get_bind()
     bind.execute(
         text(
-            "UPDATE ref.tenants SET "
-            + ", ".join(set_clauses)
-            + " WHERE code = :old_code"
+            "UPDATE ref.tenants "
+            "SET code = :new_code, legal_name = :new_legal_name "
+            "WHERE code = :old_code"
         ),
-        params,
+        {
+            "old_code": old_code,
+            "new_code": new_code,
+            "new_legal_name": new_legal_name,
+        },
     )
 
 
 def downgrade() -> None:
-    """Restore the M0 default branding on the rebranded tenant."""
-    new_code = os.getenv("GHG_TENANT_CODE")
-    new_legal_name = os.getenv("GHG_COMPANY_NAME")
-
-    if not new_code and not new_legal_name:
-        return
+    """Restore the M0 default branding on the rebranded tenant row."""
+    new_code = os.getenv("GHG_TENANT_CODE") or _LAUNCH_CODE
+    new_legal_name = os.getenv("GHG_COMPANY_NAME") or _LAUNCH_LEGAL_NAME
 
     from sqlalchemy import text
-
-    # Find the rebranded row by matching whichever value(s) we changed.
-    match_clauses: list[str] = []
-    params: dict[str, str] = {"m0_code": _M0_CODE, "m0_legal_name": _M0_LEGAL_NAME}
-    if new_code:
-        match_clauses.append("code = :new_code")
-        params["new_code"] = new_code
-    if new_legal_name:
-        match_clauses.append("legal_name = :new_legal_name")
-        params["new_legal_name"] = new_legal_name
 
     bind = op.get_bind()
     bind.execute(
         text(
             "UPDATE ref.tenants "
             "SET code = :m0_code, legal_name = :m0_legal_name "
-            "WHERE " + " AND ".join(match_clauses)
+            "WHERE code = :new_code AND legal_name = :new_legal_name"
         ),
-        params,
+        {
+            "m0_code": _M0_CODE,
+            "m0_legal_name": _M0_LEGAL_NAME,
+            "new_code": new_code,
+            "new_legal_name": new_legal_name,
+        },
     )

@@ -34,7 +34,7 @@ _CSS_PATH = _TEMPLATES_DIR / "styles.css"
 DASHBOARD_VERSION = "1.0.0"
 DASHBOARD_ID = "esg-main-2026"
 
-_DEFAULT_COMPANY_NAME = "Saturnia Ceramica S.r.l."
+_DEFAULT_COMPANY_NAME = "Gruppo Ceramiche Gresmalt S.p.A."
 
 
 def _company_name() -> str:

@@ -82,7 +82,7 @@ La dashboard ha 8 pagine, accessibili dalla sidebar di sinistra:
 La documentazione API (per sviluppatori) è su <http://localhost:8000/docs>.
 
 > **NB**: al primo avvio il database è vuoto. La pipeline di caricamento
-> dati reali (ETL) richiede file Excel formato Saturnia che non sono
+> dati reali (ETL) richiede file Excel formato Gresmalt che non sono
 > inclusi nel repository. Senza dati, le pagine mostreranno *Nessun dato
 > disponibile* o *MV not yet populated* in modo elegante.
 
@@ -140,7 +140,7 @@ verificate in parità al commit `f578832`).
 
 ### *Voglio caricare dei dati di test*
 
-La pipeline ETL non è ancora wired-up per i file Excel di Saturnia
+La pipeline ETL non è ancora wired-up per i file Excel di Gresmalt
 (scheduled per v1.1, vedi `docs/roadmap.md`). Per il momento puoi
 usare la dashboard solo per esplorare la UI e l'API; per dati reali
 serve l'intervento di uno sviluppatore.
