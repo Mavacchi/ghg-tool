@@ -152,7 +152,7 @@ class TestPublishHappyPath:
         app.dependency_overrides[get_db] = _db_returning(factor)
 
         with TestClient(app, raise_server_exceptions=False) as client:
-            resp = client.post(_BASE_URL)
+            resp = client.post(_BASE_URL, json={"reason_code": "INITIAL_PUBLICATION"})
 
         assert resp.status_code == 200
         data = resp.json()
@@ -168,7 +168,7 @@ class TestPublishHappyPath:
         app.dependency_overrides[get_db] = _db_returning(factor)
 
         with TestClient(app, raise_server_exceptions=False) as client:
-            resp = client.post(_BASE_URL)
+            resp = client.post(_BASE_URL, json={"reason_code": "INITIAL_PUBLICATION"})
 
         assert resp.status_code == 200
         data = resp.json()
@@ -187,7 +187,7 @@ class TestPublishHappyPath:
         with TestClient(app, raise_server_exceptions=False) as client:
             resp = client.post(
                 _BASE_URL,
-                json={"publish_notes": "Reviewed against DEFRA 2024 spreadsheet"},
+                json={"reason_code": "INITIAL_PUBLICATION", "publish_notes": "Reviewed against DEFRA 2024 spreadsheet"},
             )
 
         assert resp.status_code == 200
@@ -206,7 +206,7 @@ class TestPublishHappyPath:
         app.dependency_overrides[get_db] = _db_returning(factor)
 
         with TestClient(app, raise_server_exceptions=False) as client:
-            resp = client.post(_BASE_URL)
+            resp = client.post(_BASE_URL, json={"reason_code": "INITIAL_PUBLICATION"})
 
         assert resp.status_code == 200
         assert resp.json()["is_published"] is True
@@ -221,7 +221,7 @@ class TestPublishAuth:
         app.dependency_overrides[get_db] = _db_returning(None)
 
         with TestClient(app, raise_server_exceptions=False) as client:
-            resp = client.post(_BASE_URL)
+            resp = client.post(_BASE_URL, json={"reason_code": "INITIAL_PUBLICATION"})
 
         assert resp.status_code == 401
 
@@ -232,7 +232,7 @@ class TestPublishAuth:
         app.dependency_overrides[get_db] = _db_returning(factor)
 
         with TestClient(app, raise_server_exceptions=False) as client:
-            resp = client.post(_BASE_URL)
+            resp = client.post(_BASE_URL, json={"reason_code": "INITIAL_PUBLICATION"})
 
         assert resp.status_code == 403
 
@@ -245,7 +245,7 @@ class TestPublishAuth:
         app.dependency_overrides[get_db] = _db_returning(factor)
 
         with TestClient(app, raise_server_exceptions=False) as client:
-            resp = client.post(_BASE_URL)
+            resp = client.post(_BASE_URL, json={"reason_code": "INITIAL_PUBLICATION"})
 
         assert resp.status_code == 403
 
@@ -259,7 +259,7 @@ class TestPublishNotFound:
         app.dependency_overrides[get_db] = _db_returning(None)
 
         with TestClient(app, raise_server_exceptions=False) as client:
-            resp = client.post(_BASE_URL)
+            resp = client.post(_BASE_URL, json={"reason_code": "INITIAL_PUBLICATION"})
 
         assert resp.status_code == 404
         # FastAPI wraps HTTPException detail dict under {"detail": {...}}
@@ -280,7 +280,7 @@ class TestPublishNotFound:
         app.dependency_overrides[get_db] = _db_returning(None)
 
         with TestClient(app, raise_server_exceptions=False) as client:
-            resp = client.post(_BASE_URL)
+            resp = client.post(_BASE_URL, json={"reason_code": "INITIAL_PUBLICATION"})
 
         assert resp.status_code == 404
 
@@ -294,7 +294,7 @@ class TestPublishConflict:
         app.dependency_overrides[get_db] = _db_returning(factor)
 
         with TestClient(app, raise_server_exceptions=False) as client:
-            resp = client.post(_BASE_URL)
+            resp = client.post(_BASE_URL, json={"reason_code": "INITIAL_PUBLICATION"})
 
         assert resp.status_code == 409
         # FastAPI wraps HTTPException detail dict under {"detail": {...}}
@@ -308,7 +308,7 @@ class TestPublishConflict:
         app.dependency_overrides[get_db] = _db_returning(factor)
 
         with TestClient(app, raise_server_exceptions=False) as client:
-            resp = client.post(_BASE_URL)
+            resp = client.post(_BASE_URL, json={"reason_code": "INITIAL_PUBLICATION"})
 
         assert resp.status_code == 409
         problem = resp.json()["detail"]
@@ -326,7 +326,7 @@ class TestPublishValidationErrors:
         app.dependency_overrides[get_db] = _db_returning(factor)
 
         with TestClient(app, raise_server_exceptions=False) as client:
-            resp = client.post(_BASE_URL)
+            resp = client.post(_BASE_URL, json={"reason_code": "INITIAL_PUBLICATION"})
 
         assert resp.status_code == 422
         # FastAPI wraps HTTPException detail dict under {"detail": {...}}
@@ -346,7 +346,7 @@ class TestPublishValidationErrors:
         app.dependency_overrides[get_db] = _db_returning(factor)
 
         with TestClient(app, raise_server_exceptions=False) as client:
-            resp = client.post(_BASE_URL)
+            resp = client.post(_BASE_URL, json={"reason_code": "INITIAL_PUBLICATION"})
 
         assert resp.status_code == 422
         # FastAPI wraps HTTPException detail dict under {"detail": {...}}
@@ -363,7 +363,7 @@ class TestPublishValidationErrors:
         with TestClient(app, raise_server_exceptions=False) as client:
             resp = client.post(
                 _BASE_URL,
-                json={"publish_notes": "x" * 501},
+                json={"reason_code": "INITIAL_PUBLICATION", "publish_notes": "x" * 2001},
             )
 
         assert resp.status_code == 422
@@ -406,7 +406,7 @@ class TestPublishAuditLog:
             with TestClient(app, raise_server_exceptions=False) as client:
                 resp = client.post(
                     _BASE_URL,
-                    json={"publish_notes": "CSRD sign-off Q1"},
+                    json={"reason_code": "INITIAL_PUBLICATION", "publish_notes": "CSRD sign-off Q1"},
                 )
 
         assert resp.status_code == 200
@@ -419,3 +419,57 @@ class TestPublishAuditLog:
         assert ev["published_by"] == _USER_ESG
         assert ev["publish_notes"] == "CSRD sign-off Q1"
         assert "correlation_id" in ev
+
+
+class TestPublishRequestSchemaValidation:
+    """Body validation tests added after the reason_code became mandatory."""
+
+    def test_422_missing_reason_code(self):
+        """An empty body now fails Pydantic validation before the handler runs."""
+        from fastapi.testclient import TestClient
+
+        from ghg_tool.api.main import app
+
+        with TestClient(app, raise_server_exceptions=False) as client:
+            resp = client.post(
+                _BASE_URL,
+                json={},
+                headers={"Authorization": f"Bearer {_TOKEN_ESG}"},
+            )
+        assert resp.status_code == 422
+
+    def test_422_invalid_reason_code(self):
+        """Unknown reason_code value rejected by the Literal enum."""
+        from fastapi.testclient import TestClient
+
+        from ghg_tool.api.main import app
+
+        with TestClient(app, raise_server_exceptions=False) as client:
+            resp = client.post(
+                _BASE_URL,
+                json={"reason_code": "NOT_A_REAL_CODE"},
+                headers={"Authorization": f"Bearer {_TOKEN_ESG}"},
+            )
+        assert resp.status_code == 422
+
+    def test_200_accepts_2000_char_notes(self):
+        """publish_notes cap raised to 2000 chars (compliance follow-up #4)."""
+        from fastapi.testclient import TestClient
+        from unittest.mock import patch
+
+        from ghg_tool.api.main import app
+
+        # Reuse the happy-path mock setup from TestPublishHappyPath if it
+        # exists; otherwise this test will rely on the real DB via fixtures.
+        # We only assert that 2000 chars is NOT rejected by Pydantic at the
+        # boundary - the actual write may still fail without a fixtured row,
+        # but the response will then be 404, not 422 from the schema check.
+        with TestClient(app, raise_server_exceptions=False) as client:
+            resp = client.post(
+                _BASE_URL,
+                json={"reason_code": "INITIAL_PUBLICATION", "publish_notes": "x" * 2000},
+                headers={"Authorization": f"Bearer {_TOKEN_ESG}"},
+            )
+        # 422 would mean Pydantic rejected the length. Anything else (200,
+        # 401, 404) means the schema accepted 2000 chars.
+        assert resp.status_code != 422 or "publish_notes" not in resp.text

@@ -132,13 +132,21 @@ else:
 # publish action wired to POST /api/v1/factor-catalog/{id}/publish.
 # Once published, the DB trigger MG-02 freezes the row.
 # ---------------------------------------------------------------------------
+_REASON_CODES = (
+    "INITIAL_PUBLICATION",
+    "VERSION_BUMP",
+    "METHODOLOGY_UPDATE",
+    "SOURCE_REVISION",
+    "CORRECTION_REPLACEMENT",
+)
+
 _role = st.session_state.get("role", "auditor")
 if _role == "esg_manager":
     with st.expander(_("publication_queue_title", lang), expanded=False):
         st.caption(_("publication_queue_caption", lang))
-        # Fetch DRAFT rows specifically. fetch_factor_catalog has no
-        # is_published filter param, so we reuse the larger pull above
-        # and slice client-side.
+        # Filter the already-fetched catalog down to publishable drafts:
+        # not yet published, not TBC, value set OR licence-only marked.
+        # This mirrors the server-side 422 pre-conditions exactly.
         all_factors = raw or []
         drafts = [
             f for f in all_factors
@@ -149,32 +157,50 @@ if _role == "esg_manager":
             st.info(_("publication_queue_empty", lang))
         else:
             for d in drafts:
-                cols = st.columns([3, 1, 1])
-                with cols[0]:
-                    st.markdown(
-                        f"**{d.get('factor_id', '?')}** · v{d.get('version', '?')} "
-                        f"· {d.get('source', '?')} · {d.get('gwp_set', '?')}"
+                _key = f"publish_{d.get('id')}"
+                with st.container(border=True):
+                    head = st.columns([3, 1])
+                    with head[0]:
+                        st.markdown(
+                            f"**{d.get('factor_id', '?')}** · v{d.get('version', '?')} "
+                            f"· {d.get('source', '?')} · {d.get('gwp_set', '?')}"
+                        )
+                        if d.get("substance"):
+                            st.caption(f"{d.get('substance')} ({d.get('unit', '')})")
+                    with head[1]:
+                        val = d.get("value")
+                        st.markdown(
+                            f"`{val}`" if val is not None
+                            else f"_{_('licence_only_label', lang)}_"
+                        )
+
+                    reason_code = st.selectbox(
+                        _("publish_reason_label", lang),
+                        _REASON_CODES,
+                        index=None,
+                        key=f"reason_{_key}",
+                        format_func=lambda c: _(f"publish_reason_{c}", lang),
                     )
-                    if d.get("substance"):
-                        st.caption(f"{d.get('substance')} ({d.get('unit', '')})")
-                with cols[1]:
-                    val = d.get("value")
-                    st.markdown(
-                        f"`{val}`" if val is not None
-                        else f"_{_('licence_only_label', lang)}_"
+                    notes = st.text_area(
+                        _("publish_notes_label", lang),
+                        key=f"notes_{_key}",
+                        max_chars=2000,
+                        placeholder=_("publish_notes_placeholder", lang),
                     )
-                with cols[2]:
-                    _key = f"publish_{d.get('id')}"
                     _inflight = st.session_state.get(f"_inflight_{_key}", False)
                     if st.button(
                         _("publish_btn", lang),
                         key=_key,
                         type="primary",
-                        disabled=_inflight,
+                        disabled=_inflight or reason_code is None,
                     ):
                         st.session_state[f"_inflight_{_key}"] = True
                         try:
-                            resp = publish_factor(str(d.get("id")))
+                            resp = publish_factor(
+                                str(d.get("id")),
+                                reason_code=reason_code,
+                                notes=notes or None,
+                            )
                         finally:
                             st.session_state[f"_inflight_{_key}"] = False
                         if "error" in resp:
@@ -188,7 +214,7 @@ if _role == "esg_manager":
                             else:
                                 st.error(f"HTTP {sc}: {resp.get('error', '?')}")
                         else:
-                            st.success(_("publish_success", lang), icon="✅")
+                            st.success(_("publish_success", lang))
                             # Invalidate the catalog cache so the next
                             # render hides the just-published draft.
                             clear = getattr(fetch_factor_catalog, "clear", None)

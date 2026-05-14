@@ -151,20 +151,34 @@ class FactorCatalogCreate(BaseModel):
         return v
 
 
-class FactorCatalogPublishRequest(BaseModel):
-    """Optional body for ``POST /api/v1/factor-catalog/{factor_uuid}/publish``.
+PublishReasonCode = Literal[
+    "INITIAL_PUBLICATION",
+    "VERSION_BUMP",
+    "METHODOLOGY_UPDATE",
+    "SOURCE_REVISION",
+    "CORRECTION_REPLACEMENT",
+]
 
-    The body is fully optional — the endpoint can be called with an empty
-    payload.  When provided, ``publish_notes`` is recorded in the structured
-    audit log entry.
+
+class FactorCatalogPublishRequest(BaseModel):
+    """Body for ``POST /api/v1/factor-catalog/{factor_uuid}/publish``.
+
+    A controlled-vocabulary ``reason_code`` is mandatory (CSRD ESRS 1 §86 -
+    consistency of disclosure metadata) so the audit trail is queryable by
+    cause, in line with the five-code vocabulary used for emission
+    corrections. Free-text ``publish_notes`` is optional and supports up to
+    2000 characters - enough for a CSRD-grade justification citing source
+    PDF page numbers + methodology rationale (ISAE 3000 §A4).
 
     Attributes:
-        publish_notes: Free-text note recorded for audit purposes (max 500 chars).
+        reason_code: One of five controlled values; see ``PublishReasonCode``.
+        publish_notes: Optional free-text note recorded for audit purposes.
     """
 
     model_config = ConfigDict(extra="forbid")
 
-    publish_notes: str | None = Field(default=None, max_length=500)
+    reason_code: PublishReasonCode
+    publish_notes: str | None = Field(default=None, max_length=2000)
 
 
 class FactorCatalogPublishResponse(FactorCatalogResponse):
