@@ -61,3 +61,6 @@ minio_data/
 
 # Generated reports (ephemeral outputs)
 reports/output/
+
+# Claude Code agent worktrees (isolated sub-agent workspaces)
+.claude/worktrees/
