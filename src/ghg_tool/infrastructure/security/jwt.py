@@ -159,19 +159,22 @@ def create_access_token(
     role: str,
     tenant_id: str,
     extra_claims: dict[str, Any] | None = None,
+    ttl_seconds: int | None = None,
 ) -> str:
     """Encode a signed JWT access token.
 
     Args:
-        sub: Subject claim — typically the user UUID string.
+        sub: Subject claim -- typically the user UUID string.
         role: RBAC role code.
         tenant_id: Tenant UUID string.
         extra_claims: Additional claims merged into the payload (optional).
+        ttl_seconds: Override TTL in seconds; defaults to ACCESS_TOKEN_TTL_S.
 
     Returns:
         Signed JWT string.
     """
     now = datetime.now(tz=UTC)
+    effective_ttl = ttl_seconds if ttl_seconds is not None else ACCESS_TOKEN_TTL_S
     payload: dict[str, Any] = {
         "sub": sub,
         "role": role,
@@ -179,7 +182,7 @@ def create_access_token(
         "jti": str(uuid.uuid4()),
         "iat": now,
         "exp": datetime.fromtimestamp(
-            now.timestamp() + ACCESS_TOKEN_TTL_S, tz=UTC
+            now.timestamp() + effective_ttl, tz=UTC
         ),
         "token_type": "access",
     }

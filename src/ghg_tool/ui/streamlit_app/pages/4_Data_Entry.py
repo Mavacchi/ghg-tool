@@ -50,6 +50,7 @@ from ghg_tool.ui.streamlit_app.lib.api_client import (  # noqa: E402
     create_factor,
     fetch_emissions,
     fetch_factor_catalog,
+    import_excel,
     post_correction,
 )
 
@@ -635,7 +636,7 @@ with tab_excel:
         "richiede conferma esplicita prima dell'inserimento."
     )
 
-    if _role not in ("data_steward", "esg_manager"):
+    if role not in ("data_steward", "esg_manager"):
         st.warning(
             "Il tuo ruolo non puo` importare dati. Richiedi l'accesso "
             "data_steward o esg_manager.",
@@ -693,25 +694,82 @@ with tab_excel:
                             hide_index=True,
                         )
 
+                st.divider()
+                st.markdown("**Conferma e importa nel registro**")
                 st.info(
-                    "L'import vero e proprio passa attraverso "
-                    "`scripts/seed_demo_data.py` con i CSV temporaneamente "
-                    "scritti in /tmp. Per ora la UI mostra il preview ma "
-                    "l'INSERT effettivo avviene via CLI dopo che la review "
-                    "DQ-CRIT da parte tua e dell'ESG manager e completata."
+                    "Cliccando il pulsante qui sotto, le righe del workbook vengono "
+                    "inviate all'API che esegue la validazione DQ-CRIT e, se tutto "
+                    "passa, le inserisce in `raw.scope{1,2,3}_ingestions`. "
+                    "L'operazione e` irreversibile ma tracciata in Audit Trail.",
+                    icon="ℹ️",
                 )
-                # NOTE for follow-up: the actual INSERT path requires:
-                # 1. Writing the parsed DataFrames to a temporary CSV trio.
-                # 2. Calling etl.orchestrator.run_ingestion_pipeline().
-                # 3. Persisting the resulting raw rows via the existing
-                #    sync psycopg path (similar to seed_demo_data).
-                # 4. Surfacing the DQ findings inline before the user
-                #    confirms.
-                # The current UI deliberately stops at preview because
-                # writing to raw.* tables from a Streamlit container
-                # requires the same DB credentials as the API, and the
-                # confirm/rollback flow needs careful UX work to be
-                # auditor-defensible.
+
+                confirm_import = st.button(
+                    "Conferma e importa",
+                    type="primary",
+                    key="confirm_excel_import",
+                    disabled=st.session_state.get("_inflight_excel_import", False),
+                )
+
+                if confirm_import and _submit_once("excel_import"):
+                    try:
+                        with st.spinner("Importazione in corso..."):
+                            resp = import_excel(raw_bytes)
+                    finally:
+                        st.session_state["_inflight_excel_import"] = False
+
+                    if "error" in resp:
+                        sc = resp.get("status_code")
+                        err_body = resp.get("error", {})
+                        if sc == 422:
+                            # Surface DQ-CRIT findings inline so the user
+                            # understands what to fix before re-uploading.
+                            blocked_findings = []
+                            if isinstance(err_body, dict):
+                                blocked_findings = err_body.get(
+                                    "blocked_findings", []
+                                )
+                                detail_msg = err_body.get("detail", str(err_body))
+                            else:
+                                detail_msg = str(err_body)
+
+                            st.error(
+                                f"Importazione bloccata dalla validazione DQ-CRIT: "
+                                f"{detail_msg}",
+                                icon="🚫",
+                            )
+                            if blocked_findings:
+                                st.markdown("**Finding bloccanti:**")
+                                for bf in blocked_findings:
+                                    st.warning(
+                                        f"**{bf.get('rule_id', '?')}** "
+                                        f"(Scope {bf.get('scope', '?')}, "
+                                        f"sito `{bf.get('codice_sito', '?')}`, "
+                                        f"anno {bf.get('anno', '?')}): "
+                                        f"{bf.get('trigger_desc', '')}. "
+                                        f"Azione consigliata: "
+                                        f"{bf.get('recommended_action', '')}",
+                                    )
+                        else:
+                            st.error(_explain_api_error(resp))
+                    else:
+                        batch_id = resp.get("batch_id", "")
+                        st.success(
+                            f"Importazione completata. Batch ID: `{batch_id}`",
+                            icon="✅",
+                        )
+                        col_s1, col_s2, col_s3, col_dq = st.columns(4)
+                        col_s1.metric("Scope 1 righe", resp.get("scope1_rows", 0))
+                        col_s2.metric("Scope 2 righe", resp.get("scope2_rows", 0))
+                        col_s3.metric("Scope 3 righe", resp.get("scope3_rows", 0))
+                        col_dq.metric("DQ findings", resp.get("dq_findings", 0))
+
+                        if hasattr(st, "page_link"):
+                            st.page_link(
+                                "pages/7_Audit_Trail.py",
+                                label=_("view_in_audit_trail", lang),
+                                icon="🔍",
+                            )
 
 # ---------------------------------------------------------------------------
 # Footer

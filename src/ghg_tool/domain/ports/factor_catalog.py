@@ -11,7 +11,8 @@ No framework imports — pure Python stdlib + typing only.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import uuid
+from dataclasses import dataclass, field
 from decimal import Decimal
 from typing import Protocol
 
@@ -42,6 +43,11 @@ class FactorRecord:
         is_tbc: Flag — factor value still pending Phase 5 numeric pinning.
         is_licence_only: Flag — provider licence forbids republishing the
             numeric value (ecoinvent / EXIOBASE).
+        factor_db_id: Primary-key UUID of the ``ref.factor_catalog`` row.
+            ``None`` when constructed by test doubles that do not need the DB
+            UUID.  When non-None it is used as the FK value in
+            ``calc.emissions_consolidated.factor_id`` to satisfy the FK
+            constraint without falling back to the nil UUID sentinel.
     """
 
     factor_id: str
@@ -55,6 +61,7 @@ class FactorRecord:
     applicability_note: str | None = None
     is_tbc: bool = False
     is_licence_only: bool = False
+    factor_db_id: uuid.UUID | None = field(default=None, compare=False)
 
 
 class FactorCatalogPort(Protocol):

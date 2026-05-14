@@ -35,6 +35,7 @@ from ghg_tool.application.services.calc_orchestrator import (
 from ghg_tool.domain.entities.emission_record import EmissionRecord
 from ghg_tool.domain.ports.gwp_table import GWPSetTable
 from ghg_tool.domain.value_objects.gwp_set import AR6
+from ghg_tool.infrastructure.db.session import set_session_gucs
 from ghg_tool.infrastructure.factors.sql_adapter import SqlFactorCatalogAdapter
 
 logger = structlog.get_logger(__name__)
@@ -195,9 +196,12 @@ def _emission_to_params(
     """Convert an EmissionRecord domain object into a dict suitable for Core INSERT.
 
     The factor_id FK in the DB points to ref.factor_catalog.id (a UUID).
-    EmissionRecord.factor_id_uuid carries that UUID when populated by the
-    calc modules; we fall back to a nil UUID so the INSERT never fails with
-    a type error (the FK constraint will raise instead, which is correct).
+    Priority for resolving the FK UUID (first non-None wins):
+      1. ``record.factor_id_uuid`` — set by the orchestrator when it threads
+         the DB UUID from the catalog adapter through to the EmissionRecord.
+      2. nil UUID sentinel — so the INSERT type never fails with a Python
+         error; the DB FK constraint will raise instead, which is correct and
+         surfaces as a data-quality bug rather than a silent bad write.
 
     Args:
         record: Domain emission record.
@@ -207,6 +211,9 @@ def _emission_to_params(
         Parameter dict for the INSERT statement.
     """
     now = datetime.now(UTC)
+    # factor_id_uuid is populated by make_emission() from FactorRecord.factor_db_id.
+    # Fall back to nil UUID only as a last resort so the INSERT type never
+    # raises a Python error; the FK constraint on the DB side will catch it.
     fk_uuid = record.factor_id_uuid if record.factor_id_uuid is not None else uuid.UUID(int=0)
     return {
         "id": str(record.id),
@@ -274,6 +281,17 @@ async def _persist_emissions(
     finished_at = datetime.now(UTC)
 
     async with session_factory() as session, session.begin():
+        # Inject RLS GUCs immediately after opening the transaction so that
+        # all INSERT statements below see app.tenant_id and app.role_code.
+        # The service account writes as esg_manager (PERMISSION_MATRIX key
+        # "emissions"/"correct") which is the seeded role that owns bulk
+        # calc inserts (rbac.py — ROLE_ESG_MANAGER).
+        await set_session_gucs(
+            session,
+            tenant_id=str(tenant_id),
+            role_code="esg_manager",
+        )
+
         if records:
             param_list = [
                 _emission_to_params(r, tenant_id=tenant_id) for r in records

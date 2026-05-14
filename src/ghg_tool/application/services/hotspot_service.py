@@ -25,10 +25,14 @@ References:
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from decimal import Decimal
 
+from ghg_tool.application.services.yoy_stats import (
+    compute_yoy_baseline,
+    threshold_pct,
+)
 from ghg_tool.domain.entities.emission_record import EmissionRecord
 from ghg_tool.domain.value_objects.scope3_categories import label_for
 
@@ -66,6 +70,10 @@ class HotspotEntry:
             more than 80% of total Scope 3 (same value on every entry).
         flag_yoy_outlier: True when ``|yoy_delta_pct|`` exceeds the 2 sigma
             historical threshold (or the +/- 20% fallback).
+        outlier_threshold_pct: The actual threshold (percent, positive
+            half-width) used for the outlier flag on this row.  Equals
+            ``YOY_FALLBACK_PCT`` when no reliable sigma was available,
+            otherwise the per-key ``|mean| + 2 * sigma``.
     """
 
     rank: int
@@ -77,6 +85,7 @@ class HotspotEntry:
     yoy_delta_pct: Decimal | None
     flag_high_concentration: bool
     flag_yoy_outlier: bool
+    outlier_threshold_pct: Decimal = YOY_FALLBACK_PCT
 
 
 def compute_hotspots(
@@ -84,6 +93,7 @@ def compute_hotspots(
     emissions_current: Iterable[EmissionRecord],
     emissions_prior: Iterable[EmissionRecord] | None = None,
     top_n: int = 10,
+    historical_by_year: Mapping[int, Mapping[str, Decimal]] | None = None,
 ) -> list[HotspotEntry]:
     """Rank Scope 3 sub_scopes by tCO2e and build the Pareto hot-spot list.
 
@@ -110,6 +120,13 @@ def compute_hotspots(
             year, used to compute YoY deltas.  ``None`` or empty disables
             the YoY annotation (all ``yoy_delta_pct`` will be ``None``).
         top_n: Maximum number of entries to return.  Defaults to 10.
+        historical_by_year: Optional outer mapping keyed by year, inner
+            mapping keyed by ``sub_scope -> tco2e``.  When at least 3 YoY
+            deltas can be derived per sub_scope (i.e. >= 4 years of
+            history), the per-key historical sigma replaces the +/- 20%
+            fallback threshold for that sub_scope.  When omitted or
+            insufficient, behaviour is unchanged from the legacy
+            single-prior-year path.
 
     Returns:
         At most ``top_n`` ``HotspotEntry`` objects, ranked by tCO2e
@@ -150,10 +167,21 @@ def compute_hotspots(
                 (current_value - prior_value) / prior_value * Decimal("100")
             )
 
-    # Outlier threshold.  Only one prior year is available in this signature
-    # (current vs prior), so historical sigma is undefined: fall back to
-    # +/- 20% per the public contract.
-    outlier_threshold = YOY_FALLBACK_PCT
+    # Outlier threshold.  Default is the +/- 20% fallback documented above.
+    # When historical_by_year carries at least 3 derivable YoY deltas for
+    # a sub_scope, the per-key historical |mean| + 2 sigma replaces the
+    # fallback for that sub_scope only.
+    baseline_by_key: dict[tuple, object] = {}
+    if historical_by_year:
+        # Reshape sub_scope -> tco2e into (sub_scope,) -> tco2e for the
+        # shared yoy_stats helper, which keys on tuples.
+        reshaped: dict[int, dict[tuple, Decimal]] = {}
+        for y, inner in historical_by_year.items():
+            reshaped[int(y)] = {
+                (str(k),): (v if isinstance(v, Decimal) else Decimal(str(v)))
+                for k, v in inner.items()
+            }
+        baseline_by_key = compute_yoy_baseline(reshaped)  # type: ignore[assignment]
 
     # Build entries, accumulating cumulative_pct on the original ranking.
     entries: list[HotspotEntry] = []
@@ -162,9 +190,13 @@ def compute_hotspots(
         pct = (value / scope3_total) * Decimal("100")
         cumulative += pct
         yoy = yoy_deltas[sub_scope]
-        flag_outlier = (
-            yoy is not None and abs(yoy) > outlier_threshold
+        baseline = baseline_by_key.get((sub_scope,))  # type: ignore[arg-type]
+        row_threshold = threshold_pct(
+            baseline,  # type: ignore[arg-type]
+            sigma_multiplier=YOY_SIGMA_MULTIPLIER,
+            fallback_pct=YOY_FALLBACK_PCT,
         )
+        flag_outlier = yoy is not None and abs(yoy) > row_threshold
         entries.append(
             HotspotEntry(
                 rank=rank,
@@ -176,6 +208,7 @@ def compute_hotspots(
                 yoy_delta_pct=yoy,
                 flag_high_concentration=flag_high_concentration,
                 flag_yoy_outlier=flag_outlier,
+                outlier_threshold_pct=row_threshold,
             )
         )
 

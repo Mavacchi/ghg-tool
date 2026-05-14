@@ -31,10 +31,12 @@ class CurrentUser(BaseModel):
     """Decoded JWT claims for the authenticated request user.
 
     Attributes:
-        sub: Subject claim — user UUID string.
+        sub: Subject claim -- user UUID string.
         role: RBAC role code.
         tenant_id: Tenant UUID string for RLS GUC injection.
-        jti: JWT ID — used for token blacklist checks (v2).
+        jti: JWT ID -- used for token blacklist / session checks.
+        pre_2fa: If True the token is a partial pre-TOTP token and MUST NOT
+            be accepted as a Bearer credential on any protected endpoint.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -43,6 +45,7 @@ class CurrentUser(BaseModel):
     role: RoleCode
     tenant_id: str = Field(min_length=1)
     jti: str = Field(default="")
+    pre_2fa: bool = Field(default=False)
 
     @field_validator("sub")
     @classmethod
@@ -118,15 +121,21 @@ async def get_current_user(
         log.warning("JWT contains unknown role", role=role)
         raise _unauthorized(f"Unknown role in token: {role!r}")
 
+    pre_2fa: bool = bool(claims.get("pre_2fa", False))
+    if pre_2fa:
+        log.warning("pre_2fa token rejected on protected endpoint", probe_attempt=True)
+        raise _unauthorized("Partial 2FA token cannot be used as Bearer. Complete TOTP challenge first.")
+
     try:
         user = CurrentUser(
             sub=claims.get("sub", ""),
             role=role,  # noqa: PGH003  # narrowed by guard above; mypy can't track dict lookup
             tenant_id=claims.get("tenant_id", ""),
             jti=claims.get("jti", ""),
+            pre_2fa=False,
         )
     except ValueError as exc:
-        # Pydantic validation failure (e.g. non-UUID tenant_id) — surface as
+        # Pydantic validation failure (e.g. non-UUID tenant_id) -- surface as
         # 401 rather than letting the resulting ValueError bubble to a 500.
         log.warning("JWT claim validation failed", detail=str(exc))
         raise _unauthorized("Invalid token claims") from exc
