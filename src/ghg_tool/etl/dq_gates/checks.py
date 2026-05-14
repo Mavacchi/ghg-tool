@@ -75,8 +75,9 @@ def check_facility_coverage(
                         "value_observed": len(present),
                         "value_reference": 7,
                         "trigger_desc": (
-                            f"DQ-CRIT-01: Scope 1 coverage {len(present)}/7 for year {year}. "
-                            f"Missing sites: {sorted_missing}"
+                            f"DQ-CRIT-01: Site {site} missing from Scope 1 for year "
+                            f"{year} (coverage {len(present)}/7; full missing set: "
+                            f"{sorted_missing})."
                         ),
                         "blocks_pipeline": True,
                     }

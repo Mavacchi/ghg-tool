@@ -112,18 +112,24 @@ def _create_app() -> FastAPI:
 
     # ------------------------------------------------------------------
     # Middleware stack (applied in reverse — last added = outermost).
-    # Desired wrap order, from innermost (closest to routes) to outermost:
-    #   RateLimit → CorrelationId → ErrorHandler → SecurityHeaders → CORS
-    # ErrorHandler must sit OUTSIDE CorrelationId so that exceptions raised
-    # inside CorrelationIdMiddleware itself are still converted to RFC 7807
-    # (instead of bubbling up as a generic 500). CORS stays outermost so that
-    # every response — including error responses — carries CORS headers.
-    # Allowed methods include DELETE/PUT so browsers can observe the explicit
-    # 405 returned by the append-only emissions endpoints (CSRD audit trail).
+    # Wrap order, from innermost (closest to routes) to outermost:
+    #   ErrorHandler → RateLimit → CorrelationId → SecurityHeaders → CORS
+    # ErrorHandler is INNERMOST: BaseHTTPMiddleware runs the downstream
+    # stack in an anyio child task, which means ContextVar mutations made
+    # by CorrelationIdMiddleware do NOT propagate up to an outer
+    # ErrorHandler. To keep error responses tagged with the right
+    # correlation_id we let the inner ErrorHandler observe the ContextVar
+    # set by the (outer) CorrelationIdMiddleware via the request-scoped
+    # context that flows downward. CorrelationIdMiddleware's body is
+    # narrow and itself try/except-guarded (see correlation_id.py), so
+    # nothing inside it can escape uncaught.
+    # CORS stays outermost so every response — including error responses
+    # — carries CORS headers; allowed methods include DELETE/PUT so the
+    # explicit 405 on append-only emission rows is observable by browsers.
     # ------------------------------------------------------------------
+    app.add_middleware(ErrorHandlerMiddleware)
     app.add_middleware(RateLimitMiddleware)
     app.add_middleware(CorrelationIdMiddleware)
-    app.add_middleware(ErrorHandlerMiddleware)
 
     # SEC-P1-002: Security response headers (HSTS, CSP, X-Frame-Options, …)
     app.add_middleware(SecurityHeadersMiddleware)
@@ -162,14 +168,28 @@ def _create_app() -> FastAPI:
             Pydantic v2 ``exc.errors()`` may embed ``ValueError`` objects inside
             the ``ctx`` mapping and raw input values inside ``input`` — both must
             be stripped before JSON serialisation (NFR-09 — no stack trace;
-            NFR-08 — no PII in responses).  ``msg`` is also stripped because
-            Pydantic frequently echoes the offending value inside the message
-            (e.g. ``"String should match pattern '...': got 'user@example.com'"``)
-            which would leak PII back to the caller.  ``loc`` and ``type`` are
-            machine-actionable and safe to retain.
+            NFR-08 — no PII in responses).  ``msg`` is retained because it is
+            part of the published OpenAPI validation-error contract, but is
+            sanitised: error types known to echo the offending value back
+            (e.g. ``string_pattern_mismatch``, ``value_error``) get a generic
+            replacement message; all other types keep Pydantic's default.
             """
-            safe_keys = {"loc", "type"}
-            return {k: v for k, v in err.items() if k in safe_keys}
+            out: dict = {}  # type: ignore[type-arg]
+            err_type = err.get("type", "")
+            pii_echo_types = {
+                "string_pattern_mismatch",
+                "value_error",
+                "string_too_long",
+                "string_too_short",
+            }
+            for k, v in err.items():
+                if k in ("input", "url", "ctx"):
+                    continue
+                if k == "msg" and err_type in pii_echo_types:
+                    out[k] = "Field failed validation"
+                    continue
+                out[k] = v
+            return out
 
         errors = [_safe_error(err) for err in exc.errors()]
         return JSONResponse(

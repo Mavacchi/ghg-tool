@@ -188,10 +188,18 @@ def create_access_token(
     if _JWT_AUDIENCE:
         payload["aud"] = _JWT_AUDIENCE
     if extra_claims:
-        # extra_claims must never override standard claims (sub/role/tenant_id/
-        # exp/iat/jti/token_type/iss/aud); standard claims win.
+        # extra_claims must never override or inject standard claims, even
+        # when the standard claim happens not to be set (e.g. when neither
+        # GHG_JWT_ISSUER nor GHG_JWT_AUDIENCE is configured). An explicit
+        # reserved-name deny-list closes that gap.
+        _reserved = {
+            "sub", "role", "tenant_id", "exp", "iat", "jti",
+            "token_type", "iss", "aud",
+        }
         for k, v in extra_claims.items():
-            payload.setdefault(k, v)
+            if k in _reserved:
+                continue
+            payload[k] = v
     return str(jwt.encode(payload, _signing_key(), algorithm=_JWT_ALGORITHM))
 
 

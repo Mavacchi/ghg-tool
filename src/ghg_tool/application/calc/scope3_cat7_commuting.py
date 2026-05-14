@@ -47,8 +47,10 @@ def calculate(
 
     Args:
         raw_rows: Iterable of raw Scope 3 row dicts.  Only rows whose
-            ``sottocategoria`` contains 'commuting_auto' (case-insensitive)
-            and ``categoria_s3 == 7`` are processed.
+            ``sottocategoria`` equals 'commuting_auto' (after .strip() and
+            case-folding) and whose ``categoria_s3 == 7`` are processed —
+            an exact match prevents the average-car factor from being
+            applied to bus / rail / cycle commuting modes.
         factors: Factor catalog port.
         gwp: GWP table.
         correlation_id: Run identifier.

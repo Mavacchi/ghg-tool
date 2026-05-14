@@ -184,11 +184,13 @@ async def create_factor(
         applicability_note=body.applicability_note,
         pdf_source_uri=body.pdf_source_uri,
         biogenic_co2_kg_per_unit=body.biogenic_co2_kg_per_unit,
-        # New factors land as drafts (is_published=False). published_by is
-        # the *publisher* attribution and must remain NULL until a dedicated
-        # publish endpoint flips is_published — recording a publisher for an
-        # unpublished factor would falsify the audit trail.
-        published_by=None,
+        # ``published_by`` is NOT NULL at the DB level, so it must be set even
+        # for drafts.  On creation it records the *creator* (the user who
+        # proposed the factor); a future publish endpoint will overwrite it
+        # with the actual publisher when ``is_published`` flips to True.  The
+        # ``is_published=False`` flag below preserves the audit-trail
+        # distinction between proposed and published factors.
+        published_by=user.sub,
         is_published=False,
         is_tbc=False,
     )

@@ -44,18 +44,29 @@ class CursorParams:
         """
         if not self.cursor:
             return {}
+        # Local import keeps the dependency tree free of an API → middleware
+        # cycle at module import time.
+        from ghg_tool.api.middleware.correlation_id import get_correlation_id
+
+        problem_detail = {
+            "type": "about:blank",
+            "title": "Bad Request",
+            "status": 400,
+            "detail": "Invalid pagination cursor",
+            "correlation_id": get_correlation_id(),
+        }
         try:
             payload = base64.urlsafe_b64decode(self.cursor.encode()).decode()
             decoded = json.loads(payload)
         except (ValueError, json.JSONDecodeError, UnicodeDecodeError) as exc:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Invalid pagination cursor",
+                detail=problem_detail,
             ) from exc
         if not isinstance(decoded, dict):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Invalid pagination cursor",
+                detail=problem_detail,
             )
         return decoded  # type: ignore[no-any-return]
 

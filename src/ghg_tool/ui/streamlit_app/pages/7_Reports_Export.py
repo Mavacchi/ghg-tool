@@ -33,19 +33,23 @@ lang = get_lang()
 # ---------------------------------------------------------------------------
 
 
-_ALLOWED_DOWNLOAD_SCHEMES = ("https://", "http://", "/")
-
-
 def _is_safe_download_url(url: str) -> bool:
     """Return True if the URL is safe to render as a hyperlink.
 
     Rejects ``javascript:``, ``data:``, ``file:`` and other unsafe schemes
     that could trigger XSS or local-file disclosure when clicked.
+    Also rejects protocol-relative URLs (``//evil.example``) which the
+    browser would resolve under the current scheme to a foreign origin.
     """
     if not isinstance(url, str) or not url:
         return False
     lowered = url.strip().lower()
-    return lowered.startswith(_ALLOWED_DOWNLOAD_SCHEMES)
+    if lowered.startswith("//"):
+        return False
+    if lowered.startswith(("https://", "http://")):
+        return True
+    # Same-origin absolute paths (must start with a single '/').
+    return lowered.startswith("/")
 
 
 def _generate_inline_pdf(anno: int, gwp_set: str, report_lang: str) -> None:
