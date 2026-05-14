@@ -33,6 +33,25 @@ lang = get_lang()
 # ---------------------------------------------------------------------------
 
 
+def _is_safe_download_url(url: str) -> bool:
+    """Return True if the URL is safe to render as a hyperlink.
+
+    Rejects ``javascript:``, ``data:``, ``file:`` and other unsafe schemes
+    that could trigger XSS or local-file disclosure when clicked.
+    Also rejects protocol-relative URLs (``//evil.example``) which the
+    browser would resolve under the current scheme to a foreign origin.
+    """
+    if not isinstance(url, str) or not url:
+        return False
+    lowered = url.strip().lower()
+    if lowered.startswith("//"):
+        return False
+    if lowered.startswith(("https://", "http://")):
+        return True
+    # Same-origin absolute paths (must start with a single '/').
+    return lowered.startswith("/")
+
+
 def _generate_inline_pdf(anno: int, gwp_set: str, report_lang: str) -> None:
     """Generate PDF inline and offer download button.
 
@@ -119,8 +138,8 @@ with col_pdf_status:
 
         if status == "COMPLETED":
             download_url = status_data.get("download_url")
-            if download_url:
-                st.markdown(f"[Scarica PDF]({download_url})")
+            if download_url and _is_safe_download_url(download_url):
+                st.link_button("Scarica PDF", download_url)
             else:
                 _generate_inline_pdf(anno, gwp_set, report_lang)
         elif status == "FAILED":
@@ -184,8 +203,8 @@ with col_xls_status:
         st.write(f"{_('status_label', lang)} **{status_label}**")
         if status == "COMPLETED":
             download_url = status_data.get("download_url")
-            if download_url:
-                st.markdown(f"[{_('download_excel', lang)}]({download_url})")
+            if download_url and _is_safe_download_url(download_url):
+                st.link_button(_("download_excel", lang), download_url)
 
 # ---------------------------------------------------------------------------
 # Footer

@@ -62,11 +62,14 @@ else:
     count = pagination.get("count", len(df))
     next_cursor = pagination.get("next_cursor")
     st.caption(
-        f"{_('page_of', lang).format(page=1, total='?')} | "
-        f"Righe: {count} | Correlation ID richiesta: {correlation_id_resp}"
+        f"Righe visualizzate: {count} | Correlation ID richiesta: {correlation_id_resp}"
     )
     if next_cursor:
-        st.info("Sono disponibili ulteriori righe — aumentare 'Righe per pagina'.")
+        st.warning(
+            "Sono disponibili ulteriori righe oltre quelle mostrate. "
+            "Aumentare 'Righe per pagina' o restringere i filtri (date/scope). "
+            "La navigazione per cursore sarà disponibile in una prossima release."
+        )
 
     # Display columns
     display_cols = [
@@ -107,10 +110,12 @@ else:
 
     # Emission detail modal (selectbox + caption — Streamlit doesn't have true modals)
     if "emission_id" in df.columns:
-        selected_id = st.selectbox("Dettaglio emission_id", [""] + df["emission_id"].tolist())
+        emission_ids = df["emission_id"].dropna().astype(str).unique().tolist()
+        selected_id = st.selectbox("Dettaglio emission_id", [""] + emission_ids)
         if selected_id:
-            row = df[df["emission_id"] == selected_id].iloc[0].to_dict()
-            st.json(row)
+            matches = df[df["emission_id"].astype(str) == selected_id]
+            if not matches.empty:
+                st.json(matches.iloc[0].to_dict())
 
 # ---------------------------------------------------------------------------
 # Footer

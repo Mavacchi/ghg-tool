@@ -47,8 +47,10 @@ def calculate(
 
     Args:
         raw_rows: Iterable of raw Scope 3 row dicts.  Only rows whose
-            ``sottocategoria`` contains 'commuting_auto' (case-insensitive)
-            and ``categoria_s3 == 7`` are processed.
+            ``sottocategoria`` equals 'commuting_auto' (after .strip() and
+            case-folding) and whose ``categoria_s3 == 7`` are processed —
+            an exact match prevents the average-car factor from being
+            applied to bus / rail / cycle commuting modes.
         factors: Factor catalog port.
         gwp: GWP table.
         correlation_id: Run identifier.
@@ -63,7 +65,11 @@ def calculate(
     for row in raw_rows:
         if int(row.get("categoria_s3", 0)) != 7:
             continue
-        if "commuting" not in str(row.get("sottocategoria", "")).lower():
+        # The DEFRA factor wired here is the average-CAR factor; restrict to
+        # the exact 'commuting_auto' subcategory. A substring match on
+        # 'commuting' would silently apply the car factor to bus / rail / cycle
+        # km, inflating Cat 7 emissions by 5x or more for those modes.
+        if str(row.get("sottocategoria", "")).strip().lower() != "commuting_auto":
             continue
         km = to_decimal(row["quantita"])
         tco2e = (factor.value or Decimal("0")) * km * KG_TO_TONNE

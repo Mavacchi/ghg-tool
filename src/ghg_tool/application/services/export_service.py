@@ -82,7 +82,10 @@ def _new_job(
         "job_id": str(job_id),
         "type": job_type,
         "status": _STATUS_PENDING,  # REV-WAVE3-004: canonical internal status
-        "tenant_id": tenant_id[:8],  # truncated — no full tenant PII
+        # Store the full tenant_id so the API can enforce ownership when
+        # serving status / download. Tenant_id is not PII; PII concerns
+        # apply to usernames, not tenant codes.
+        "tenant_id": tenant_id,
         "period": period,
         "created_by": user[:8],      # truncated — no full user PII
         "correlation_id": correlation_id,

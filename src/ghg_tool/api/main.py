@@ -111,7 +111,21 @@ def _create_app() -> FastAPI:
     )
 
     # ------------------------------------------------------------------
-    # Middleware stack (applied in reverse — last added = outermost)
+    # Middleware stack (applied in reverse — last added = outermost).
+    # Wrap order, from innermost (closest to routes) to outermost:
+    #   ErrorHandler → RateLimit → CorrelationId → SecurityHeaders → CORS
+    # ErrorHandler is INNERMOST: BaseHTTPMiddleware runs the downstream
+    # stack in an anyio child task, which means ContextVar mutations made
+    # by CorrelationIdMiddleware do NOT propagate up to an outer
+    # ErrorHandler. To keep error responses tagged with the right
+    # correlation_id we let the inner ErrorHandler observe the ContextVar
+    # set by the (outer) CorrelationIdMiddleware via the request-scoped
+    # context that flows downward. CorrelationIdMiddleware's body is
+    # narrow and itself try/except-guarded (see correlation_id.py), so
+    # nothing inside it can escape uncaught.
+    # CORS stays outermost so every response — including error responses
+    # — carries CORS headers; allowed methods include DELETE/PUT so the
+    # explicit 405 on append-only emission rows is observable by browsers.
     # ------------------------------------------------------------------
     app.add_middleware(ErrorHandlerMiddleware)
     app.add_middleware(RateLimitMiddleware)
@@ -125,7 +139,7 @@ def _create_app() -> FastAPI:
         CORSMiddleware,
         allow_origins=_CORS_ORIGINS,
         allow_credentials=False,
-        allow_methods=["GET", "POST", "OPTIONS"],
+        allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
         allow_headers=["Authorization", "Content-Type", "X-Correlation-Id"],
     )
 
@@ -152,20 +166,29 @@ def _create_app() -> FastAPI:
             """Strip non-serialisable / PII fields from a Pydantic error dict.
 
             Pydantic v2 ``exc.errors()`` may embed ``ValueError`` objects inside
-            the ``ctx`` mapping and raw input values inside ``input``.  Both must
-            be stripped before JSON serialisation (NFR-09 — no stack trace; NFR-08
-            — no PII in responses).
+            the ``ctx`` mapping and raw input values inside ``input`` — both must
+            be stripped before JSON serialisation (NFR-09 — no stack trace;
+            NFR-08 — no PII in responses).  ``msg`` is retained because it is
+            part of the published OpenAPI validation-error contract, but is
+            sanitised: error types known to echo the offending value back
+            (e.g. ``string_pattern_mismatch``, ``value_error``) get a generic
+            replacement message; all other types keep Pydantic's default.
             """
             out: dict = {}  # type: ignore[type-arg]
+            err_type = err.get("type", "")
+            pii_echo_types = {
+                "string_pattern_mismatch",
+                "value_error",
+                "string_too_long",
+                "string_too_short",
+            }
             for k, v in err.items():
-                if k in ("input", "url"):
-                    # Never echo request input back (may contain passwords/PII)
+                if k in ("input", "url", "ctx"):
                     continue
-                if k == "ctx":
-                    # ctx values may be non-serialisable exception objects
-                    out[k] = {ck: str(cv) for ck, cv in v.items()}
-                else:
-                    out[k] = v
+                if k == "msg" and err_type in pii_echo_types:
+                    out[k] = "Field failed validation"
+                    continue
+                out[k] = v
             return out
 
         errors = [_safe_error(err) for err in exc.errors()]

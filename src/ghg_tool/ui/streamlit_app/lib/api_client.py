@@ -39,11 +39,23 @@ def _get_base_url() -> str:
 
 
 def _get_headers() -> dict[str, str]:
-    # REV-WAVE3-019: import constant from lib/auth.py (single source of truth).
-    from ghg_tool.ui.streamlit_app.lib.auth import _DEMO_TOKEN
+    """Build the request headers, fail-closed when no token is available.
 
-    token = st.session_state.get("token", _DEMO_TOKEN)
-    return {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+    When no token is in session_state and demo mode is disabled, the
+    Authorization header is OMITTED entirely (rather than sent as an empty
+    bearer). An empty-bearer header would let auth middleware that
+    special-cases the "missing header" branch silently accept the request,
+    and the trailing space in ``"Bearer "`` is itself a parser ambiguity.
+    """
+    from ghg_tool.ui.streamlit_app.lib.auth import _DEMO_MODE, _DEMO_TOKEN
+
+    token = st.session_state.get("token")
+    if not token:
+        token = _DEMO_TOKEN if _DEMO_MODE else None
+    headers: dict[str, str] = {"Content-Type": "application/json"}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    return headers
 
 
 def _safe_get(url: str, params: dict[str, Any] | None = None) -> dict[str, Any]:

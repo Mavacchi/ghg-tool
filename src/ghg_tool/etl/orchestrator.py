@@ -251,7 +251,13 @@ def run_ingestion_pipeline(
         scope3_rows = []
 
     # -- Step 9: Cat 3 FR-11 reconciliation -----------------------------------
-    all_findings.extend(_tag_findings(compute_cat3_reconciliation(df1, df3), dq_report_version))
+    # Skip reconciliation on a blocked pipeline — df1/df3 may contain poisoned
+    # rows (negative quantities, missing mandatory columns) that would produce
+    # misleading INFO findings on the audit trail for an aborted batch.
+    if crit_passed:
+        all_findings.extend(
+            _tag_findings(compute_cat3_reconciliation(df1, df3), dq_report_version)
+        )
 
     return ETLResult(
         correlation_id=correlation_id,

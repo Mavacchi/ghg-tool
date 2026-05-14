@@ -130,8 +130,13 @@ async def waive_finding(
     log = logger.bind(correlation_id=correlation_id, user=user.sub[:8])
     log.info("waive_finding", finding_id=str(finding_id), reason_code=body.reason_code)
 
+    # Filter by tenant_id defence-in-depth, on top of RLS, so a misconfigured
+    # session GUC cannot let one tenant waive another tenant's finding.
     result = await session.execute(
-        select(DqFinding).where(DqFinding.id == finding_id)
+        select(DqFinding).where(
+            DqFinding.id == finding_id,
+            DqFinding.tenant_id == uuid.UUID(user.tenant_id),
+        )
     )
     original = result.scalar_one_or_none()
     if original is None:

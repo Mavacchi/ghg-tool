@@ -45,8 +45,14 @@ with st.sidebar:
 
     st.divider()
 
+    import datetime as _dt  # noqa: PLC0415
+
     year_options = list(range(2024, 2027))
-    selected_year = st.selectbox(_("year_filter", lang), year_options, index=0)
+    _current_year = _dt.date.today().year
+    _default_year_index = (
+        year_options.index(_current_year) if _current_year in year_options else len(year_options) - 1
+    )
+    selected_year = st.selectbox(_("year_filter", lang), year_options, index=_default_year_index)
 
     gwp_options = ["AR6", "AR5"]
     selected_gwp = st.selectbox("GWP Set", gwp_options, index=0)

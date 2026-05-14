@@ -8,13 +8,14 @@ handlers.  Raises 401 for all auth failures and 403 for RBAC failures
 
 from __future__ import annotations
 
+import uuid
 from typing import Literal
 
 import structlog
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose.exceptions import ExpiredSignatureError, JWTError  # type: ignore[import-untyped]
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from ghg_tool.api.middleware.correlation_id import get_correlation_id
 from ghg_tool.infrastructure.security import jwt as jwt_module
@@ -42,6 +43,18 @@ class CurrentUser(BaseModel):
     role: RoleCode
     tenant_id: str = Field(min_length=1)
     jti: str = Field(default="")
+
+    @field_validator("tenant_id")
+    @classmethod
+    def _validate_tenant_uuid(cls, value: str) -> str:
+        """Reject non-UUID tenant claims so callers can pass tenant_id to
+        ``uuid.UUID()`` without a 500 leak. Bad JWTs surface as 401 from the
+        get_current_user dependency instead."""
+        try:
+            uuid.UUID(value)
+        except ValueError as exc:
+            raise ValueError("tenant_id must be a valid UUID") from exc
+        return value
 
 
 async def get_current_user(
@@ -87,12 +100,18 @@ async def get_current_user(
         log.warning("JWT contains unknown role", role=role)
         raise _unauthorized(f"Unknown role in token: {role!r}")
 
-    user = CurrentUser(
-        sub=claims.get("sub", ""),
-        role=role,  # noqa: PGH003  # narrowed by guard above; mypy can't track dict lookup
-        tenant_id=claims.get("tenant_id", ""),
-        jti=claims.get("jti", ""),
-    )
+    try:
+        user = CurrentUser(
+            sub=claims.get("sub", ""),
+            role=role,  # noqa: PGH003  # narrowed by guard above; mypy can't track dict lookup
+            tenant_id=claims.get("tenant_id", ""),
+            jti=claims.get("jti", ""),
+        )
+    except ValueError as exc:
+        # Pydantic validation failure (e.g. non-UUID tenant_id) — surface as
+        # 401 rather than letting the resulting ValueError bubble to a 500.
+        log.warning("JWT claim validation failed", detail=str(exc))
+        raise _unauthorized("Invalid token claims") from exc
 
     # Store sub on request.state for rate-limit middleware
     request.state.user_sub = user.sub

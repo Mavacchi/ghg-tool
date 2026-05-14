@@ -6,7 +6,7 @@ import base64
 import json
 import uuid
 
-from fastapi import Query
+from fastapi import HTTPException, Query, status
 
 
 class CursorParams:
@@ -35,15 +35,40 @@ class CursorParams:
         """Decode the opaque cursor to a filter dict.
 
         Returns:
-            A dict with cursor fields, or empty dict if cursor is None/invalid.
+            A dict with cursor fields, or empty dict if the cursor is None.
+
+        Raises:
+            HTTPException: 400 when a non-empty cursor cannot be decoded —
+                silently returning an empty dict here would let the client
+                walk page 1 forever without an error signal.
         """
         if not self.cursor:
             return {}
+        # Local import keeps the dependency tree free of an API → middleware
+        # cycle at module import time.
+        from ghg_tool.api.middleware.correlation_id import get_correlation_id
+
+        problem_detail = {
+            "type": "about:blank",
+            "title": "Bad Request",
+            "status": 400,
+            "detail": "Invalid pagination cursor",
+            "correlation_id": get_correlation_id(),
+        }
         try:
             payload = base64.urlsafe_b64decode(self.cursor.encode()).decode()
-            return json.loads(payload)  # type: ignore[no-any-return]
-        except Exception:  # noqa: BLE001
-            return {}
+            decoded = json.loads(payload)
+        except (ValueError, json.JSONDecodeError, UnicodeDecodeError) as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=problem_detail,
+            ) from exc
+        if not isinstance(decoded, dict):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=problem_detail,
+            )
+        return decoded  # type: ignore[no-any-return]
 
 
 def encode_cursor(last_id: uuid.UUID | str) -> str:

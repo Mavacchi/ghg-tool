@@ -164,7 +164,10 @@ async def get_export_job_status(
     """
     correlation_id = get_correlation_id()
     job = get_job_status(job_id)
-    if job is None:
+    # Enforce tenant ownership defence-in-depth (do not rely on UUID
+    # unguessability alone). A missing job and a cross-tenant job both
+    # surface as 404 — never disclose the existence of another tenant's job.
+    if job is None or job.get("tenant_id") != user.tenant_id:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail={
@@ -221,7 +224,9 @@ async def download_export(
     """
     correlation_id = get_correlation_id()
     job = get_job_status(job_id)
-    if job is None:
+    # Enforce tenant ownership on download too — collapse "wrong tenant" and
+    # "not found" into the same 404 response to avoid existence disclosure.
+    if job is None or job.get("tenant_id") != user.tenant_id:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail={

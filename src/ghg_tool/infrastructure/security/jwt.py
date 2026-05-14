@@ -97,8 +97,10 @@ _JWT_AUDIENCE = os.environ.get("GHG_JWT_AUDIENCE", "")
 ACCESS_TOKEN_TTL_S: int = int(os.environ.get("GHG_ACCESS_TOKEN_TTL", "3600"))
 REFRESH_TOKEN_TTL_S: int = int(os.environ.get("GHG_REFRESH_TOKEN_TTL", "86400"))
 
-# Algorithms that must never be accepted (SG-01)
-_FORBIDDEN_ALGORITHMS = frozenset({"none", "NONE", "None"})
+# Algorithms that must never be accepted (SG-01). Compared case-insensitively
+# in decode_token to catch mixed-case spellings (e.g. "nOnE") that some
+# attacker tooling has historically used to slip past naive string matches.
+_FORBIDDEN_ALGORITHMS = frozenset({"none"})
 
 
 def _load_key(path: str) -> str:
@@ -186,7 +188,18 @@ def create_access_token(
     if _JWT_AUDIENCE:
         payload["aud"] = _JWT_AUDIENCE
     if extra_claims:
-        payload.update(extra_claims)
+        # extra_claims must never override or inject standard claims, even
+        # when the standard claim happens not to be set (e.g. when neither
+        # GHG_JWT_ISSUER nor GHG_JWT_AUDIENCE is configured). An explicit
+        # reserved-name deny-list closes that gap.
+        _reserved = {
+            "sub", "role", "tenant_id", "exp", "iat", "jti",
+            "token_type", "iss", "aud",
+        }
+        for k, v in extra_claims.items():
+            if k in _reserved:
+                continue
+            payload[k] = v
     return str(jwt.encode(payload, _signing_key(), algorithm=_JWT_ALGORITHM))
 
 
@@ -213,6 +226,11 @@ def create_refresh_token(sub: str, tenant_id: str) -> str:
     }
     if _JWT_ISSUER:
         payload["iss"] = _JWT_ISSUER
+    # Include aud on refresh tokens too — otherwise decode_token() would fail
+    # validation in production when GHG_JWT_AUDIENCE is set (jose verifies aud
+    # by default whenever the option is left enabled in _build_options).
+    if _JWT_AUDIENCE:
+        payload["aud"] = _JWT_AUDIENCE
     return str(jwt.encode(payload, _signing_key(), algorithm=_JWT_ALGORITHM))
 
 
@@ -239,7 +257,7 @@ def decode_token(token: str) -> dict[str, Any]:
         raise JWTError(f"Malformed JWT header: {exc}") from exc
 
     alg = header.get("alg", "")
-    if alg in _FORBIDDEN_ALGORITHMS:
+    if isinstance(alg, str) and alg.lower() in _FORBIDDEN_ALGORITHMS:
         raise ValueError(f"JWT algorithm '{alg}' is not permitted (SG-01)")
 
     options = _build_options()

@@ -178,9 +178,14 @@ def build_scope3_rows(
     rows: list[dict[str, Any]] = []
     for _, row in df.iterrows():
         combustibile = str(row["Combustibile"]) if pd.notna(row.get("Combustibile")) else ""
+        # Include Metodo in the idempotency key — two rows with identical
+        # (anno, categoria_s3, sottocategoria, combustibile) but different
+        # methods (e.g. spend-based vs distance-based) are distinct facts
+        # and must not collide on the UNIQUE (tenant_id, batch_id, idem_key)
+        # constraint.
         idem_key = _build_idempotency_key(
             [str(row["Anno"]), str(row["Categoria_S3"]),
-             str(row["Sottocategoria"]), combustibile]
+             str(row["Sottocategoria"]), combustibile, str(row.get("Metodo", ""))]
         )
         rows.append(
             {

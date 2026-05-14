@@ -219,7 +219,12 @@ display_cols: list[str] = [
 
 st.dataframe(df[display_cols], use_container_width=True)
 
-csv_bytes: bytes = df[display_cols].to_csv(index=False).encode("utf-8")
+from ghg_tool.ui.excel.sheets import _safe_cell_value  # noqa: E402, PLC0415
+
+_csv_df = df[display_cols].copy()
+for _col in _csv_df.select_dtypes(include=["object"]).columns:
+    _csv_df[_col] = _csv_df[_col].map(_safe_cell_value)
+csv_bytes: bytes = _csv_df.to_csv(index=False).encode("utf-8")
 st.download_button(
     label=_("download_csv", lang),
     data=csv_bytes,
