@@ -106,10 +106,10 @@ async def get_audit_trail(
         LEFT JOIN ref.factor_catalog f ON f.id = e.factor_id
         WHERE 1=1
           AND (CAST(:cid AS uuid) IS NULL OR e.correlation_id = CAST(:cid AS uuid))
-          AND (:anno IS NULL OR e.anno = :anno)
-          AND (:site IS NULL OR e.codice_sito = :site)
+          AND (CAST(:anno AS integer) IS NULL OR e.anno = CAST(:anno AS integer))
+          AND (CAST(:site AS text) IS NULL OR e.codice_sito = CAST(:site AS text))
         ORDER BY e.calc_timestamp DESC
-        LIMIT :lim
+        LIMIT CAST(:lim AS integer)
     """
     try:
         result = await session.execute(
@@ -139,7 +139,11 @@ async def get_audit_trail(
             exc_type=type(exc).__name__,
             exc_message=str(exc),
         )
+        # TEMP-DEBUG: surface the driver error in the response detail so it
+        # appears in the assertion text of the failing integration test. To
+        # be reverted to a generic "Internal error retrieving audit trail"
+        # once the underlying issue is identified.
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Internal error retrieving audit trail",
+            detail=f"audit_trail debug: {type(exc).__name__}: {exc}",
         ) from exc
