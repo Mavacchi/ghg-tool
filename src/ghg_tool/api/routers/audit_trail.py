@@ -133,18 +133,13 @@ async def get_audit_trail(
             pagination=PaginationMeta(count=len(entries)),
             correlation_id=request_cid or "",
         )
-    except Exception as exc:  # noqa: BLE001 — temp-debug, broaden from SQLAlchemyError
+    except SQLAlchemyError as exc:
         log.error(
             "audit_trail query failed",
             exc_type=type(exc).__name__,
             exc_message=str(exc),
         )
-        # TEMP-DEBUG: surface the driver/handler error in the response detail
-        # so it appears in the assertion text of the failing integration test.
-        # Previous run hit the global middleware (generic message) which means
-        # the failure is no longer a SQLAlchemyError after the CAST() fix;
-        # broaden to Exception to actually see what is escaping.
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"audit_trail debug: {type(exc).__name__}: {exc}",
+            detail="Internal error retrieving audit trail",
         ) from exc
