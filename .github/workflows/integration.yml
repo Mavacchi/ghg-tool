@@ -37,12 +37,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - id: check
-        # Emits has_e2e=true iff at least one .py file exists under tests/e2e/.
-        # Replaces the previous `if: hashFiles(...)` at job level, which is
-        # rejected by the workflow validator because hashFiles() needs an
-        # initialized workspace that is not available in jobs.<id>.if.
+        # Emits has_e2e=true iff tests/e2e/ contains at least one real test
+        # file (a *.py that is NOT a packaging `__init__.py`). Replaces the
+        # previous `if: hashFiles(...)` at job level, which is rejected by
+        # the workflow validator because hashFiles() needs an initialized
+        # workspace that is not available in jobs.<id>.if.
         run: |
-          if find tests/e2e -name '*.py' -type f 2>/dev/null | grep -q .; then
+          if find tests/e2e -name '*.py' -type f ! -name '__init__.py' 2>/dev/null | grep -q .; then
             echo "has_e2e=true" >> "$GITHUB_OUTPUT"
           else
             echo "has_e2e=false" >> "$GITHUB_OUTPUT"
