@@ -137,9 +137,12 @@ async def _sql_insert_emission(
                 tco2e, factor_id, factor_version, factor_source,
                 gwp_set, methodology, created_by
             ) VALUES (
-                :id::uuid, :tenant_id::uuid, :corr_id::uuid, :raw_row_id::uuid,
+                CAST(:id AS uuid),
+                CAST(:tenant_id AS uuid),
+                CAST(:corr_id AS uuid),
+                CAST(:raw_row_id AS uuid),
                 1, 1, :sub_scope, 'IANO', :anno,
-                :tco2e, :factor_id::uuid, '2006', 'IPCC',
+                :tco2e, CAST(:factor_id AS uuid), '2006', 'IPCC',
                 'AR6', 'stoichiometric', 'api_integration_test'
             )
             """
@@ -228,7 +231,7 @@ class TestEmissionsIntegration:
             result = await rls_session.execute(
                 text(
                     "SELECT id::text FROM calc.emissions_consolidated "
-                    "WHERE id = :id::uuid"
+                    "WHERE id = CAST(:id AS uuid)"
                 ),
                 {"id": body["id"]},
             )
@@ -321,7 +324,7 @@ class TestEmissionsIntegration:
             text(
                 "SELECT valid_to, superseded_by "
                 "FROM calc.emissions_consolidated "
-                "WHERE id = :id::uuid"
+                "WHERE id = CAST(:id AS uuid)"
             ),
             {"id": row_a_id},
         )
@@ -470,7 +473,7 @@ class TestGoCertificateIntegration:
         result = await rls_session.execute(
             text(
                 "SELECT id::text FROM ref.sites "
-                "WHERE tenant_id = :tid::uuid AND codice_sito = 'IANO' LIMIT 1"
+                "WHERE tenant_id = CAST(:tid AS uuid) AND codice_sito = 'IANO' LIMIT 1"
             ),
             {"tid": tenant_id},
         )
@@ -529,7 +532,7 @@ class TestGoCertificateIntegration:
                         qc7_exclusivity_passed, qc8_residual_mix_disclosed,
                         pdf_evidence_uri, validated_by
                     ) VALUES (
-                        :tid::uuid, :go_id, :site_id::uuid, 2024, 1500.0,
+                        CAST(:tid AS uuid), :go_id, CAST(:site_id AS uuid), 2024, 1500.0,
                         2024, '2024-12-31'::date,
                         'Ceramic Tile Manufacturer S.p.A.', 'Italy',
                         'solar_pv',
@@ -545,7 +548,7 @@ class TestGoCertificateIntegration:
             verify = await rls_session.execute(
                 text(
                     "SELECT go_id FROM ref.go_certificate_evidence "
-                    "WHERE go_id = :go_id AND tenant_id = :tid::uuid"
+                    "WHERE go_id = :go_id AND tenant_id = CAST(:tid AS uuid)"
                 ),
                 {"go_id": go_id, "tid": tenant_id},
             )

@@ -63,9 +63,12 @@ async def _insert_emission_row(
                 tco2e, factor_id, factor_version, factor_source,
                 gwp_set, methodology, created_by
             ) VALUES (
-                :id::uuid, :tenant_id::uuid, :corr_id::uuid, :raw_row_id::uuid,
+                CAST(:id AS uuid),
+                CAST(:tenant_id AS uuid),
+                CAST(:corr_id AS uuid),
+                CAST(:raw_row_id AS uuid),
                 1, 1, :sub_scope, :codice_sito, :anno,
-                1.23456, :factor_id::uuid, '2006', 'IPCC',
+                1.23456, CAST(:factor_id AS uuid), '2006', 'IPCC',
                 'AR6', 'stoichiometric', 'integration_test'
             )
             """
@@ -115,7 +118,7 @@ async def test_insert_on_emissions_consolidated_succeeds(
         text(
             "SELECT id::text, valid_to, superseded_by "
             "FROM calc.emissions_consolidated "
-            "WHERE id = :id::uuid"
+            "WHERE id = CAST(:id AS uuid)"
         ),
         {"id": row_id},
     )
@@ -155,7 +158,7 @@ async def test_update_on_emissions_consolidated_raises(
             text(
                 "UPDATE calc.emissions_consolidated "
                 "SET tco2e = 999.0 "
-                "WHERE id = :id::uuid"
+                "WHERE id = CAST(:id AS uuid)"
             ),
             {"id": row_id},
         )
@@ -190,7 +193,7 @@ async def test_delete_on_emissions_consolidated_raises(
         await rls_session.execute(
             text(
                 "DELETE FROM calc.emissions_consolidated "
-                "WHERE id = :id::uuid"
+                "WHERE id = CAST(:id AS uuid)"
             ),
             {"id": row_id},
         )

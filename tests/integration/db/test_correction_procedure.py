@@ -96,9 +96,12 @@ async def _insert_emission(
                 tco2e, factor_id, factor_version, factor_source,
                 gwp_set, methodology, created_by
             ) VALUES (
-                :id::uuid, :tenant_id::uuid, :corr_id::uuid, :raw_row_id::uuid,
+                CAST(:id AS uuid),
+                CAST(:tenant_id AS uuid),
+                CAST(:corr_id AS uuid),
+                CAST(:raw_row_id AS uuid),
                 1, 1, :sub_scope, :codice_sito, :anno,
-                :tco2e, :factor_id::uuid, '2006', 'IPCC',
+                :tco2e, CAST(:factor_id AS uuid), '2006', 'IPCC',
                 'AR6', 'stoichiometric', 'integration_test_correction'
             )
             """
@@ -159,7 +162,7 @@ async def test_fn_emit_correction_sets_superseded_by(
 
     # Step 3: Call fn_emit_correction — closes row A, points it at row B
     await rls_session.execute(
-        text("SELECT calc.fn_emit_correction(:a::uuid, :b::uuid, 'DATA_ERROR')"),
+        text("SELECT calc.fn_emit_correction(CAST(:a AS uuid), CAST(:b AS uuid), 'DATA_ERROR')"),
         {"a": row_a_id, "b": row_b_id},
     )
 
@@ -168,7 +171,7 @@ async def test_fn_emit_correction_sets_superseded_by(
         text(
             "SELECT valid_to, superseded_by::text, reason_code "
             "FROM calc.emissions_consolidated "
-            "WHERE id = :id::uuid"
+            "WHERE id = CAST(:id AS uuid)"
         ),
         {"id": row_a_id},
     )
@@ -187,7 +190,7 @@ async def test_fn_emit_correction_sets_superseded_by(
         text(
             "SELECT valid_to, superseded_by "
             "FROM calc.emissions_consolidated "
-            "WHERE id = :id::uuid"
+            "WHERE id = CAST(:id AS uuid)"
         ),
         {"id": row_b_id},
     )
@@ -224,7 +227,8 @@ async def test_fn_emit_correction_rejects_invalid_reason_code(
     with pytest.raises((IntegrityError, ProgrammingError)) as exc_info:
         await rls_session.execute(
             text(
-                "SELECT calc.fn_emit_correction(:a::uuid, :b::uuid, 'INVALID_CODE_XYZ')"
+                "SELECT calc.fn_emit_correction("
+                "CAST(:a AS uuid), CAST(:b AS uuid), 'INVALID_CODE_XYZ')"
             ),
             {"a": row_a_id, "b": row_b_id},
         )
@@ -271,7 +275,7 @@ async def test_fn_emit_correction_requires_correction_guc(
             text(
                 "UPDATE calc.emissions_consolidated "
                 "SET tco2e = 0.001 "
-                "WHERE id = :id::uuid"
+                "WHERE id = CAST(:id AS uuid)"
             ),
             {"id": row_id},
         )
@@ -319,7 +323,7 @@ async def test_fn_emit_correction_audit_log_entry_created(
 
     # Step 1: Execute the correction procedure
     await rls_session.execute(
-        text("SELECT calc.fn_emit_correction(:a::uuid, :b::uuid, 'FACTOR_UPDATE')"),
+        text("SELECT calc.fn_emit_correction(CAST(:a AS uuid), CAST(:b AS uuid), 'FACTOR_UPDATE')"),
         {"a": row_a_id, "b": row_b_id},
     )
 
@@ -333,10 +337,10 @@ async def test_fn_emit_correction_audit_log_entry_created(
                 id, tenant_id, correlation_id, user_role, action,
                 resource, resource_id, before_state, after_state
             ) VALUES (
-                :audit_id::uuid, :tenant_id::uuid, :corr_id::uuid,
+                CAST(:audit_id AS uuid), CAST(:tenant_id AS uuid), CAST(:corr_id AS uuid),
                 'data_steward', 'EMISSION_CORRECTION',
-                'calc.emissions_consolidated', :res_id::uuid,
-                :before_state::jsonb, :after_state::jsonb
+                'calc.emissions_consolidated', CAST(:res_id AS uuid),
+                CAST(:before_state AS jsonb), CAST(:after_state AS jsonb)
             )
             """
         ),
@@ -355,7 +359,7 @@ async def test_fn_emit_correction_audit_log_entry_created(
         text(
             "SELECT action, resource_id::text, correlation_id::text "
             "FROM calc.audit_log "
-            "WHERE id = :id::uuid"
+            "WHERE id = CAST(:id AS uuid)"
         ),
         {"id": audit_id},
     )
@@ -373,7 +377,7 @@ async def test_fn_emit_correction_audit_log_entry_created(
     with pytest.raises((IntegrityError, ProgrammingError)):
         await rls_session.execute(
             text(
-                "UPDATE calc.audit_log SET action = 'TAMPERED' WHERE id = :id::uuid"
+                "UPDATE calc.audit_log SET action = 'TAMPERED' WHERE id = CAST(:id AS uuid)"
             ),
             {"id": audit_id},
         )
