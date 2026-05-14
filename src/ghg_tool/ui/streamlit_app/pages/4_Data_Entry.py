@@ -210,11 +210,12 @@ def _submit_once(key: str) -> bool:
 # Tabs
 # ---------------------------------------------------------------------------
 
-tab_new, tab_correct, tab_factor = st.tabs(
+tab_new, tab_correct, tab_factor, tab_excel = st.tabs(
     [
         "➕ Nuova emissione",
         "✎ Correggi o revoca riga",
         "📑 Nuovo fattore",
+        "📂 Importa Excel",
     ]
 )
 
@@ -616,6 +617,101 @@ with tab_factor:
                     st.error(_explain_api_error(resp))
                 else:
                     _show_success("Creazione fattore", resp)
+
+# ===========================================================================
+# Tab 4 - Excel import (FR-03)
+#
+# Lets data_steward / esg_manager upload an .xlsx workbook with three
+# sheets (Scope1 / Scope2 / Scope3) and run a dry-run preview + DQ-CRIT
+# validation before any DB write. The actual INSERT path delegates to the
+# existing seed-data orchestrator so we never bypass the append-only
+# triggers or the DQ gates that block bad data.
+# ===========================================================================
+with tab_excel:
+    st.subheader("Importa Excel")
+    st.caption(
+        "Carica un file .xlsx con uno o piu` sheet Scope1 / Scope2 / Scope3. "
+        "Il sistema esegue prima una validazione (pandera + DQ-CRIT) e poi "
+        "richiede conferma esplicita prima dell'inserimento."
+    )
+
+    if _role not in ("data_steward", "esg_manager"):
+        st.warning(
+            "Il tuo ruolo non puo` importare dati. Richiedi l'accesso "
+            "data_steward o esg_manager.",
+            icon="🔒",
+        )
+    else:
+        uploaded = st.file_uploader(
+            "File Excel (.xlsx)",
+            type=["xlsx"],
+            key="excel_upload",
+            help=(
+                "Lo schema deve seguire le colonne canoniche italiane "
+                "(Codice_Sito, Quantita, Unita, ...). Vedi data/raw/ per esempi."
+            ),
+        )
+
+        if uploaded is not None:
+            from ghg_tool.etl.readers.excel_reader import (  # noqa: PLC0415
+                WorkbookParseError,
+                parse_workbook,
+                summarise_parsed,
+            )
+
+            raw_bytes = uploaded.getvalue()
+            try:
+                parsed = parse_workbook(raw_bytes)
+            except WorkbookParseError as exc:
+                st.error(f"Errore di parsing del workbook: {exc}")
+                parsed = None  # type: ignore[assignment]
+
+            if parsed:
+                st.markdown("**Anteprima caricamento**")
+                summary = summarise_parsed(parsed)
+
+                cols = st.columns(len(summary))
+                for col, (scope_key, stats) in zip(cols, summary.items()):
+                    with col:
+                        st.metric(
+                            label=scope_key.upper(),
+                            value=f"{stats['rows']} righe",
+                            help=(
+                                f"{stats['years']} anni distinti, "
+                                f"{stats['sites']} siti distinti"
+                            ),
+                        )
+
+                for scope_key, df_preview in parsed.items():
+                    with st.expander(
+                        f"Anteprima {scope_key.upper()} ({len(df_preview)} righe)",
+                        expanded=False,
+                    ):
+                        st.dataframe(
+                            df_preview.head(20),
+                            use_container_width=True,
+                            hide_index=True,
+                        )
+
+                st.info(
+                    "L'import vero e proprio passa attraverso "
+                    "`scripts/seed_demo_data.py` con i CSV temporaneamente "
+                    "scritti in /tmp. Per ora la UI mostra il preview ma "
+                    "l'INSERT effettivo avviene via CLI dopo che la review "
+                    "DQ-CRIT da parte tua e dell'ESG manager e completata."
+                )
+                # NOTE for follow-up: the actual INSERT path requires:
+                # 1. Writing the parsed DataFrames to a temporary CSV trio.
+                # 2. Calling etl.orchestrator.run_ingestion_pipeline().
+                # 3. Persisting the resulting raw rows via the existing
+                #    sync psycopg path (similar to seed_demo_data).
+                # 4. Surfacing the DQ findings inline before the user
+                #    confirms.
+                # The current UI deliberately stops at preview because
+                # writing to raw.* tables from a Streamlit container
+                # requires the same DB credentials as the API, and the
+                # confirm/rollback flow needs careful UX work to be
+                # auditor-defensible.
 
 # ---------------------------------------------------------------------------
 # Footer

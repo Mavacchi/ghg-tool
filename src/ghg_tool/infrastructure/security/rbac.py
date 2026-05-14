@@ -47,6 +47,7 @@ PERMISSION_MATRIX: Final[dict[str, dict[str, frozenset[str]]]] = {
         "read": frozenset({ROLE_DATA_STEWARD, ROLE_ESG_MANAGER, ROLE_AUDITOR}),
         "write": frozenset({ROLE_DATA_STEWARD}),
         "publish": frozenset({ROLE_ESG_MANAGER}),
+        "approve": frozenset({ROLE_ESG_MANAGER}),
     },
     "dq_findings": {
         "read": frozenset({ROLE_DATA_STEWARD, ROLE_ESG_MANAGER, ROLE_AUDITOR}),
@@ -75,6 +76,14 @@ PERMISSION_MATRIX: Final[dict[str, dict[str, frozenset[str]]]] = {
         # both require esg_manager so the v1 admin page only exposes user
         # creation + listing to the same role.
         "read": frozenset({ROLE_ESG_MANAGER}),
+        "write": frozenset({ROLE_ESG_MANAGER}),
+    },
+    "reconciliation": {
+        # M13 -- CSRD Article 23 restatement workflow.
+        # All roles may read snapshots + diffs (auditors need this).
+        # Only esg_manager may freeze a new snapshot (privileged action,
+        # audit-logged + SIEM-forwarded).
+        "read": frozenset({ROLE_DATA_STEWARD, ROLE_ESG_MANAGER, ROLE_AUDITOR}),
         "write": frozenset({ROLE_ESG_MANAGER}),
     },
 }

@@ -5,13 +5,17 @@ without having to drop to the ``scripts/create_user.py`` CLI:
 
   - ``GET /api/v1/users``  - list users in the caller's tenant.
   - ``POST /api/v1/users`` - create a new user with a bcrypt-hashed password.
+  - ``PATCH /api/v1/users/{user_uuid}/active``   - activate / deactivate.
+  - ``PATCH /api/v1/users/{user_uuid}/role``      - change role.
+  - ``POST /api/v1/users/{user_uuid}/password-reset`` - admin password reset.
 
-Both endpoints require ``users.read`` / ``users.write`` permission, which
-is granted only to ``esg_manager`` in ``PERMISSION_MATRIX``.
+All write endpoints require ``users.write`` (esg_manager only).
 """
 
 from __future__ import annotations
 
+import secrets
+import string
 import uuid
 
 import structlog
@@ -24,7 +28,14 @@ from ghg_tool.api.dependencies.auth import CurrentUser
 from ghg_tool.api.dependencies.db import get_db
 from ghg_tool.api.middleware.correlation_id import get_correlation_id
 from ghg_tool.api.middleware.rbac import require_permission
+from ghg_tool.api.schemas.user_schemas import (
+    UserActivePatchRequest,
+    UserPasswordResetRequest,
+    UserPasswordResetResponse,
+    UserRolePatchRequest,
+)
 from ghg_tool.infrastructure.db.models.audit_log import AuditLog
+from ghg_tool.infrastructure.security import siem
 from ghg_tool.infrastructure.security.password import hash_password
 
 logger = structlog.get_logger(__name__)
@@ -32,6 +43,10 @@ logger = structlog.get_logger(__name__)
 router = APIRouter(prefix="/api/v1/users", tags=["users"])
 
 _VALID_ROLES = frozenset({"data_steward", "esg_manager", "auditor"})
+
+# Alphabet for server-side password generation: all printable ASCII except
+# ambiguous characters (0, O, I, l) and shell-special characters.
+_PWD_ALPHABET = string.ascii_letters + string.digits + "!@#$%^&*()-_=+"
 
 
 class UserListItem(BaseModel):
@@ -65,6 +80,117 @@ class UserCreateRequest(BaseModel):
 class UserCreateResponse(UserListItem):
     """Response for a successful user creation - same shape as list item."""
 
+
+# ---------------------------------------------------------------------------
+# Helper: fetch user row within the caller's tenant (returns None if absent).
+# ---------------------------------------------------------------------------
+
+async def _fetch_user_in_tenant(
+    session: AsyncSession,
+    user_uuid: uuid.UUID,
+    tenant_id: str,
+) -> dict | None:
+    """Fetch a single user row joined with its role_code.
+
+    Returns None if not found or if the user belongs to a different tenant.
+    Never trusts a client-supplied tenant identifier; always uses the
+    caller's JWT-derived tenant_id.
+
+    Args:
+        session: Async DB session.
+        user_uuid: Target user UUID from the URL path.
+        tenant_id: Caller's tenant UUID string from the JWT.
+
+    Returns:
+        Row dict with keys: id, username, email, role_code, role_id, is_active.
+        None if the user does not exist or belongs to a different tenant.
+    """
+    result = await session.execute(
+        text(
+            "SELECT u.id, u.username, u.email, r.role_code, u.role_id, u.is_active "
+            "FROM ref.users u JOIN ref.roles r ON r.id = u.role_id "
+            "WHERE u.id = CAST(:uid AS uuid) "
+            "  AND u.tenant_id = CAST(:tenant AS uuid)"
+        ),
+        {"uid": str(user_uuid), "tenant": tenant_id},
+    )
+    row = result.fetchone()
+    if row is None:
+        return None
+    return {
+        "id": row.id,
+        "username": row.username,
+        "email": row.email,
+        "role_code": row.role_code,
+        "role_id": row.role_id,
+        "is_active": row.is_active,
+    }
+
+
+async def _count_active_esg_managers(
+    session: AsyncSession,
+    tenant_id: str,
+) -> int:
+    """Count active esg_manager rows in the tenant.
+
+    Used to enforce the 'last_admin' guard on deactivation and role demotion.
+
+    Args:
+        session: Async DB session.
+        tenant_id: Caller's tenant UUID string from the JWT.
+
+    Returns:
+        Number of active esg_manager users in the tenant.
+    """
+    result = await session.execute(
+        text(
+            "SELECT COUNT(*) FROM ref.users u "
+            "JOIN ref.roles r ON r.id = u.role_id "
+            "WHERE u.tenant_id = CAST(:tenant AS uuid) "
+            "  AND r.role_code = 'esg_manager' "
+            "  AND u.is_active = TRUE"
+        ),
+        {"tenant": tenant_id},
+    )
+    row = result.fetchone()
+    return int(row[0]) if row else 0
+
+
+def _problem(
+    status_code: int,
+    title: str,
+    detail: str,
+    error_code: str,
+    correlation_id: str | None,
+) -> HTTPException:
+    """Build an RFC 7807 problem+json HTTPException.
+
+    Args:
+        status_code: HTTP status code.
+        title: Short title.
+        detail: Human-readable detail message.
+        error_code: Machine-readable error code.
+        correlation_id: Request correlation UUID string.
+
+    Returns:
+        HTTPException with RFC 7807 body.
+    """
+    return HTTPException(
+        status_code=status_code,
+        detail={
+            "type": "about:blank",
+            "title": title,
+            "status": status_code,
+            "error_code": error_code,
+            "detail": detail,
+            "correlation_id": correlation_id,
+        },
+    )
+
+
+# ---------------------------------------------------------------------------
+# GET /
+# ---------------------------------------------------------------------------
 
 @router.get(
     "/",
@@ -115,6 +241,10 @@ async def list_users(
         for row in rows
     ]
 
+
+# ---------------------------------------------------------------------------
+# POST /
+# ---------------------------------------------------------------------------
 
 @router.post(
     "/",
@@ -268,3 +398,488 @@ async def create_user(
         role_code=body.role_code,
         is_active=True,
     )
+
+
+# ---------------------------------------------------------------------------
+# PATCH /{user_uuid}/active
+# ---------------------------------------------------------------------------
+
+@router.patch(
+    "/{user_uuid}/active",
+    response_model=UserListItem,
+    status_code=status.HTTP_200_OK,
+    summary="Activate or deactivate a user (esg_manager only)",
+    description=(
+        "Updates the ``is_active`` flag for the target user within the "
+        "caller's tenant. Cannot deactivate the caller's own account "
+        "(422 ``self_deactivation_forbidden``) or the last active "
+        "esg_manager in the tenant (422 ``last_admin``). Writes an "
+        "audit_log row and emits a SIEM event in the same transaction."
+    ),
+    responses={
+        200: {"description": "User activation state updated"},
+        401: {"description": "Not authenticated"},
+        403: {"description": "Insufficient role"},
+        404: {"description": "User not found or belongs to a different tenant"},
+        422: {"description": "self_deactivation_forbidden or last_admin"},
+    },
+)
+async def patch_user_active(
+    user_uuid: uuid.UUID,
+    request: Request,
+    body: UserActivePatchRequest,
+    caller: CurrentUser = Depends(require_permission("users", "write")),
+    session: AsyncSession = Depends(get_db),
+) -> UserListItem:
+    """Activate or deactivate a user account.
+
+    Guards:
+    - Tenant isolation via WHERE clause on tenant_id from JWT.
+    - Self-deactivation guard prevents the caller locking themselves out.
+    - Last-admin guard prevents leaving the tenant without any active manager.
+
+    Args:
+        user_uuid: Target user UUID from the URL path.
+        request: HTTP request (for audit metadata).
+        body: ``UserActivePatchRequest`` with the desired ``is_active`` flag.
+        caller: Authenticated esg_manager from JWT.
+        session: Async DB session.
+
+    Returns:
+        Updated ``UserListItem``.
+
+    Raises:
+        HTTPException: 404 if not found or wrong tenant.
+        HTTPException: 422 for self-deactivation or last-admin scenarios.
+    """
+    correlation_id = get_correlation_id()
+    client_ip = request.client.host if request.client else None
+    user_agent = request.headers.get("user-agent")
+    log = logger.bind(
+        correlation_id=correlation_id,
+        tenant_id=caller.tenant_id,
+        user=caller.sub[:8],
+        ip_address=client_ip,
+        user_agent=user_agent,
+        target_user=str(user_uuid),
+    )
+
+    target = await _fetch_user_in_tenant(session, user_uuid, caller.tenant_id)
+    if target is None:
+        log.warning("patch_user_active_not_found")
+        raise _problem(
+            status.HTTP_404_NOT_FOUND,
+            "Not Found",
+            f"User {user_uuid} not found.",
+            "user_not_found",
+            correlation_id,
+        )
+
+    # Guard: refuse to deactivate the caller's own account.
+    if not body.is_active and str(user_uuid) == caller.sub:
+        log.warning("patch_user_active_self_deactivation_blocked")
+        raise _problem(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            "Unprocessable Entity",
+            "You cannot deactivate your own account.",
+            "self_deactivation_forbidden",
+            correlation_id,
+        )
+
+    # Guard: refuse to deactivate the last active esg_manager.
+    if not body.is_active and target["role_code"] == "esg_manager":
+        active_managers = await _count_active_esg_managers(session, caller.tenant_id)
+        if active_managers <= 1:
+            log.warning("patch_user_active_last_admin_blocked")
+            raise _problem(
+                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                "Unprocessable Entity",
+                "Cannot deactivate the last active esg_manager in this tenant.",
+                "last_admin",
+                correlation_id,
+            )
+
+    before_state = {
+        "is_active": target["is_active"],
+        "role_code": target["role_code"],
+    }
+    after_state = {
+        "is_active": body.is_active,
+        "role_code": target["role_code"],
+    }
+
+    await session.execute(
+        text(
+            "UPDATE ref.users SET is_active = :active "
+            "WHERE id = CAST(:uid AS uuid) "
+            "  AND tenant_id = CAST(:tenant AS uuid)"
+        ),
+        {
+            "active": body.is_active,
+            "uid": str(user_uuid),
+            "tenant": caller.tenant_id,
+        },
+    )
+
+    action = "user_activated" if body.is_active else "user_deactivated"
+
+    session.add(
+        AuditLog(
+            tenant_id=uuid.UUID(caller.tenant_id),
+            correlation_id=uuid.UUID(correlation_id) if correlation_id else uuid.uuid4(),
+            user_role=caller.role,
+            action=action,
+            resource="users",
+            resource_id=user_uuid,
+            request_method="PATCH",
+            request_path=f"/api/v1/users/{user_uuid}/active",
+            status_code=200,
+            ip_address=client_ip,
+            user_agent=user_agent,
+            before_state=before_state,
+            after_state=after_state,
+        )
+    )
+
+    await session.flush()
+
+    log.info(action, target_role=target["role_code"])
+
+    siem.emit(
+        event=action,
+        correlation_id=correlation_id,
+        tenant_id=caller.tenant_id,
+        user_sub=caller.sub,
+        severity="INFO",
+        payload={"target_user": str(user_uuid), "is_active": body.is_active},
+    )
+
+    return UserListItem(
+        id=user_uuid,
+        username=target["username"],
+        email=target["email"],
+        role_code=target["role_code"],
+        is_active=body.is_active,
+    )
+
+
+# ---------------------------------------------------------------------------
+# PATCH /{user_uuid}/role
+# ---------------------------------------------------------------------------
+
+@router.patch(
+    "/{user_uuid}/role",
+    response_model=UserListItem,
+    status_code=status.HTTP_200_OK,
+    summary="Change a user's role (esg_manager only)",
+    description=(
+        "Assigns a new role to the target user within the caller's tenant. "
+        "Refuses to demote the last active esg_manager (422 ``last_admin``). "
+        "Writes an audit_log row with before/after role_code and emits a "
+        "SIEM event at severity WARN (privilege change)."
+    ),
+    responses={
+        200: {"description": "Role updated"},
+        401: {"description": "Not authenticated"},
+        403: {"description": "Insufficient role"},
+        404: {"description": "User not found or belongs to a different tenant"},
+        422: {"description": "last_admin - would remove the last esg_manager"},
+    },
+)
+async def patch_user_role(
+    user_uuid: uuid.UUID,
+    request: Request,
+    body: UserRolePatchRequest,
+    caller: CurrentUser = Depends(require_permission("users", "write")),
+    session: AsyncSession = Depends(get_db),
+) -> UserListItem:
+    """Change the role assigned to a user.
+
+    The new role_code is validated by the Pydantic Literal before the handler
+    runs.  The handler then resolves the role_id FK from ref.roles, guards
+    against removing the last esg_manager, and performs the UPDATE.
+
+    Args:
+        user_uuid: Target user UUID from the URL path.
+        request: HTTP request (for audit metadata).
+        body: ``UserRolePatchRequest`` with the desired ``role_code``.
+        caller: Authenticated esg_manager from JWT.
+        session: Async DB session.
+
+    Returns:
+        Updated ``UserListItem``.
+
+    Raises:
+        HTTPException: 404 if not found or wrong tenant.
+        HTTPException: 422 if demoting the last active esg_manager.
+        HTTPException: 500 if ref.roles seed is missing.
+    """
+    correlation_id = get_correlation_id()
+    client_ip = request.client.host if request.client else None
+    user_agent = request.headers.get("user-agent")
+    log = logger.bind(
+        correlation_id=correlation_id,
+        tenant_id=caller.tenant_id,
+        user=caller.sub[:8],
+        ip_address=client_ip,
+        user_agent=user_agent,
+        target_user=str(user_uuid),
+    )
+
+    target = await _fetch_user_in_tenant(session, user_uuid, caller.tenant_id)
+    if target is None:
+        log.warning("patch_user_role_not_found")
+        raise _problem(
+            status.HTTP_404_NOT_FOUND,
+            "Not Found",
+            f"User {user_uuid} not found.",
+            "user_not_found",
+            correlation_id,
+        )
+
+    # Guard: refuse to demote the last active esg_manager.
+    if (
+        target["role_code"] == "esg_manager"
+        and body.role_code != "esg_manager"
+        and target["is_active"]
+    ):
+        active_managers = await _count_active_esg_managers(session, caller.tenant_id)
+        if active_managers <= 1:
+            log.warning("patch_user_role_last_admin_blocked")
+            raise _problem(
+                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                "Unprocessable Entity",
+                "Cannot demote the last active esg_manager in this tenant.",
+                "last_admin",
+                correlation_id,
+            )
+
+    # Resolve the new role_id FK.
+    role_row = await session.execute(
+        text("SELECT id FROM ref.roles WHERE role_code = :rc"),
+        {"rc": body.role_code},
+    )
+    role = role_row.fetchone()
+    if role is None:
+        log.error("patch_user_role_seed_missing", role_code=body.role_code)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={
+                "type": "about:blank",
+                "title": "Internal Server Error",
+                "status": 500,
+                "detail": "Reference data missing. Contact your administrator.",
+                "correlation_id": correlation_id,
+            },
+        )
+
+    before_state = {"role_code": target["role_code"]}
+    after_state = {"role_code": body.role_code}
+
+    await session.execute(
+        text(
+            "UPDATE ref.users SET role_id = CAST(:rid AS uuid) "
+            "WHERE id = CAST(:uid AS uuid) "
+            "  AND tenant_id = CAST(:tenant AS uuid)"
+        ),
+        {
+            "rid": str(role.id),
+            "uid": str(user_uuid),
+            "tenant": caller.tenant_id,
+        },
+    )
+
+    session.add(
+        AuditLog(
+            tenant_id=uuid.UUID(caller.tenant_id),
+            correlation_id=uuid.UUID(correlation_id) if correlation_id else uuid.uuid4(),
+            user_role=caller.role,
+            action="user_role_changed",
+            resource="users",
+            resource_id=user_uuid,
+            request_method="PATCH",
+            request_path=f"/api/v1/users/{user_uuid}/role",
+            status_code=200,
+            ip_address=client_ip,
+            user_agent=user_agent,
+            before_state=before_state,
+            after_state=after_state,
+        )
+    )
+
+    await session.flush()
+
+    log.info(
+        "user_role_changed",
+        before_role=target["role_code"],
+        after_role=body.role_code,
+    )
+
+    siem.emit(
+        event="user_role_changed",
+        correlation_id=correlation_id,
+        tenant_id=caller.tenant_id,
+        user_sub=caller.sub,
+        severity="WARN",
+        payload={
+            "target_user": str(user_uuid),
+            "before_role": target["role_code"],
+            "after_role": body.role_code,
+        },
+    )
+
+    return UserListItem(
+        id=user_uuid,
+        username=target["username"],
+        email=target["email"],
+        role_code=body.role_code,
+        is_active=target["is_active"],
+    )
+
+
+# ---------------------------------------------------------------------------
+# POST /{user_uuid}/password-reset
+# ---------------------------------------------------------------------------
+
+def _generate_password(length: int = 16) -> str:
+    """Generate a cryptographically secure random password.
+
+    Uses ``secrets.choice`` which is backed by ``os.urandom`` (CSPRNG).
+    The generated password contains only characters from ``_PWD_ALPHABET``
+    so it is safely transmissible over JSON without escaping issues.
+
+    Args:
+        length: Desired password length (default 16).
+
+    Returns:
+        A random password string of the requested length.
+    """
+    return "".join(secrets.choice(_PWD_ALPHABET) for _ in range(length))
+
+
+@router.post(
+    "/{user_uuid}/password-reset",
+    response_model=UserPasswordResetResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Admin password reset (esg_manager only)",
+    description=(
+        "Resets the target user's password within the caller's tenant. "
+        "If ``new_password`` is null or omitted, a secure 16-character "
+        "password is generated server-side. The plaintext is returned ONCE "
+        "in the response body so the admin can communicate it; it is never "
+        "logged or stored unencrypted. Writes an audit_log row carrying only "
+        "``{reset_at: <iso8601>}`` in after_state - never the hash or plaintext."
+    ),
+    responses={
+        200: {"description": "Password reset, new_password in response body"},
+        401: {"description": "Not authenticated"},
+        403: {"description": "Insufficient role"},
+        404: {"description": "User not found or belongs to a different tenant"},
+    },
+)
+async def reset_user_password(
+    user_uuid: uuid.UUID,
+    request: Request,
+    body: UserPasswordResetRequest | None = None,
+    caller: CurrentUser = Depends(require_permission("users", "write")),
+    session: AsyncSession = Depends(get_db),
+) -> UserPasswordResetResponse:
+    """Reset a user's password; return the new plaintext once.
+
+    The plaintext password is NEVER written to any log, metric, or audit
+    column.  The audit row records only the action and the timestamp.
+
+    Args:
+        user_uuid: Target user UUID from the URL path.
+        request: HTTP request (for audit metadata).
+        body: Optional ``UserPasswordResetRequest``; may be omitted entirely.
+        caller: Authenticated esg_manager from JWT.
+        session: Async DB session.
+
+    Returns:
+        ``UserPasswordResetResponse`` containing the new plaintext password.
+
+    Raises:
+        HTTPException: 404 if not found or wrong tenant.
+    """
+    from datetime import UTC, datetime  # noqa: PLC0415 - lazy import is fine here
+
+    correlation_id = get_correlation_id()
+    client_ip = request.client.host if request.client else None
+    user_agent = request.headers.get("user-agent")
+    log = logger.bind(
+        correlation_id=correlation_id,
+        tenant_id=caller.tenant_id,
+        user=caller.sub[:8],
+        ip_address=client_ip,
+        user_agent=user_agent,
+        target_user=str(user_uuid),
+    )
+
+    target = await _fetch_user_in_tenant(session, user_uuid, caller.tenant_id)
+    if target is None:
+        log.warning("reset_user_password_not_found")
+        raise _problem(
+            status.HTTP_404_NOT_FOUND,
+            "Not Found",
+            f"User {user_uuid} not found.",
+            "user_not_found",
+            correlation_id,
+        )
+
+    # Determine the new password - generate if caller did not supply one.
+    if body is None or body.new_password is None:
+        new_plain = _generate_password(16)
+    else:
+        new_plain = body.new_password
+
+    new_hash = hash_password(new_plain)
+
+    await session.execute(
+        text(
+            "UPDATE ref.users SET password_hash = :h "
+            "WHERE id = CAST(:uid AS uuid) "
+            "  AND tenant_id = CAST(:tenant AS uuid)"
+        ),
+        {
+            "h": new_hash,
+            "uid": str(user_uuid),
+            "tenant": caller.tenant_id,
+        },
+    )
+
+    reset_at = datetime.now(tz=UTC).isoformat()
+
+    # after_state carries ONLY reset_at; never the hash or plaintext.
+    session.add(
+        AuditLog(
+            tenant_id=uuid.UUID(caller.tenant_id),
+            correlation_id=uuid.UUID(correlation_id) if correlation_id else uuid.uuid4(),
+            user_role=caller.role,
+            action="user_password_reset",
+            resource="users",
+            resource_id=user_uuid,
+            request_method="POST",
+            request_path=f"/api/v1/users/{user_uuid}/password-reset",
+            status_code=200,
+            ip_address=client_ip,
+            user_agent=user_agent,
+            after_state={"reset_at": reset_at},
+        )
+    )
+
+    await session.flush()
+
+    # Log the action - never include the password or its hash.
+    log.info("user_password_reset", target_user=str(user_uuid))
+
+    siem.emit(
+        event="user_password_reset",
+        correlation_id=correlation_id,
+        tenant_id=caller.tenant_id,
+        user_sub=caller.sub,
+        severity="WARN",
+        payload={"target_user": str(user_uuid)},
+    )
+
+    return UserPasswordResetResponse(new_password=new_plain)

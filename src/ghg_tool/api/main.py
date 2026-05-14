@@ -49,6 +49,7 @@ from ghg_tool.api.routers import (
     health,
     intensity,
     kpis,
+    reconciliation,
     reports,
     users,
 )
@@ -282,6 +283,7 @@ def _create_app() -> FastAPI:
     app.include_router(reports.router)
     app.include_router(exports.router)
     app.include_router(users.router)
+    app.include_router(reconciliation.router)
 
     return app
 
