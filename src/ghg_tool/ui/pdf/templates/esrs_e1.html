@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="{{ language }}">
+<head>
+  <meta charset="utf-8">
+  <title>GHG Report ESRS E1 — Saturnia Ceramica S.r.l. — {{ anno }}</title>
+  <link rel="stylesheet" href="{{ css_path }}">
+</head>
+<body data-year="{{ anno }}" data-dashboard-version="Dashboard v{{ dashboard_version }}">
+
+<!-- ============================================================ -->
+<!-- REPORT HEADER                                                -->
+<!-- ============================================================ -->
+<div class="report-header">
+  <div class="company-name">Saturnia Ceramica S.r.l.</div>
+  <div class="report-subtitle">
+    Report GHG — ESRS E1-6 + E1-7 | Anno di rendicontazione: {{ anno }}
+  </div>
+  <div class="report-subtitle">
+    Periodo: {{ anno }}-01-01 — {{ anno }}-12-31 |
+    Set GWP: {{ gwp_set }} (IPCC AR6 GWP100) |
+    Metodologia: GHG Protocol Corporate Standard (2004)
+  </div>
+  <div class="report-subtitle">
+    Livello di assurance: ISAE 3000 Limited (assurance provider esterno) |
+    Confine organizzativo: Controllo operativo, 7 siti italiani
+  </div>
+  <div class="report-subtitle">
+    Generato da: GHG Accounting Tool v1 |
+    Dashboard: {{ dashboard_id }} v{{ dashboard_version }} |
+    Timestamp: {{ generated_at }}
+  </div>
+</div>
+
+<!-- VIANO 2025 banner (MG-12) -->
+{% if anno == 2025 and has_viano %}
+<div class="viano-banner">
+  <strong>⚠️ Operatività ridotta sito VIANO nel 2025</strong><br>
+  Il sito VIANO ha operato a capacità ridotta nel 2025.
+  I dati 2025 per VIANO sono reali (fermo parziale confermato 2026-05-13).
+  Interpretare i confronti YoY con cautela per questo sito.
+  Riferimento: MG-12, OI-2.
+</div>
+{% endif %}
+
+<!-- ============================================================ -->
+<!-- SECTIONS E1-6 and E1-7                                      -->
+<!-- ============================================================ -->
+{% include "_e1_6_breakdown.html" %}
+{% include "_e1_7_biogenic.html" %}
+
+<!-- ============================================================ -->
+<!-- ESRS E1-6 §45 — INTENSITY RATIOS                            -->
+<!-- ============================================================ -->
+<div class="avoid-break">
+<h2>ESRS E1-6 §45 — Indicatori di Intensità GHG</h2>
+<table>
+  <thead>
+    <tr>
+      <th>KPI</th>
+      <th>Anno</th>
+      <th>Variante Scope 2</th>
+      <th class="numeric">Numeratore (tCO2e)</th>
+      <th class="numeric">Denominatore</th>
+      <th>Unità denominatore</th>
+      <th class="numeric">Intensità</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for row in intensity_rows %}
+    <tr>
+      <td>{{ row.kpi_code }}</td>
+      <td class="numeric">{{ row.anno }}</td>
+      <td>{{ row.scope2_variant }}</td>
+      <td class="numeric">{{ "%.2f"|format(row.numerator_tco2e) }}</td>
+      <td class="numeric">{{ "%.2f"|format(row.denominator_value) }}</td>
+      <td>{{ row.denominator_unit }}</td>
+      <td class="numeric">{{ "%.4f"|format(row.intensity_value) }}</td>
+    </tr>
+    {% else %}
+    <tr><td colspan="7"><em>Metriche di intensità non disponibili in questo output.</em></td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+</div>
+
+<!-- ============================================================ -->
+<!-- APPENDICES                                                   -->
+<!-- ============================================================ -->
+{% include "_appendix_methodology.html" %}
+{% include "_appendix_dq_findings.html" %}
+
+<!-- ============================================================ -->
+<!-- DISCLAIMER                                                   -->
+<!-- ============================================================ -->
+<div class="disclaimer page-break-before">
+  <strong>Disclaimer:</strong>
+  {{ disclaimer_text }}
+  <br><br>
+  <strong>Fonte dati:</strong> API v1 | GWP set: {{ gwp_set }} |
+  Fonti fattori: ISPRA 2024 + IEA 2024 |
+  Metodologia: GHG Protocol Corporate Standard.
+</div>
+
+<!-- ============================================================ -->
+<!-- SIGNATURE BLOCK                                              -->
+<!-- ============================================================ -->
+<div class="signature-block">
+<h2>Blocco Firma</h2>
+<table>
+  <tbody>
+    <tr>
+      <td>
+        <strong>Preparato da:</strong> data_steward<br>
+        Firma: ____________________<br>
+        Data: ____________________
+      </td>
+      <td>
+        <strong>Rivisto da:</strong> esg_manager<br>
+        Firma: ____________________<br>
+        Data: ____________________
+      </td>
+      <td>
+        <strong>Approvato da:</strong><br>
+        Firma: ____________________<br>
+        Data: ____________________
+      </td>
+    </tr>
+  </tbody>
+</table>
+</div>
+
+<!-- ============================================================ -->
+<!-- MANDATORY METADATA FOOTER (FR-23)                           -->
+<!-- ============================================================ -->
+<div class="metadata-footer">
+  Dashboard ID: {{ dashboard_id }} | v{{ dashboard_version }} |
+  API v1 | GWP set: {{ gwp_set }} |
+  Fonte fattori: ISPRA 2024 + IEA 2024 |
+  Metodologia: GHG Protocol Corporate Standard |
+  Generato: {{ generated_at }}
+</div>
+
+</body>
+</html>

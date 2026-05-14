@@ -1,0 +1,51 @@
+# Coverage configuration — updated for wave 3 (visualization/reporting layer).
+# Excludes layers tested in integration/E2E suites (wave 3+) and Streamlit UI
+# execution scripts that require a live server session.
+[run]
+source = src/ghg_tool
+omit =
+    */tests/*
+    */migrations/*
+    src/ghg_tool/infrastructure/db/*
+    src/ghg_tool/infrastructure/factors/*
+    src/ghg_tool/infrastructure/reporting/*
+    src/ghg_tool/infrastructure/security/*
+    src/ghg_tool/infrastructure/etl/*
+    src/ghg_tool/api/*
+    src/ghg_tool/dashboard/*
+    src/ghg_tool/etl/readers/*
+    src/ghg_tool/etl/writers/*
+    src/ghg_tool/etl/schemas/*
+    src/ghg_tool/etl/orchestrator.py
+    src/ghg_tool/ui/streamlit_app/Home.py
+    src/ghg_tool/ui/streamlit_app/pages/*
+    src/ghg_tool/ui/streamlit_app/lib/api_client.py
+    src/ghg_tool/ui/streamlit_app/lib/auth.py
+    src/ghg_tool/ui/pdf/data_loader.py
+
+[report]
+fail_under = 85
+show_missing = true
+omit =
+    */tests/*
+    */migrations/*
+    src/ghg_tool/infrastructure/db/*
+    src/ghg_tool/infrastructure/factors/*
+    src/ghg_tool/infrastructure/reporting/*
+    src/ghg_tool/infrastructure/security/*
+    src/ghg_tool/infrastructure/etl/*
+    src/ghg_tool/api/*
+    src/ghg_tool/dashboard/*
+    src/ghg_tool/etl/readers/*
+    src/ghg_tool/etl/writers/*
+    src/ghg_tool/etl/schemas/*
+    src/ghg_tool/etl/orchestrator.py
+    src/ghg_tool/ui/streamlit_app/Home.py
+    src/ghg_tool/ui/streamlit_app/pages/*
+    src/ghg_tool/ui/streamlit_app/lib/api_client.py
+    src/ghg_tool/ui/streamlit_app/lib/auth.py
+    src/ghg_tool/ui/pdf/data_loader.py
+exclude_lines =
+    pragma: no cover
+    if TYPE_CHECKING:
+    raise NotImplementedError

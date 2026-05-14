@@ -1,0 +1,63 @@
+<!-- ESRS E1-7 Biogenic carbon separately disclosed (ADR-007) -->
+<!-- ADR-007: biogenic NOT summed into Scope 1/2/3 totals -->
+
+<div class="biogenic-memo avoid-break">
+  <h3>ESRS E1-7 — Emissioni Biogeniche di CO2 (Memo separato)</h3>
+
+  <p>
+    <strong>ADR-007 / GHG Protocol Corporate Standard §4.5:</strong>
+    Le emissioni biogeniche di CO2 dalla combustione di biomasse e biogas sono
+    <em>disclosed separatamente</em> in questa sezione E1-7.
+    <strong>Non sono incluse nei totali Scope 1/2/3</strong>
+    ai sensi di ADR-007 e del GHG Protocol Corporate Standard §4.5.
+  </p>
+
+  {% if biogenic_rows %}
+  <table>
+    <thead>
+      <tr>
+        <th>Sito</th>
+        <th>Sub-scope</th>
+        <th class="numeric">Anno</th>
+        <th class="numeric">CO2 Biogenico (t)</th>
+        <th class="numeric">CO2 Fossile (t)</th>
+        <th>Fonte Fattore</th>
+        <th>Versione</th>
+        <th>GWP Set</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in biogenic_rows %}
+      <tr>
+        <td>{{ row.codice_sito or "—" }}</td>
+        <td>{{ row.sub_scope }}</td>
+        <td class="numeric">{{ row.anno }}</td>
+        <td class="numeric">{{ "%.4f"|format(row.co2_biogenic_tonne or 0) }}</td>
+        <td class="numeric">{{ "%.4f"|format(row.co2_fossil_tonne or 0) }}</td>
+        <td>{{ row.factor_source }}</td>
+        <td>{{ row.factor_version }}</td>
+        <td>{{ row.gwp_set }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+    <tfoot>
+      <tr>
+        <th colspan="3">Totale biogenico memo</th>
+        <th class="numeric">{{ "%.4f"|format(biogenic_total_co2) }}</th>
+        <th class="numeric">{{ "%.4f"|format(biogenic_total_fossil) }}</th>
+        <th colspan="3"></th>
+      </tr>
+    </tfoot>
+  </table>
+  {% else %}
+  <p class="zero-line">
+    <em>Nessuna emissione biogenica materiale identificata nel periodo {{ anno }}.
+    Riga zero dichiarativa per completezza ESRS E1-7.</em>
+  </p>
+  {% endif %}
+
+  <p class="uncertainty">
+    Fonte: calcoli da dati attività Scope 1 per biomasse/biogas per sito × anno.
+    Fattore biogenico companion da ADR-007 factor catalog (colonna biogenic_co2_kg_per_unit).
+  </p>
+</div>

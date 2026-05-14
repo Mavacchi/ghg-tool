@@ -1,0 +1,212 @@
+---
+# GHG Tool — Integration Test Pipeline (NFR-15, NFR-16)
+#
+# Runs the 13 integration tests in tests/integration/ against a real PostgreSQL
+# service container spun up by GitHub Actions.
+#
+# CREDENTIAL NOTE: All credentials in this file are ephemeral, test-only values
+# that are never reused outside this CI job. Do NOT pattern-match secret scanners
+# on these strings — they are intentionally in plaintext per the test-only policy.
+# Real production credentials are never committed to this repository.
+#
+# Job topology (independent of ci.yml jobs):
+#   detect-e2e   — checks whether tests/e2e/ contains any *.py files
+#   integration  — spin up PG service, apply migrations, run pytest -m integration
+#   e2e          — runs only when detect-e2e reports has_e2e=true
+#
+# Note: hashFiles() is NOT available in jobs.<id>.if (workspace is not yet
+# checked out at job-init time), so the e2e skip decision must be moved into
+# a dedicated detect-e2e job whose output the e2e job consumes via `needs`.
+#
+# See .github/workflows/ci.yml for the lint + unit + migration-check suite.
+
+name: Integration
+
+on:
+  push:
+    branches: ["main", "develop", "feature/**", "claude/**"]
+  pull_request:
+    branches: ["main", "develop"]
+
+jobs:
+  detect-e2e:
+    name: Detect e2e tests
+    runs-on: ubuntu-22.04
+    outputs:
+      has_e2e: ${{ steps.check.outputs.has_e2e }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: check
+        # Emits has_e2e=true iff tests/e2e/ contains at least one real test
+        # file (a *.py that is NOT a packaging `__init__.py`). Replaces the
+        # previous `if: hashFiles(...)` at job level, which is rejected by
+        # the workflow validator because hashFiles() needs an initialized
+        # workspace that is not available in jobs.<id>.if.
+        run: |
+          if find tests/e2e -name '*.py' -type f ! -name '__init__.py' 2>/dev/null | grep -q .; then
+            echo "has_e2e=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_e2e=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  integration:
+    name: Integration tests (PG service)
+    runs-on: ubuntu-22.04
+
+    services:
+      postgres:
+        # Pin to minor digest is preferred in production; alpine tag is acceptable
+        # for ephemeral CI because the runner is discarded after the job.
+        image: postgres:15-alpine
+        env:
+          # Ephemeral CI-only credentials — never reused, not secrets (see header).
+          POSTGRES_DB: ghg_tool_test
+          POSTGRES_USER: ghg_test
+          POSTGRES_PASSWORD: ghg_test_password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ghg_test -d ghg_tool_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      # Sync driver for Alembic (psycopg3)
+      SQLALCHEMY_URL: "postgresql+psycopg://ghg_test:ghg_test_password@localhost:5432/ghg_tool_test"
+      # Async driver for asyncpg-based tests and app code
+      SQLALCHEMY_ASYNC_URL: "postgresql+asyncpg://ghg_test:ghg_test_password@localhost:5432/ghg_tool_test"
+      DATABASE_URL: "postgresql+asyncpg://ghg_test:ghg_test_password@localhost:5432/ghg_tool_test"
+      # Must be ≥ 32 characters or FastAPI/JWT middleware rejects it at startup.
+      # Ephemeral CI-only value — never reused.
+      JWT_SECRET_KEY: "test-secret-only-for-ci-min-32-characters-long"
+      ENV: "test"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          # Cache pip wheels keyed on pyproject.toml content hash
+          cache: "pip"
+          cache-dependency-path: "pyproject.toml"
+
+      - name: Install dev dependencies
+        run: pip install -e ".[dev]"
+
+      # The GH Actions service container healthcheck usually passes before we
+      # reach this step, but an explicit wait loop guards against slow runners.
+      - name: Wait for PostgreSQL to be ready
+        run: |
+          for i in $(seq 1 30); do
+            pg_isready -h localhost -U ghg_test -d ghg_tool_test && break
+            echo "Attempt $i/30 — waiting 2s..."
+            sleep 2
+          done
+
+      - name: Apply Alembic migrations
+        run: python -m alembic upgrade head
+
+      - name: Verify migration state
+        run: |
+          echo "=== Current revision ==="
+          python -m alembic current
+          echo "=== Known heads ==="
+          python -m alembic heads
+
+      - name: Run integration tests
+        # --cov-fail-under=0 disables the 85% gate from pyproject.toml on this
+        # job: the integration suite alone only exercises a slice of src/ (it
+        # covers the DB layer, while pure-Python modules are tested in the
+        # unit job in ci.yml).  The 85% gate is enforced there on the unit
+        # suite — applying it here would always fail at ~34%.
+        run: |
+          python -m pytest tests/integration \
+            -v --tb=short --strict-markers \
+            -m "integration" \
+            --cov=src/ghg_tool --cov-append \
+            --cov-report=term-missing \
+            --cov-fail-under=0
+
+      - name: Upload coverage artifact
+        # Always upload so failures still produce a coverage artefact for diagnosis.
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-integration
+          path: .coverage
+
+  e2e:
+    name: E2E tests (skipped when tests/e2e/ is empty)
+    runs-on: ubuntu-22.04
+    needs: [integration, detect-e2e]
+    # Skip when detect-e2e found no .py files under tests/e2e/. Using a job
+    # output (instead of hashFiles() directly) is required because hashFiles()
+    # is not recognized in jobs.<id>.if at workflow-parse time.
+    if: needs.detect-e2e.outputs.has_e2e == 'true'
+
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          # Ephemeral CI-only credentials — never reused, not secrets (see header).
+          POSTGRES_DB: ghg_tool_test
+          POSTGRES_USER: ghg_test
+          POSTGRES_PASSWORD: ghg_test_password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ghg_test -d ghg_tool_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      SQLALCHEMY_URL: "postgresql+psycopg://ghg_test:ghg_test_password@localhost:5432/ghg_tool_test"
+      SQLALCHEMY_ASYNC_URL: "postgresql+asyncpg://ghg_test:ghg_test_password@localhost:5432/ghg_tool_test"
+      DATABASE_URL: "postgresql+asyncpg://ghg_test:ghg_test_password@localhost:5432/ghg_tool_test"
+      JWT_SECRET_KEY: "test-secret-only-for-ci-min-32-characters-long"
+      ENV: "test"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+          cache-dependency-path: "pyproject.toml"
+
+      - name: Install dev dependencies
+        run: pip install -e ".[dev]"
+
+      - name: Wait for PostgreSQL to be ready
+        run: |
+          for i in $(seq 1 30); do
+            pg_isready -h localhost -U ghg_test -d ghg_tool_test && break
+            echo "Attempt $i/30 — waiting 2s..."
+            sleep 2
+          done
+
+      - name: Apply Alembic migrations
+        run: python -m alembic upgrade head
+
+      - name: Run e2e tests
+        # See "Run integration tests" — same reason for disabling the 85% gate.
+        run: |
+          python -m pytest tests/e2e \
+            -v --tb=short --strict-markers \
+            -m "e2e" \
+            --cov=src/ghg_tool --cov-append \
+            --cov-report=term-missing \
+            --cov-fail-under=0
+
+      - name: Upload coverage artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-e2e
+          path: .coverage

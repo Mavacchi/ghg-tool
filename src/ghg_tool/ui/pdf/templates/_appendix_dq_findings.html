@@ -1,0 +1,58 @@
+<!-- Appendix B — DQ Findings (open + waived) -->
+
+<div class="page-break-before avoid-break">
+<h2>Appendice B — Risultati Data Quality (DQ)</h2>
+
+<p>
+  Questa appendice elenca i risultati DQ aperti e rinunciati al momento della generazione del report.
+  I risultati CRIT chiusi e i risultati INFO non sono inclusi per concisione.
+  Tutti i risultati sono accessibili via API <code>GET /api/v1/dq-findings</code>.
+</p>
+
+{% if dq_rows %}
+<table>
+  <thead>
+    <tr>
+      <th>ID</th>
+      <th>Regola</th>
+      <th>Severità</th>
+      <th>Sito</th>
+      <th>Anno</th>
+      <th>Stato</th>
+      <th>Descrizione</th>
+      <th>Azione raccomandata</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for row in dq_rows %}
+    <tr>
+      <td>{{ row.id|truncate(12, killwords=True, end="…") }}</td>
+      <td>{{ row.rule_id }}</td>
+      <td>
+        <span class="severity-{{ row.severity|lower }}">{{ row.severity }}</span>
+      </td>
+      <td>{{ row.codice_sito or "—" }}</td>
+      <td>{{ row.anno or "—" }}</td>
+      <td>{{ row.resolution_status }}</td>
+      <td>{{ row.trigger_desc or "—" }}</td>
+      <td>{{ row.recommended_action or "—" }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="zero-line">
+  <em>Nessun finding DQ aperto o rinunciato al momento della generazione del report.</em>
+</p>
+{% endif %}
+
+{% if anno == 2025 %}
+<div class="viano-banner">
+  <strong>⚠️ Nota VIANO 2025 (MG-12):</strong>
+  Il sito VIANO ha operato a capacità ridotta nel 2025.
+  I confronti YoY per questo sito devono essere interpretati con cautela.
+  Consumo elettrico VIANO 2025 ≈ 50% del 2024 — dato confermato come reale (fermo parziale).
+  Riferimento: MG-12, OI-2 chiuso.
+</div>
+{% endif %}
+</div>

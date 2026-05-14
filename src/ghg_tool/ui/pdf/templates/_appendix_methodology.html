@@ -1,0 +1,113 @@
+<!-- Appendix A — Methodology, boundary, GWP set, factor sources -->
+
+<div class="page-break-before avoid-break">
+<h2>Appendice A — Metodologia e Fonti</h2>
+
+<h3>A.1 Confini Organizzativi</h3>
+<p>
+  <strong>Metodo di confine:</strong> Controllo operativo — GHG Protocol Corporate Standard Capitolo 4.<br>
+  L'azienda rende conto del 100% delle emissioni dalle operazioni sotto controllo operativo.
+</p>
+<table>
+  <thead>
+    <tr>
+      <th>Codice Sito</th>
+      <th>Ruolo</th>
+      <th>Incluso in confine</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr><td>IANO</td><td>Sito principale (EU ETS Annex I Attività 17)</td><td>Sì</td></tr>
+    <tr><td>VIANO</td><td>Sito secondario di produzione</td><td>Sì</td></tr>
+    <tr><td>VIANO_GARGOLA</td><td>Sito secondario di produzione</td><td>Sì</td></tr>
+    <tr><td>CASALGRANDE</td><td>Sito secondario di produzione</td><td>Sì</td></tr>
+    <tr><td>FIORANO</td><td>Sito secondario di produzione</td><td>Sì</td></tr>
+    <tr><td>SASSUOLO</td><td>Sito secondario di produzione</td><td>Sì</td></tr>
+    <tr><td>FRASSINORO</td><td>Sito secondario di produzione</td><td>Sì</td></tr>
+  </tbody>
+</table>
+
+<h3>A.2 Periodo di Rendicontazione</h3>
+<p>
+  Anno Base: 2024 (consolidato, 7 siti).<br>
+  Anno Corrente: {{ anno }} ({{ "parziale — vedere nota VIANO 2025" if anno == 2025 else "consolidato" }}).<br>
+  Periodo: {{ anno }}-01-01 → {{ anno }}-12-31.
+</p>
+
+<h3>A.3 Set GWP</h3>
+<p>
+  <strong>GWP set primario:</strong> IPCC AR6 GWP100 — CH4 = 27,9; N2O = 273.<br>
+  <strong>GWP set secondario:</strong> AR5 (EU ETS dual-track per IANO Annex I).<br>
+  <em>I set GWP non vengono mai mixati in un singolo run di report.</em>
+  Set usato in questo report: <strong>{{ gwp_set }}</strong>.
+</p>
+
+<h3>A.4 Fonti dei Fattori di Emissione</h3>
+<table>
+  <thead>
+    <tr>
+      <th>Factor ID</th>
+      <th>Fonte</th>
+      <th>Versione</th>
+      <th>Valido dal</th>
+      <th>Scope / Categoria</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for f in factor_rows %}
+    <tr>
+      <td>{{ f.factor_id }}</td>
+      <td>{{ f.source }}</td>
+      <td>{{ f.version }}</td>
+      <td>{{ f.valid_from }}</td>
+      <td>{{ f.scope }} / {{ f.category }}</td>
+    </tr>
+    {% else %}
+    <tr><td colspan="5"><em>Catalogo fattori non disponibile in questo output.</em></td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+<h3>A.5 Metodologie di Calcolo</h3>
+<ul>
+  <li><strong>Scope 1 Combustione:</strong> fattori DEFRA (Gas Naturale, Gasolio, Benzina), AR6 GWP. Output CO2, CH4, N2O.</li>
+  <li><strong>Scope 1 Processo:</strong> fattore stechiometrico 0,4397 tCO2/t CaCO3 (IPCC AR6); solo IANO.</li>
+  <li><strong>Scope 1 Fugitive HFC:</strong> zero dichiarativo — impianti ad anello chiuso; top-up refrigerante dichiarati trascurabili (2026-05-13).</li>
+  <li><strong>Scope 2 LB:</strong> fattore grid ISPRA Italia (primario), IEA (secondario).</li>
+  <li><strong>Scope 2 MB:</strong> 0 tCO2e/MWh per volumi EE_Acquistata_GO; residual mix ISPRA per EE_Acquistata_Grid (SASSUOLO 2024).</li>
+  <li><strong>Scope 3 Cat 1:</strong> mass-based (ecoinvent v3.10) + spend-based (EXIOBASE).</li>
+  <li><strong>Scope 3 Cat 3:</strong> WTT DEFRA; quantità derivata da Σ Scope 1, non da CSV Cat 3.</li>
+  <li><strong>Scope 3 Cat 4/9:</strong> distance-based (tkm × DEFRA freight factors per mode).</li>
+  <li><strong>Scope 3 Cat 7:</strong> distance-based; FTE HR ufficiale 2024=506, 2025=484 (confermato 2026-05-13).</li>
+</ul>
+
+<h3>A.6 Anno Base e Politica di Ricalcolo</h3>
+<p>
+  Anno base: 2024. Un cambiamento strutturale (acquisizione/dismissione) o una revisione metodologica
+  che causa uno shift &gt;5% nel totale Scope 1+2 tCO2e dell'anno base
+  attiva il workflow obbligatorio di ricalcolo (FR-26).
+</p>
+
+<h3>A.7 &mdash; EU Taxonomy &amp; SFDR scope</h3>
+<p>
+  <strong>EU Taxonomy (Regulation 2020/852).</strong> Alignment assessment
+  (substantial contribution, do-no-significant-harm, minimum safeguards) is
+  <em>out of scope</em> for v1 of this tool. The reporting entity defers
+  Taxonomy KPI calculation (CapEx, OpEx, turnover alignment) to v2.
+  Placeholder disclosure per CG-10: <em>EU Taxonomy alignment: assessment deferred to v2.</em>
+</p>
+<p>
+  <strong>SFDR Principal Adverse Impact (PAI) indicators.</strong> Not applicable:
+  this is an issuer-level GHG accounting tool. The reporting entity is not a
+  financial-market participant; no financial-product PAI reporting is in scope.
+</p>
+<p>
+  <strong>EU ETS Phase IV.</strong> The IANO site is covered as Annex I Activity
+  17 (manufacture of ceramic products by firing) under Directive 2003/87/EC and
+  MRR Regulation 2018/2066 as amended by 2023/2122. Dual-track GWP (AR5 + AR6)
+  is maintained for ETS vs CSRD parallel reporting (FR-34, FR-19); the MRR XML
+  upload format is deferred to v2. AR5 output rows are tagged
+  <code>regulatory_stream = EU_ETS_PHASE_IV</code> and clearly labelled as
+  distinct from the primary CSRD ESRS E1 (AR6) disclosure.
+</p>
+</div>
