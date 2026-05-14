@@ -10,8 +10,13 @@
 # Real production credentials are never committed to this repository.
 #
 # Job topology (independent of ci.yml jobs):
+#   detect-e2e   — checks whether tests/e2e/ contains any *.py files
 #   integration  — spin up PG service, apply migrations, run pytest -m integration
-#   e2e          — conditional on tests/e2e/**/*.py existing; skipped when empty
+#   e2e          — runs only when detect-e2e reports has_e2e=true
+#
+# Note: hashFiles() is NOT available in jobs.<id>.if (workspace is not yet
+# checked out at job-init time), so the e2e skip decision must be moved into
+# a dedicated detect-e2e job whose output the e2e job consumes via `needs`.
 #
 # See .github/workflows/ci.yml for the lint + unit + migration-check suite.
 
@@ -24,6 +29,25 @@ on:
     branches: ["main", "develop"]
 
 jobs:
+  detect-e2e:
+    name: Detect e2e tests
+    runs-on: ubuntu-22.04
+    outputs:
+      has_e2e: ${{ steps.check.outputs.has_e2e }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: check
+        # Emits has_e2e=true iff at least one .py file exists under tests/e2e/.
+        # Replaces the previous `if: hashFiles(...)` at job level, which is
+        # rejected by the workflow validator because hashFiles() needs an
+        # initialized workspace that is not available in jobs.<id>.if.
+        run: |
+          if find tests/e2e -name '*.py' -type f 2>/dev/null | grep -q .; then
+            echo "has_e2e=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_e2e=false" >> "$GITHUB_OUTPUT"
+          fi
+
   integration:
     name: Integration tests (PG service)
     runs-on: ubuntu-22.04
@@ -110,10 +134,11 @@ jobs:
   e2e:
     name: E2E tests (skipped when tests/e2e/ is empty)
     runs-on: ubuntu-22.04
-    needs: integration
-    # hashFiles returns '' when no .py files exist under tests/e2e/ — this
-    # causes the job to be skipped automatically rather than failing.
-    if: hashFiles('tests/e2e/**/*.py') != ''
+    needs: [integration, detect-e2e]
+    # Skip when detect-e2e found no .py files under tests/e2e/. Using a job
+    # output (instead of hashFiles() directly) is required because hashFiles()
+    # is not recognized in jobs.<id>.if at workflow-parse time.
+    if: needs.detect-e2e.outputs.has_e2e == 'true'
 
     services:
       postgres:
