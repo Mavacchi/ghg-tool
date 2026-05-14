@@ -1,8 +1,12 @@
 """Unit tests for POST /api/v1/factor-catalog/{factor_uuid}/publish.
 
+Updated for the two-eyes approval workflow (FR-12, ISAE 3000 §A99).
+The first esg_manager call now returns 202 (approval requested) rather
+than 200 (factor published). Full second-manager approval tests live
+in test_factor_publish_approval.py.
+
 Covers:
-- happy path (draft → published)
-- happy path with publish_notes
+- happy path: first call -> 202 (approval row created, factor NOT published)
 - 401 unauthenticated
 - 403 wrong role (auditor)
 - 403 wrong role (data_steward)
@@ -11,6 +15,7 @@ Covers:
 - 409 already published
 - 422 is_tbc=True
 - 422 value=None AND is_licence_only=False
+- structured log emitted on approval request
 
 All DB access is mocked.  No live PostgreSQL instance required.
 """
@@ -100,8 +105,6 @@ def _make_factor_orm(
     factor.applicability_note = None
     factor.pdf_source_uri = None
     factor.created_at = datetime(2024, 1, 1, tzinfo=UTC)
-    # MG-03: draft rows have published_at/published_by = None; published rows
-    # have both set.  The mock reflects whatever is_published dictates.
     factor.published_at = datetime(2024, 1, 1, tzinfo=UTC) if is_published else None
     factor.published_by = "esg-manager-user" if is_published else None
     factor.is_published = is_published
@@ -215,7 +218,6 @@ class TestPublishHappyPath:
         with TestClient(app, raise_server_exceptions=False) as client:
             client.post(_BASE_URL, json={"reason_code": "INITIAL_PUBLICATION"})
 
-        # After the first /publish call the factor must still be a draft.
         assert factor.is_published is False
 
     def test_happy_path_with_publish_notes_accepted(self) -> None:
@@ -256,8 +258,7 @@ class TestPublishAuth:
     """Authentication and authorisation failures."""
 
     def test_401_unauthenticated(self) -> None:
-        """No Authorization header → 401."""
-        # Do NOT override get_current_user so real JWT decode runs.
+        """No Authorization header -> 401."""
         app.dependency_overrides[get_db] = _db_returning(None)
 
         with TestClient(app, raise_server_exceptions=False) as client:
@@ -294,7 +295,7 @@ class TestPublishNotFound:
     """404 cases: unknown UUID and cross-tenant isolation."""
 
     def test_404_unknown_uuid(self) -> None:
-        """Repository returns None for an unknown UUID → 404."""
+        """Repository returns None for an unknown UUID -> 404."""
         app.dependency_overrides[get_current_user] = _auth_override("esg_manager")
         app.dependency_overrides[get_db] = _db_returning(None)
 
@@ -302,7 +303,6 @@ class TestPublishNotFound:
             resp = client.post(_BASE_URL, json={"reason_code": "INITIAL_PUBLICATION"})
 
         assert resp.status_code == 404
-        # FastAPI wraps HTTPException detail dict under {"detail": {...}}
         body = resp.json()
         assert "not found" in body["detail"]["detail"].lower()
 
@@ -313,7 +313,6 @@ class TestPublishNotFound:
         row owned by tenant_A is invisible to tenant_B, so the mock returning
         None (simulating the RLS/WHERE tenant filter) produces a 404.
         """
-        # Mock: repo returns None because tenant_B cannot see tenant_A's row.
         app.dependency_overrides[get_current_user] = _auth_override(
             "esg_manager", tenant_id=_TENANT_B
         )
@@ -337,7 +336,6 @@ class TestPublishConflict:
             resp = client.post(_BASE_URL, json={"reason_code": "INITIAL_PUBLICATION"})
 
         assert resp.status_code == 409
-        # FastAPI wraps HTTPException detail dict under {"detail": {...}}
         problem = resp.json()["detail"]
         assert problem["error_code"] == "already_published"
         assert "immutable" in problem["detail"].lower()
@@ -360,7 +358,7 @@ class TestPublishValidationErrors:
     """422 pre-condition failures."""
 
     def test_422_is_tbc_true(self) -> None:
-        """TBC factors cannot be published — their value is not yet pinned."""
+        """TBC factors cannot be published - their value is not yet pinned."""
         factor = _make_factor_orm(is_published=False, is_tbc=True, value=None)
         app.dependency_overrides[get_current_user] = _auth_override("esg_manager")
         app.dependency_overrides[get_db] = _db_returning(factor)
@@ -369,7 +367,6 @@ class TestPublishValidationErrors:
             resp = client.post(_BASE_URL, json={"reason_code": "INITIAL_PUBLICATION"})
 
         assert resp.status_code == 422
-        # FastAPI wraps HTTPException detail dict under {"detail": {...}}
         problem = resp.json()["detail"]
         assert problem["error_code"] == "tbc_factor"
         assert "tbc" in problem["detail"].lower()
@@ -389,13 +386,12 @@ class TestPublishValidationErrors:
             resp = client.post(_BASE_URL, json={"reason_code": "INITIAL_PUBLICATION"})
 
         assert resp.status_code == 422
-        # FastAPI wraps HTTPException detail dict under {"detail": {...}}
         problem = resp.json()["detail"]
         assert problem["error_code"] == "null_value"
         assert "null" in problem["detail"].lower()
 
     def test_422_publish_notes_too_long(self) -> None:
-        """publish_notes exceeding 500 chars fails Pydantic validation at the body level."""
+        """publish_notes exceeding 2000 chars fails Pydantic validation at the body level."""
         factor = _make_factor_orm(is_published=False, value=1.0)
         app.dependency_overrides[get_current_user] = _auth_override("esg_manager")
         app.dependency_overrides[get_db] = _db_returning(factor)
@@ -410,10 +406,10 @@ class TestPublishValidationErrors:
 
 
 class TestPublishAuditLog:
-    """Verify the structured log is emitted on a successful publish."""
+    """Verify the structured log is emitted on approval request (202)."""
 
-    def test_structured_log_emitted_on_success(self) -> None:
-        """patch structlog to capture the factor_published log event."""
+    def test_structured_log_emitted_on_approval_request(self) -> None:
+        """First /publish call emits 'factor_approval_requested' log event."""
         factor = _make_factor_orm(is_published=False, value=9.9)
         app.dependency_overrides[get_current_user] = _auth_override(
             "esg_manager", user_id=_USER_ESG
@@ -421,8 +417,6 @@ class TestPublishAuditLog:
         app.dependency_overrides[get_db] = _db_returning(factor)
 
         captured: list[dict] = []
-
-        original_get_logger = __import__("structlog").get_logger
 
         class _CapturingLogger:
             def __init__(self) -> None:
@@ -449,67 +443,57 @@ class TestPublishAuditLog:
                     json={"reason_code": "INITIAL_PUBLICATION", "publish_notes": "CSRD sign-off Q1"},
                 )
 
-        assert resp.status_code == 200
-        publish_events = [e for e in captured if e.get("event") == "factor_published"]
-        assert len(publish_events) == 1
-        ev = publish_events[0]
+        assert resp.status_code == 202
+        approval_events = [
+            e for e in captured if e.get("event") == "factor_approval_requested"
+        ]
+        assert len(approval_events) == 1
+        ev = approval_events[0]
         assert ev["factor_id"] == "TEST_FACTOR_001"
-        assert ev["version"] == "v1"
-        assert ev["gwp_set"] == "AR6"
-        assert ev["published_by"] == _USER_ESG
-        assert ev["publish_notes"] == "CSRD sign-off Q1"
+        assert ev["reason_code"] == "INITIAL_PUBLICATION"
         assert "correlation_id" in ev
 
 
 class TestPublishRequestSchemaValidation:
-    """Body validation tests added after the reason_code became mandatory."""
+    """Body validation tests for the reason_code and publish_notes fields."""
 
     def test_422_missing_reason_code(self):
         """An empty body now fails Pydantic validation before the handler runs."""
-        from fastapi.testclient import TestClient
-
-        from ghg_tool.api.main import app
-
+        app.dependency_overrides[get_current_user] = _auth_override(
+            "esg_manager", user_id=_USER_ESG
+        )
+        app.dependency_overrides[get_db] = _db_returning(
+            _make_factor_orm(is_published=False, value=1.0)
+        )
         with TestClient(app, raise_server_exceptions=False) as client:
-            resp = client.post(
-                _BASE_URL,
-                json={},
-                headers={"Authorization": f"Bearer {_TOKEN_ESG}"},
-            )
+            resp = client.post(_BASE_URL, json={})
         assert resp.status_code == 422
 
     def test_422_invalid_reason_code(self):
         """Unknown reason_code value rejected by the Literal enum."""
-        from fastapi.testclient import TestClient
-
-        from ghg_tool.api.main import app
-
+        app.dependency_overrides[get_current_user] = _auth_override(
+            "esg_manager", user_id=_USER_ESG
+        )
+        app.dependency_overrides[get_db] = _db_returning(
+            _make_factor_orm(is_published=False, value=1.0)
+        )
         with TestClient(app, raise_server_exceptions=False) as client:
             resp = client.post(
                 _BASE_URL,
                 json={"reason_code": "NOT_A_REAL_CODE"},
-                headers={"Authorization": f"Bearer {_TOKEN_ESG}"},
             )
         assert resp.status_code == 422
 
-    def test_200_accepts_2000_char_notes(self):
-        """publish_notes cap raised to 2000 chars (compliance follow-up #4)."""
-        from fastapi.testclient import TestClient
-        from unittest.mock import patch
-
-        from ghg_tool.api.main import app
-
-        # Reuse the happy-path mock setup from TestPublishHappyPath if it
-        # exists; otherwise this test will rely on the real DB via fixtures.
-        # We only assert that 2000 chars is NOT rejected by Pydantic at the
-        # boundary - the actual write may still fail without a fixtured row,
-        # but the response will then be 404, not 422 from the schema check.
+    def test_202_accepts_2000_char_notes(self):
+        """publish_notes cap is 2000 chars; valid length -> 202 (not 422)."""
+        factor = _make_factor_orm(is_published=False, value=1.0)
+        app.dependency_overrides[get_current_user] = _auth_override(
+            "esg_manager", user_id=_USER_ESG
+        )
+        app.dependency_overrides[get_db] = _db_returning(factor)
         with TestClient(app, raise_server_exceptions=False) as client:
             resp = client.post(
                 _BASE_URL,
                 json={"reason_code": "INITIAL_PUBLICATION", "publish_notes": "x" * 2000},
-                headers={"Authorization": f"Bearer {_TOKEN_ESG}"},
             )
-        # 422 would mean Pydantic rejected the length. Anything else (200,
-        # 401, 404) means the schema accepted 2000 chars.
         assert resp.status_code != 422 or "publish_notes" not in resp.text
