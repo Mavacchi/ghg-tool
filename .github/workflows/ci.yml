@@ -6,11 +6,11 @@
 #   2. unit   — pytest tests/unit (no DB required) with coverage gate ≥ 85 %
 #   3. migration-check — alembic check (offline, no live DB)
 #
-# Integration and e2e tests are excluded here; they run in the separate
-# "integration" workflow that requires a PostgreSQL service container.
-# That workflow is deferred to wave 3.
+# Integration and e2e tests run in the separate "integration" workflow
+# (.github/workflows/integration.yml) that provides a PostgreSQL service
+# container.  These two workflows are independent and run in parallel.
 #
-# Secrets required (none in wave 1 — all connections are offline/unit-only).
+# Secrets required (none here — all connections are offline/unit-only).
 
 name: CI
 
@@ -103,4 +103,4 @@ jobs:
         run: python -m alembic heads 2>&1 | tee /tmp/alembic_heads.txt
         continue-on-error: true
         # Note: will warn "no DB connection" without PostgreSQL; that is expected.
-        # Wave 3 CI adds a postgres service container for live alembic upgrade --sql.
+        # Live alembic upgrade head runs in integration.yml against a PG service container.

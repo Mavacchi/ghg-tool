@@ -1,0 +1,178 @@
+---
+# GHG Tool — Integration Test Pipeline (NFR-15, NFR-16)
+#
+# Runs the 13 integration tests in tests/integration/ against a real PostgreSQL
+# service container spun up by GitHub Actions.
+#
+# CREDENTIAL NOTE: All credentials in this file are ephemeral, test-only values
+# that are never reused outside this CI job. Do NOT pattern-match secret scanners
+# on these strings — they are intentionally in plaintext per the test-only policy.
+# Real production credentials are never committed to this repository.
+#
+# Job topology (independent of ci.yml jobs):
+#   integration  — spin up PG service, apply migrations, run pytest -m integration
+#   e2e          — conditional on tests/e2e/**/*.py existing; skipped when empty
+#
+# See .github/workflows/ci.yml for the lint + unit + migration-check suite.
+
+name: Integration
+
+on:
+  push:
+    branches: ["main", "develop", "feature/**", "claude/**"]
+  pull_request:
+    branches: ["main", "develop"]
+
+jobs:
+  integration:
+    name: Integration tests (PG service)
+    runs-on: ubuntu-22.04
+
+    services:
+      postgres:
+        # Pin to minor digest is preferred in production; alpine tag is acceptable
+        # for ephemeral CI because the runner is discarded after the job.
+        image: postgres:15-alpine
+        env:
+          # Ephemeral CI-only credentials — never reused, not secrets (see header).
+          POSTGRES_DB: ghg_tool_test
+          POSTGRES_USER: ghg_test
+          POSTGRES_PASSWORD: ghg_test_password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ghg_test -d ghg_tool_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      # Sync driver for Alembic (psycopg3)
+      SQLALCHEMY_URL: "postgresql+psycopg://ghg_test:ghg_test_password@localhost:5432/ghg_tool_test"
+      # Async driver for asyncpg-based tests and app code
+      SQLALCHEMY_ASYNC_URL: "postgresql+asyncpg://ghg_test:ghg_test_password@localhost:5432/ghg_tool_test"
+      DATABASE_URL: "postgresql+asyncpg://ghg_test:ghg_test_password@localhost:5432/ghg_tool_test"
+      # Must be ≥ 32 characters or FastAPI/JWT middleware rejects it at startup.
+      # Ephemeral CI-only value — never reused.
+      JWT_SECRET_KEY: "test-secret-only-for-ci-min-32-characters-long"
+      ENV: "test"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          # Cache pip wheels keyed on pyproject.toml content hash
+          cache: "pip"
+          cache-dependency-path: "pyproject.toml"
+
+      - name: Install dev dependencies
+        run: pip install -e ".[dev]"
+
+      # The GH Actions service container healthcheck usually passes before we
+      # reach this step, but an explicit wait loop guards against slow runners.
+      - name: Wait for PostgreSQL to be ready
+        run: |
+          for i in $(seq 1 30); do
+            pg_isready -h localhost -U ghg_test -d ghg_tool_test && break
+            echo "Attempt $i/30 — waiting 2s..."
+            sleep 2
+          done
+
+      - name: Apply Alembic migrations
+        run: python -m alembic upgrade head
+
+      - name: Verify migration state
+        run: |
+          echo "=== Current revision ==="
+          python -m alembic current
+          echo "=== Known heads ==="
+          python -m alembic heads
+
+      - name: Run integration tests
+        run: |
+          python -m pytest tests/integration \
+            -v --tb=short --strict-markers \
+            -m "integration" \
+            --cov=src/ghg_tool --cov-append \
+            --cov-report=term-missing
+
+      - name: Upload coverage artifact
+        # Always upload so failures still produce a coverage artefact for diagnosis.
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-integration
+          path: .coverage
+
+  e2e:
+    name: E2E tests (skipped when tests/e2e/ is empty)
+    runs-on: ubuntu-22.04
+    needs: integration
+    # hashFiles returns '' when no .py files exist under tests/e2e/ — this
+    # causes the job to be skipped automatically rather than failing.
+    if: hashFiles('tests/e2e/**/*.py') != ''
+
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          # Ephemeral CI-only credentials — never reused, not secrets (see header).
+          POSTGRES_DB: ghg_tool_test
+          POSTGRES_USER: ghg_test
+          POSTGRES_PASSWORD: ghg_test_password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ghg_test -d ghg_tool_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      SQLALCHEMY_URL: "postgresql+psycopg://ghg_test:ghg_test_password@localhost:5432/ghg_tool_test"
+      SQLALCHEMY_ASYNC_URL: "postgresql+asyncpg://ghg_test:ghg_test_password@localhost:5432/ghg_tool_test"
+      DATABASE_URL: "postgresql+asyncpg://ghg_test:ghg_test_password@localhost:5432/ghg_tool_test"
+      JWT_SECRET_KEY: "test-secret-only-for-ci-min-32-characters-long"
+      ENV: "test"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+          cache-dependency-path: "pyproject.toml"
+
+      - name: Install dev dependencies
+        run: pip install -e ".[dev]"
+
+      - name: Wait for PostgreSQL to be ready
+        run: |
+          for i in $(seq 1 30); do
+            pg_isready -h localhost -U ghg_test -d ghg_tool_test && break
+            echo "Attempt $i/30 — waiting 2s..."
+            sleep 2
+          done
+
+      - name: Apply Alembic migrations
+        run: python -m alembic upgrade head
+
+      - name: Run e2e tests
+        run: |
+          python -m pytest tests/e2e \
+            -v --tb=short --strict-markers \
+            -m "e2e" \
+            --cov=src/ghg_tool --cov-append \
+            --cov-report=term-missing
+
+      - name: Upload coverage artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-e2e
+          path: .coverage

@@ -83,14 +83,33 @@ test-unit:
 	    --cov-fail-under=85 \
 	    $(PYTEST_ARGS)
 
-test-integration:
-	@echo "==> Running integration tests (requires PostgreSQL)..."
-	@echo "==> Make sure 'make db-up migrate' has been run first."
-	$(PYTEST) $(INTEG_DIR) \
-	    -m integration \
-	    --tb=short \
-	    --strict-markers \
-	    $(PYTEST_ARGS)
+test-integration: ## Run integration tests against the docker-compose test stack (port 5433)
+	@echo "==> Starting test PostgreSQL on host port 5433..."
+	docker compose -f docker-compose.yml -f docker-compose.test.yml up -d db-test
+	@echo "==> Waiting for test DB to be ready..."
+	@until docker exec ghg_db_test pg_isready -U ghg_test -d ghg_tool_test > /dev/null 2>&1; do \
+	    printf '.'; sleep 1; \
+	done
+	@echo ""
+	@echo "==> Applying Alembic migrations to test DB..."
+	SQLALCHEMY_URL="postgresql+psycopg://ghg_test:ghg_test_password@localhost:5433/ghg_tool_test" \
+	    $(ALEMBIC) upgrade head
+	@echo "==> Running integration tests..."
+	SQLALCHEMY_URL="postgresql+psycopg://ghg_test:ghg_test_password@localhost:5433/ghg_tool_test" \
+	SQLALCHEMY_ASYNC_URL="postgresql+asyncpg://ghg_test:ghg_test_password@localhost:5433/ghg_tool_test" \
+	DATABASE_URL="postgresql+asyncpg://ghg_test:ghg_test_password@localhost:5433/ghg_tool_test" \
+	JWT_SECRET_KEY="test-secret-only-for-local-min-32-characters" \
+	ENV="test" \
+	    $(PYTEST) $(INTEG_DIR) \
+	        -v -m integration \
+	        --tb=short \
+	        --strict-markers \
+	        $(PYTEST_ARGS)
+
+test-integration-down: ## Stop and remove the integration test stack + volume
+	@echo "==> Tearing down integration test stack..."
+	docker compose -f docker-compose.yml -f docker-compose.test.yml down -v
+	@echo "==> Done."
 
 # ---------------------------------------------------------------------------
 # Database
@@ -153,7 +172,8 @@ help:
 	@echo "  py-compile         Syntax-check all Python files"
 	@echo "  test               Run unit tests (alias: test-unit)"
 	@echo "  test-unit          Run unit tests with coverage gate"
-	@echo "  test-integration   Run integration tests (requires db-up migrate)"
+	@echo "  test-integration   Run integration tests against docker-compose test stack"
+	@echo "  test-integration-down  Stop + remove the integration test stack"
 	@echo "  db-up              Start PostgreSQL in Docker (detached)"
 	@echo "  db-down            Stop containers + remove volumes"
 	@echo "  migrate            Apply Alembic migrations to head"

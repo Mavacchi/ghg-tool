@@ -1,0 +1,91 @@
+# GHG Tool — Docker Compose test-stack override
+#
+# Provides an isolated PostgreSQL instance on host port 5433 (dev db stays
+# on 5432) for running integration tests locally without touching dev data.
+#
+# CREDENTIAL NOTE: Credentials here are ephemeral, test-only values. They
+# are never reused outside this local test stack. Do NOT pattern-match secret
+# scanners on these strings.
+#
+# Usage:
+#   # Start the test database (detached):
+#   docker compose -f docker-compose.yml -f docker-compose.test.yml up -d db-test
+#
+#   # Run migrations against it (host-side alembic, no container needed):
+#   SQLALCHEMY_URL="postgresql+psycopg://ghg_test:ghg_test_password@localhost:5433/ghg_tool_test" \
+#     python -m alembic upgrade head
+#
+#   # Run integration tests:
+#   SQLALCHEMY_ASYNC_URL="postgresql+asyncpg://ghg_test:ghg_test_password@localhost:5433/ghg_tool_test" \
+#   DATABASE_URL="postgresql+asyncpg://ghg_test:ghg_test_password@localhost:5433/ghg_tool_test" \
+#   JWT_SECRET_KEY="test-secret-only-for-local-min-32-characters" \
+#   ENV="test" \
+#     python -m pytest tests/integration -v -m integration
+#
+#   # Or use the Makefile shortcut:
+#   make test-integration
+#
+#   # Tear down and remove the test volume:
+#   docker compose -f docker-compose.yml -f docker-compose.test.yml down -v
+#
+# NOTE: The migrate-test service requires the runtime Docker image to be
+# built first (`docker build -t ghg-tool:latest --target runtime .`).
+# If you prefer to run alembic from the host (no image build needed), simply
+# skip migrate-test and use the host-side alembic command shown above.
+#
+# NOTE on tmpfs: The tmpfs mount on /var/lib/postgresql/data gives in-memory
+# storage for maximum speed. Remove or comment it out if you need data to
+# survive container restarts, or if running on macOS (Docker Desktop may not
+# support the size= option on all versions).
+
+services:
+  # ---------------------------------------------------------------------------
+  # Test-only PostgreSQL on host port 5433 (avoids conflict with dev db:5432)
+  # ---------------------------------------------------------------------------
+  db-test:
+    image: postgres:15-alpine
+    container_name: ghg_db_test
+    environment:
+      # Ephemeral test-only credentials — never reused, not secrets.
+      POSTGRES_DB: ghg_tool_test
+      POSTGRES_USER: ghg_test
+      POSTGRES_PASSWORD: ghg_test_password
+    ports:
+      - "5433:5432"
+    volumes:
+      - pgdata_test:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ghg_test -d ghg_tool_test"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    # Optional: uncomment for in-memory ephemeral storage (faster, no disk I/O).
+    # Remove if it causes issues on macOS Docker Desktop.
+    # tmpfs:
+    #   - /var/lib/postgresql/data:rw,size=128m
+
+  # ---------------------------------------------------------------------------
+  # Migration runner against the test database
+  # Requires: docker build -t ghg-tool:latest --target runtime .
+  # Alternative: run `python -m alembic upgrade head` from the host directly
+  #              (see Usage comments at the top of this file).
+  # ---------------------------------------------------------------------------
+  migrate-test:
+    image: ghg-tool:latest
+    build:
+      context: .
+      target: runtime
+    container_name: ghg_migrate_test
+    depends_on:
+      db-test:
+        condition: service_healthy
+    environment:
+      # Sync driver for Alembic (psycopg3); container-side hostname is db-test.
+      SQLALCHEMY_URL: "postgresql+psycopg://ghg_test:ghg_test_password@db-test:5432/ghg_tool_test"
+    command: ["python", "-m", "alembic", "upgrade", "head"]
+    restart: on-failure
+
+volumes:
+  pgdata_test:
+    name: ghg_pgdata_test
