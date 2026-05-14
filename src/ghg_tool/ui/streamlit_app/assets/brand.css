@@ -384,3 +384,60 @@ html, body,
     transition-duration: 0.01ms !important;
   }
 }
+
+/* --------------------------------------------------------------------
+ * Home hero header. Scoped to .carbontrace-hero so it does not
+ * interfere with h1 rules on other pages. The brand rule is rendered
+ * as an explicit div because pseudo-elements inside injected HTML
+ * blocks are not reliably positioned across browsers.
+ * ------------------------------------------------------------------ */
+.carbontrace-hero {
+  padding-top: 1rem;
+  padding-bottom: 0.5rem;
+  margin-bottom: 1.25rem;
+}
+
+.carbontrace-hero .ct-brand-rule {
+  width: 32px;
+  height: 2px;
+  background: #788B99;
+  border-radius: 1px;
+  margin-bottom: 1.1rem;
+}
+
+.carbontrace-hero h1.ct-hero-title {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  font-weight: 700;
+  font-size: 2.6rem;
+  line-height: 1.12;
+  letter-spacing: -0.03em;
+  color: #1a1a1a;
+  margin: 0 0 0.45rem 0;
+  padding: 0;
+}
+
+/* Suppress the generic h1::before rule on the hero so the brand-rule
+ * div isn't stacked with a phantom pseudo-element rule. */
+.carbontrace-hero h1.ct-hero-title::before {
+  display: none !important;
+}
+
+.carbontrace-hero .ct-hero-tagline {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  font-weight: 400;
+  font-size: 1.02rem;
+  line-height: 1.45;
+  letter-spacing: 0.005em;
+  color: #788B99;
+  margin: 0 0 0.35rem 0;
+}
+
+.carbontrace-hero .ct-hero-company {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  font-weight: 400;
+  font-size: 0.78rem;
+  line-height: 1.4;
+  letter-spacing: 0.06em;
+  color: #9a9a9a;
+  margin: 0;
+}

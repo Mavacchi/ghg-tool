@@ -90,11 +90,22 @@ with st.sidebar:
 require_auth(lang)
 
 # ---------------------------------------------------------------------------
-# Page title — "Carbontrace · Gresmalt"
+# Hero header. Product name only, then tagline, then company name as
+# tertiary line. Year context is surfaced by the sidebar year selector,
+# so we do not repeat it as a subheader here.
 # ---------------------------------------------------------------------------
-st.title(f"{PRODUCT_NAME} · {COMPANY_SHORT}")
-st.caption(COMPANY_NAME)
-st.subheader(f"{_('nav_home', lang)} · {selected_year}")
+_hero_tagline = _("hero_tagline", lang)
+st.markdown(
+    f"""
+<div class="carbontrace-hero">
+  <div class="ct-brand-rule"></div>
+  <h1 class="ct-hero-title">{PRODUCT_NAME}</h1>
+  <p class="ct-hero-tagline">{_hero_tagline}</p>
+  <p class="ct-hero-company">{COMPANY_NAME}</p>
+</div>
+""",
+    unsafe_allow_html=True,
+)
 
 # Demo-mode banner (visible only when GHG_DEMO_MODE is enabled and the
 # session is currently using a demo token, so users never confuse the

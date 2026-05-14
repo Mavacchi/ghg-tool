@@ -82,6 +82,7 @@ BRAND_ACCENT: Final[str] = "#788B99"      # accent (mission section)
 # ---------------------------------------------------------------------------
 _ASSETS_DIR: Final[Path] = Path(__file__).parent.parent / "assets"
 LOGO_PATH: Final[Path] = _ASSETS_DIR / "logo.png"
+LOGO_COLLAPSED_PATH: Final[Path] = _ASSETS_DIR / "logo_collapsed.png"
 FAVICON_PATH: Final[Path] = _ASSETS_DIR / "favicon.png"
 
 
