@@ -20,7 +20,7 @@ st.set_page_config(
 )
 
 from ghg_tool.ui.streamlit_app.lib.auth import get_lang, require_auth  # noqa: E402
-from ghg_tool.ui.streamlit_app.lib.brand import apply_brand_chrome  # noqa: E402
+from ghg_tool.ui.streamlit_app.lib.brand import apply_brand_chrome, render_context_bar  # noqa: E402
 from ghg_tool.ui.streamlit_app.lib.filters import available_years  # noqa: E402
 from ghg_tool.ui.streamlit_app.lib.help import _help  # noqa: E402
 from ghg_tool.ui.streamlit_app.lib.i18n import _  # noqa: E402
@@ -54,6 +54,13 @@ with st.sidebar:
 
     page_size = st.number_input(_("rows_per_page", lang), min_value=10, max_value=500,
                                 value=50, step=10)
+
+render_context_bar(
+    lang=lang,
+    year=anno_filter,
+    gwp=None,
+    role=st.session_state.get("role"),
+)
 
 # ---------------------------------------------------------------------------
 # Data fetch

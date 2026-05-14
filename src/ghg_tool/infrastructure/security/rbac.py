@@ -46,6 +46,7 @@ PERMISSION_MATRIX: Final[dict[str, dict[str, frozenset[str]]]] = {
     "factor_catalog": {
         "read": frozenset({ROLE_DATA_STEWARD, ROLE_ESG_MANAGER, ROLE_AUDITOR}),
         "write": frozenset({ROLE_DATA_STEWARD}),
+        "publish": frozenset({ROLE_ESG_MANAGER}),
     },
     "dq_findings": {
         "read": frozenset({ROLE_DATA_STEWARD, ROLE_ESG_MANAGER, ROLE_AUDITOR}),

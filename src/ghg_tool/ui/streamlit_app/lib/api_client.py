@@ -266,6 +266,38 @@ def create_emission(payload: dict[str, Any]) -> dict[str, Any]:
     return _safe_post(f"{_get_base_url()}/api/v1/emissions/", body=payload)
 
 
+def publish_factor(
+    factor_uuid: str,
+    reason_code: str,
+    notes: str | None = None,
+) -> dict[str, Any]:
+    """POST to /api/v1/factor-catalog/{uuid}/publish (esg_manager only).
+
+    Flips the draft factor's ``is_published`` flag to True via a
+    race-safe conditional UPDATE, stamps ``published_at`` and
+    ``published_by``, and writes an ``calc.audit_log`` row in the same
+    transaction. After the call the row is frozen by the DB trigger
+    ``trg_factor_immutability`` (MG-02).
+
+    Args:
+        factor_uuid: UUID of the draft factor to publish.
+        reason_code: One of INITIAL_PUBLICATION / VERSION_BUMP /
+            METHODOLOGY_UPDATE / SOURCE_REVISION / CORRECTION_REPLACEMENT.
+        notes: Optional ``publish_notes`` (max 2000 chars).
+
+    Returns:
+        Updated ``FactorCatalogPublishResponse`` dict, or
+        ``{"error": "...", "status_code": ...}`` on failure.
+    """
+    body: dict[str, Any] = {"reason_code": reason_code}
+    if notes:
+        body["publish_notes"] = notes
+    return _safe_post(
+        f"{_get_base_url()}/api/v1/factor-catalog/{factor_uuid}/publish",
+        body=body,
+    )
+
+
 def create_factor(payload: dict[str, Any]) -> dict[str, Any]:
     """POST a new factor version to /api/v1/factor-catalog (data_steward).
 

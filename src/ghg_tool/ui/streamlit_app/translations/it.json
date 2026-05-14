@@ -132,5 +132,22 @@
   "justification_too_short": "La giustificazione deve essere almeno 10 caratteri.",
   "no_open_findings": "Nessun finding OPEN disponibile.",
   "sites_filter_hint": "Siti (vuoto = tutti)",
-  "rows_per_page": "Righe per pagina"
+  "rows_per_page": "Righe per pagina",
+  "publication_queue_title": "📑 Bozze in attesa di pubblicazione",
+  "publication_queue_caption": "Pubblicare un fattore lo rende immutabile (regola MG-02). I fattori TBC o privi di valore non possono essere pubblicati.",
+  "publication_queue_empty": "Nessun fattore pronto per la pubblicazione.",
+  "publish_btn": "Pubblica",
+  "publish_success": "Fattore pubblicato. Ora è frozen e tracciato in calc.audit_log.",
+  "publish_already_done": "Questo fattore è già pubblicato (o è stato appena pubblicato da un altro utente).",
+  "publish_validation_failed": "Pubblicazione non consentita: fattore TBC o privo di valore.",
+  "publish_forbidden": "Solo il ruolo esg_manager può pubblicare fattori.",
+  "publish_reason_label": "Motivo pubblicazione",
+  "publish_reason_INITIAL_PUBLICATION": "Prima pubblicazione",
+  "publish_reason_VERSION_BUMP": "Nuova versione",
+  "publish_reason_METHODOLOGY_UPDATE": "Aggiornamento metodologico",
+  "publish_reason_SOURCE_REVISION": "Revisione fonte",
+  "publish_reason_CORRECTION_REPLACEMENT": "Correzione di una versione precedente",
+  "publish_notes_label": "Note (opzionali, max 2000 caratteri)",
+  "publish_notes_placeholder": "Es. Allineamento a ISPRA 2024 pag. 17; aggiornamento k = 0,267 kg CO2e/kWh.",
+  "licence_only_label": "licence-only"
 }

@@ -22,9 +22,9 @@ st.set_page_config(
 
 from ghg_tool.ui.streamlit_app.lib.auth import get_lang, require_auth  # noqa: E402
 from ghg_tool.ui.streamlit_app.lib.help import _help  # noqa: E402
-from ghg_tool.ui.streamlit_app.lib.brand import apply_brand_chrome  # noqa: E402
+from ghg_tool.ui.streamlit_app.lib.brand import apply_brand_chrome, render_context_bar  # noqa: E402
 from ghg_tool.ui.streamlit_app.lib.i18n import _  # noqa: E402
-from ghg_tool.ui.streamlit_app.lib.api_client import fetch_factor_catalog  # noqa: E402
+from ghg_tool.ui.streamlit_app.lib.api_client import fetch_factor_catalog, publish_factor  # noqa: E402
 
 apply_brand_chrome()
 require_auth()
@@ -60,6 +60,13 @@ with st.sidebar:
         "Solo pubblicati / Published only", value=True,
         help=_help("factor_version", lang),
     )
+
+render_context_bar(
+    lang=lang,
+    year=None,
+    gwp=gwp_filter or None,
+    role=st.session_state.get("role"),
+)
 
 # ---------------------------------------------------------------------------
 # Data fetch
@@ -117,6 +124,105 @@ else:
     )
 
     st.caption(f"Totale fattori: {len(df)}")
+
+# ---------------------------------------------------------------------------
+# Publication queue (esg_manager only)
+#
+# Lists draft factors (is_published=False) and exposes a single-click
+# publish action wired to POST /api/v1/factor-catalog/{id}/publish.
+# Once published, the DB trigger MG-02 freezes the row.
+# ---------------------------------------------------------------------------
+_REASON_CODES = (
+    "INITIAL_PUBLICATION",
+    "VERSION_BUMP",
+    "METHODOLOGY_UPDATE",
+    "SOURCE_REVISION",
+    "CORRECTION_REPLACEMENT",
+)
+
+_role = st.session_state.get("role", "auditor")
+if _role == "esg_manager":
+    with st.expander(_("publication_queue_title", lang), expanded=False):
+        st.caption(_("publication_queue_caption", lang))
+        # Filter the already-fetched catalog down to publishable drafts:
+        # not yet published, not TBC, value set OR licence-only marked.
+        # This mirrors the server-side 422 pre-conditions exactly.
+        all_factors = raw or []
+        drafts = [
+            f for f in all_factors
+            if not f.get("is_published") and not f.get("is_tbc")
+            and (f.get("value") is not None or f.get("is_licence_only"))
+        ]
+        if not drafts:
+            st.info(_("publication_queue_empty", lang))
+        else:
+            for d in drafts:
+                _key = f"publish_{d.get('id')}"
+                with st.container(border=True):
+                    head = st.columns([3, 1])
+                    with head[0]:
+                        st.markdown(
+                            f"**{d.get('factor_id', '?')}** · v{d.get('version', '?')} "
+                            f"· {d.get('source', '?')} · {d.get('gwp_set', '?')}"
+                        )
+                        if d.get("substance"):
+                            st.caption(f"{d.get('substance')} ({d.get('unit', '')})")
+                    with head[1]:
+                        val = d.get("value")
+                        st.markdown(
+                            f"`{val}`" if val is not None
+                            else f"_{_('licence_only_label', lang)}_"
+                        )
+
+                    reason_code = st.selectbox(
+                        _("publish_reason_label", lang),
+                        _REASON_CODES,
+                        index=None,
+                        key=f"reason_{_key}",
+                        format_func=lambda c: _(f"publish_reason_{c}", lang),
+                    )
+                    notes = st.text_area(
+                        _("publish_notes_label", lang),
+                        key=f"notes_{_key}",
+                        max_chars=2000,
+                        placeholder=_("publish_notes_placeholder", lang),
+                    )
+                    _inflight = st.session_state.get(f"_inflight_{_key}", False)
+                    if st.button(
+                        _("publish_btn", lang),
+                        key=_key,
+                        type="primary",
+                        disabled=_inflight or reason_code is None,
+                    ):
+                        st.session_state[f"_inflight_{_key}"] = True
+                        try:
+                            resp = publish_factor(
+                                str(d.get("id")),
+                                reason_code=reason_code,
+                                notes=notes or None,
+                            )
+                        finally:
+                            st.session_state[f"_inflight_{_key}"] = False
+                        if "error" in resp:
+                            sc = resp.get("status_code")
+                            if sc == 409:
+                                st.warning(_("publish_already_done", lang))
+                            elif sc == 422:
+                                st.error(_("publish_validation_failed", lang))
+                            elif sc == 403:
+                                st.error(_("publish_forbidden", lang))
+                            else:
+                                st.error(f"HTTP {sc}: {resp.get('error', '?')}")
+                        else:
+                            st.success(_("publish_success", lang))
+                            # Invalidate the catalog cache so the next
+                            # render hides the just-published draft.
+                            clear = getattr(fetch_factor_catalog, "clear", None)
+                            if callable(clear):
+                                try:
+                                    clear()
+                                except (AttributeError, TypeError):
+                                    pass
 
 # ---------------------------------------------------------------------------
 # Footer

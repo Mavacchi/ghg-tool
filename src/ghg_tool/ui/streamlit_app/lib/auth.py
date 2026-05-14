@@ -224,7 +224,7 @@ def render_login_form(lang: str = "it") -> None:
         st.markdown(
             f"""
 <div class="carbontrace-hero ct-login-hero">
-  <div class="ct-brand-rule"></div>
+  <div class="ct-brand-rule" aria-hidden="true"></div>
   <h1 class="ct-hero-title">{PRODUCT_NAME}</h1>
   <p class="ct-hero-tagline">{_("hero_tagline", lang)}</p>
   <p class="ct-hero-company">{COMPANY_NAME}</p>

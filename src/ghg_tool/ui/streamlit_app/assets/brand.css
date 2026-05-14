@@ -524,3 +524,181 @@ html, body,
 [data-testid="stVerticalBlockBorderWrapper"]:hover {
   border-color: #DDD3C5 !important;
 }
+
+/* ====================================================================
+ * PAGE TRANSITIONS: staggered fade-in of top-level content blocks
+ *
+ * Streamlit re-executes the page script on every navigation. The
+ * generic [data-testid="stMain"] entry animation already fires once.
+ * To create a refined "editorial reveal" feel, we stagger the first
+ * ~6 direct child blocks of stMain so they cascade in.
+ *
+ * Honours prefers-reduced-motion (already declared elsewhere in this
+ * file — the @media block at the bottom disables all animations).
+ * ================================================================ */
+
+[data-testid="stMain"] > div > div > [data-testid="stVerticalBlock"]
+  > div:nth-child(-n+6) {
+  animation: brand-fade-up 360ms cubic-bezier(0.22, 0.61, 0.36, 1) both;
+}
+
+/* Cascade delays — small enough to feel snappy, not theatrical */
+[data-testid="stMain"] > div > div > [data-testid="stVerticalBlock"]
+  > div:nth-child(1) { animation-delay: 0ms; }
+[data-testid="stMain"] > div > div > [data-testid="stVerticalBlock"]
+  > div:nth-child(2) { animation-delay: 60ms; }
+[data-testid="stMain"] > div > div > [data-testid="stVerticalBlock"]
+  > div:nth-child(3) { animation-delay: 120ms; }
+[data-testid="stMain"] > div > div > [data-testid="stVerticalBlock"]
+  > div:nth-child(4) { animation-delay: 180ms; }
+[data-testid="stMain"] > div > div > [data-testid="stVerticalBlock"]
+  > div:nth-child(5) { animation-delay: 240ms; }
+[data-testid="stMain"] > div > div > [data-testid="stVerticalBlock"]
+  > div:nth-child(6) { animation-delay: 300ms; }
+
+/* ====================================================================
+ * STICKY CONTEXT BAR
+ *
+ * Compact one-line bar that sits below the toolbar and stays visible
+ * while the user scrolls. Shows year, GWP set and role so the user
+ * never loses context. Anchored via position: sticky on a wrapper
+ * the Python layer injects with class .ct-sticky-context.
+ * ================================================================ */
+
+.ct-sticky-context {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  background: rgba(246, 246, 246, 0.92);
+  backdrop-filter: saturate(180%) blur(8px);
+  -webkit-backdrop-filter: saturate(180%) blur(8px);
+  border-bottom: 1px solid #ECE5DC;
+  margin: -1rem -1rem 1rem -1rem;
+  padding: 0.5rem 1rem;
+  display: flex;
+  align-items: center;
+  gap: 1.25rem;
+  font-size: 0.78rem;
+  color: #5a5a5a;
+  letter-spacing: 0.01em;
+}
+
+.ct-sticky-context .ct-ctx-key {
+  color: #9a9a9a;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  font-size: 0.68rem;
+  margin-right: 0.3rem;
+}
+.ct-sticky-context .ct-ctx-val {
+  color: #1a1a1a;
+  font-weight: 600;
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  font-variant-numeric: tabular-nums lining-nums;
+}
+.ct-sticky-context .ct-ctx-sep {
+  color: #ECE5DC;
+}
+
+/* ====================================================================
+ * ACCESSIBILITY: skip link + focus rings
+ *
+ * Skip link is rendered by Home / pages and only visible when keyboard-
+ * focused. Lets screen-reader and tab-key users bypass the nav.
+ * ================================================================ */
+
+.ct-skip-link {
+  position: absolute;
+  left: -9999px;
+  top: 0;
+  background: #1a1a1a;
+  color: #FFFFFF;
+  padding: 0.5rem 1rem;
+  border-radius: 0 0 6px 0;
+  z-index: 10000;
+  text-decoration: none;
+  font-weight: 500;
+}
+.ct-skip-link:focus {
+  left: 0;
+}
+
+/* Stronger focus ring everywhere, not just on inputs. WCAG AA needs
+ * a visible focus indicator on all interactive elements. */
+*:focus-visible {
+  outline: 2px solid #788B99 !important;
+  outline-offset: 2px !important;
+  border-radius: 4px;
+}
+
+/* Decorative-only divs (brand rule etc.) carry aria-hidden via Python;
+ * this CSS just makes sure the rule does not steal a tab stop. */
+.ct-brand-rule {
+  pointer-events: none;
+}
+
+/* ====================================================================
+ * MOBILE RESPONSIVE
+ *
+ * Streamlit handles a lot of the responsive logic by default, but
+ * the custom hero block, 5-up metric strip, and dense form layouts
+ * need explicit narrow-viewport handling.
+ * ================================================================ */
+
+@media (max-width: 768px) {
+  /* Hero scales down on phones — h1 too large at 2.6 rem on a 360 px
+   * viewport. */
+  .carbontrace-hero h1.ct-hero-title {
+    font-size: 1.85rem;
+    letter-spacing: -0.02em;
+  }
+  .carbontrace-hero .ct-hero-tagline {
+    font-size: 0.92rem;
+  }
+  .carbontrace-hero .ct-hero-company {
+    font-size: 0.72rem;
+  }
+
+  /* Metric value can overflow when 5 metrics share a row on a narrow
+   * viewport. Streamlit stacks the columns automatically below ~640 px;
+   * here we reduce the metric value type size for the 641-768 band so
+   * it reads cleanly on tablets in portrait. */
+  [data-testid="stMetricValue"] {
+    font-size: 1.35rem;
+  }
+
+  /* Sticky context bar wraps to 2 rows on narrow screens. */
+  .ct-sticky-context {
+    flex-wrap: wrap;
+    gap: 0.5rem 1rem;
+    font-size: 0.74rem;
+  }
+
+  /* Page-link CTA spans the full row on mobile so it is easy to tap. */
+  [data-testid="stPageLink"] {
+    display: flex;
+    width: 100%;
+    justify-content: center;
+  }
+
+  /* The hero brand rule is fine at 32 px but feels heavy on mobile. */
+  .carbontrace-hero .ct-brand-rule {
+    width: 24px;
+    margin-bottom: 0.85rem;
+  }
+}
+
+@media (max-width: 480px) {
+  /* Phone-portrait: tighten padding on bordered containers, reduce
+   * h1 even further to keep it on one line. */
+  [data-testid="stVerticalBlockBorderWrapper"] {
+    padding: 0.25rem;
+  }
+  .carbontrace-hero h1.ct-hero-title {
+    font-size: 1.6rem;
+  }
+  [data-testid="stMetric"] {
+    padding: 0.85rem 1rem 0.75rem 1rem;
+  }
+}
