@@ -60,7 +60,7 @@
   "generate_excel": "Generate Excel: Multi-sheet",
   "pdf_subtitle": "ESRS E1-6 + E1-7 | WeasyPrint | VIANO 2025 disclosure if applicable",
   "excel_subtitle": "11 sheets | Cell-level metadata | Okabe-Ito header fill",
-  "pdf_error_msg": "PDF generation failed. Please contact your ESG Manager.",
+  "pdf_error_msg": "PDF generation failed. Please contact your Administrator.",
   "job_started": "Job started:",
   "excel_inline_btn": "Generate Excel in-browser (demo)",
   "status_label": "Status:",

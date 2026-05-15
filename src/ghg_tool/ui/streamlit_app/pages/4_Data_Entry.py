@@ -227,7 +227,7 @@ with tab_new:
     st.subheader("Nuova emissione")
     st.caption(
         "Inserisce una riga nuova nel registro consolidato. "
-        "Richiede ruolo `data_steward` o `esg_manager`."
+        "Richiede ruolo **editor** o **admin**."
     )
 
     # Load factor catalog up-front so the picker has options.
@@ -524,7 +524,7 @@ with tab_factor:
     st.info(
         "**Stato pubblicazione.** Questa interfaccia crea fattori in stato "
         "*draft*: non sono utilizzabili in calcolo finché non vengono pubblicati. "
-        "Il flusso di pubblicazione (che richiede approvazione `esg_manager` e "
+        "Il flusso di pubblicazione (che richiede approvazione `admin` e "
         "registra timestamp + identità del pubblicatore per audit ISAE 3000) "
         "non è ancora disponibile in questa release: arriva con la wave 3.",
         icon="📌",
