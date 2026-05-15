@@ -31,7 +31,7 @@ import uuid
 from typing import Annotated, Literal
 
 import structlog
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Response, status
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -49,6 +49,12 @@ from ghg_tool.application.services.auto_calc_service import (
     UnitConversionError,
     compute_and_insert,
     compute_preview,
+)
+from ghg_tool.application.services.idempotency_service import (
+    IdempotencyHit,
+    IdempotencyKeyReusedError,
+    check_idempotency,
+    store_response,
 )
 from ghg_tool.domain.exceptions.calc_errors import MissingFactorError
 
@@ -507,15 +513,18 @@ def get_factor_catalog() -> object:
         "Compute tCO2e for a single activity quantity using the factor catalog "
         "(closest-prior vintage) without writing to the database. "
         "Returns the full audit trace: factor_id, factor_value, formula_human, warnings. "
-        "Requires emissions.write permission (editor role)."
+        "Requires emissions.write permission (editor role).\n\n"
+        "M6: when ``codice_sito`` is provided, looks up ``site_type`` (Task B) "
+        "and ``country`` (Task C) from ``ref.sites`` to validate process "
+        "emissions applicability and select the correct LB factor."
     ),
     responses={
         200: {"description": "Preview calc result with full audit trace"},
         403: {"description": "Insufficient permission (requires emissions.write)"},
         422: {
             "description": (
-                "Validation error or missing factor "
-                "(MissingFactorError / UnitConversionError)"
+                "Validation error, missing factor, site_type invalid "
+                "(MissingFactorError / UnitConversionError / site_type_invalid)"
             )
         },
     },
@@ -523,6 +532,7 @@ def get_factor_catalog() -> object:
 async def calc_preview(
     body: CalcInputRequest,
     user: Annotated[CurrentUser, Depends(require_permission("emissions", "write"))],
+    session: Annotated[AsyncSession, Depends(get_db)],
     factor_catalog: Annotated[object, Depends(get_factor_catalog)],
 ) -> CalcPreviewResponse:
     """Compute a tCO2e preview for the given activity record.
@@ -530,16 +540,21 @@ async def calc_preview(
     No database write is performed. The factor catalog is queried with
     closest-prior vintage selection for the requested anno.
 
+    M6: the DB session is used read-only to look up site_type (Task B) and
+    country (Task C) from ref.sites when codice_sito is provided.
+
     Args:
         body: Universal auto-calc input (scope, sub_scope, quantita, unita, …).
         user: Authenticated user with emissions.write permission.
+        session: Async DB session (read-only for site metadata lookup).
         factor_catalog: Factor catalog port (SQL adapter in production, test double in tests).
 
     Returns:
         CalcPreviewResponse with tco2e, factor provenance, and formula trace.
 
     Raises:
-        HTTPException 422: On missing factor, unit conversion error, or validation failure.
+        HTTPException 422: On missing factor, unit conversion error, site_type
+            invalid, or other validation failure.
     """
     log = logger.bind(
         correlation_id=get_correlation_id(),
@@ -550,7 +565,12 @@ async def calc_preview(
     )
     log.info("calc_preview_request")
     try:
-        return await compute_preview(body, factor_catalog=factor_catalog)  # type: ignore[arg-type]
+        return await compute_preview(
+            body,
+            factor_catalog=factor_catalog,  # type: ignore[arg-type]
+            session=session,
+            tenant_id=user.tenant_id,
+        )
     except MissingFactorError as exc:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -590,54 +610,127 @@ async def calc_preview(
     summary="Auto-calc insert: quantity × factor → tCO2e + append to emissions_consolidated",
     description=(
         "Compute tCO2e and append a new row to calc.emissions_consolidated "
-        "(append-only; raw_row_id=NULL for direct API entry). "
-        "An audit_log entry with action='emission_auto_calc' is written atomically. "
-        "Requires emissions.write permission (editor role)."
+        "(append-only). Also inserts a row in raw.direct_entry (FR-22) and "
+        "links raw_row_id on the consolidated row. An audit_log entry with "
+        "action='emission_auto_calc' is written atomically in the same "
+        "transaction. Requires emissions.write permission (editor role).\n\n"
+        "**Idempotency-Key** (optional, max 120 chars): when provided, the "
+        "server checks cache.idempotency_keys for a prior response with the "
+        "same key and tenant. On a hit the cached response is returned with "
+        "``X-Idempotency-Replayed: true``. On key reuse with a different body "
+        "a 422 is returned."
     ),
     responses={
+        200: {
+            "description": (
+                "Idempotency replay: cached response returned "
+                "(header X-Idempotency-Replayed: true)"
+            )
+        },
         201: {"description": "Emission row inserted; returns preview data + emission_id"},
         403: {"description": "Insufficient permission (requires emissions.write)"},
+        409: {"description": "Idempotency key reused with a different request body"},
         422: {
             "description": (
-                "Validation error, missing factor, or unit conversion error"
+                "Validation error, missing factor, site_type invalid, "
+                "or unit conversion error"
             )
         },
     },
 )
 async def calc_insert(
     body: CalcInputRequest,
+    response: Response,
     user: Annotated[CurrentUser, Depends(require_permission("emissions", "write"))],
     session: Annotated[AsyncSession, Depends(get_db)],
     factor_catalog: Annotated[object, Depends(get_factor_catalog)],
+    idempotency_key: Annotated[
+        str | None,
+        Header(
+            alias="Idempotency-Key",
+            max_length=120,
+            description=(
+                "Optional idempotency key (max 120 chars). "
+                "If supplied the server caches the response for 24 h; "
+                "subsequent requests with the same key and body return the "
+                "cached response with X-Idempotency-Replayed: true."
+            ),
+        ),
+    ] = None,
 ) -> CalcInsertResponse:
     """Compute tCO2e and insert an emission record into the ledger.
 
-    The emission row is inserted directly into calc.emissions_consolidated with
-    raw_row_id=NULL (not via the bulk ETL pipeline). An audit_log row is
-    appended atomically in the same session transaction.
+    The emission row is inserted into calc.emissions_consolidated.
+    A corresponding raw.direct_entry row is inserted in the same transaction
+    (Task D / FR-22 traceability); raw_row_id on the consolidated row points
+    to that raw entry.  An audit_log row is appended atomically.
+
+    Task E: when Idempotency-Key header is present, the request is checked
+    against cache.idempotency_keys.  On a cache hit the stored response is
+    returned immediately (HTTP 200 + X-Idempotency-Replayed: true) without
+    executing the insert again.
 
     Args:
         body: Universal auto-calc input.
+        response: FastAPI response object (used to set headers).
         user: Authenticated user with emissions.write permission.
         session: Async DB session with RLS GUCs pre-set (tenant_id + role).
         factor_catalog: Factor catalog port.
+        idempotency_key: Optional Idempotency-Key header value (max 120 chars).
 
     Returns:
         CalcInsertResponse: preview data + emission_id + correlation_id + created_at.
 
     Raises:
-        HTTPException 422: On missing factor, unit conversion error, or validation failure.
+        HTTPException 422: On missing factor, unit conversion error,
+            site_type invalid, or idempotency key reuse with different body.
     """
+    cid = get_correlation_id()
     log = logger.bind(
-        correlation_id=get_correlation_id(),
+        correlation_id=cid,
         user=user.sub,
         scope=body.scope,
         sub_scope=body.sub_scope,
         anno=body.anno,
+        idempotency_replayed=False,
     )
     log.info("calc_insert_request")
+
+    # -----------------------------------------------------------------------
+    # Task E — idempotency check
+    # -----------------------------------------------------------------------
+    if idempotency_key is not None:
+        body_dict = body.model_dump(mode="json")
+        try:
+            hit: IdempotencyHit | None = await check_idempotency(
+                session,
+                key=idempotency_key,
+                tenant_id=user.tenant_id,
+                body=body_dict,
+            )
+        except IdempotencyKeyReusedError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail={
+                    "error": "idempotency_key_reuse_with_different_body",
+                    "message": str(exc),
+                },
+            ) from exc
+
+        if hit is not None:
+            log.info(
+                "calc_insert_idempotency_replay",
+                idempotency_replayed=True,
+            )
+            response.headers["X-Idempotency-Replayed"] = "true"
+            response.status_code = status.HTTP_200_OK
+            return CalcInsertResponse(**hit.response_body)
+
+    # -----------------------------------------------------------------------
+    # Normal insert path
+    # -----------------------------------------------------------------------
     try:
-        return await compute_and_insert(
+        result = await compute_and_insert(
             body,
             factor_catalog=factor_catalog,  # type: ignore[arg-type]
             session=session,
@@ -673,3 +766,19 @@ async def calc_insert(
                 "detail": str(exc),
             },
         ) from exc
+
+    # -----------------------------------------------------------------------
+    # Task E — store response in idempotency cache (same transaction)
+    # -----------------------------------------------------------------------
+    if idempotency_key is not None:
+        await store_response(
+            session,
+            key=idempotency_key,
+            tenant_id=user.tenant_id,
+            body=body_dict,
+            response_status=201,
+            response_body=result.model_dump(mode="json"),
+        )
+
+    log.info("calc_insert_idempotency_replayed_false", idempotency_replayed=False)
+    return result
