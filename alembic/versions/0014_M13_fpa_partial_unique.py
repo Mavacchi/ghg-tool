@@ -29,7 +29,13 @@ from alembic import op
 revision: str = "0014_M13"
 down_revision: str = "0013_M12"
 branch_labels: str | None = None
-depends_on: str | None = None
+# 0014_M13 lives on the chain 0011_M10 -> 0012_M13 -> 0013_M12 -> 0014_M13,
+# but it operates on calc.factor_publish_approvals which is created by the
+# parallel-branch migration 0012_M11. Alembic's topological order can pick
+# 0014_M13 before 0012_M11, producing UndefinedTable on real Postgres
+# (offline --sql generation hides this). depends_on enforces the runtime
+# precedence: 0012_M11 must be applied before 0014_M13.
+depends_on: str | None = "0012_M11"
 
 _SCHEMA = "calc"
 _TABLE = "factor_publish_approvals"
