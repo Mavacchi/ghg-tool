@@ -11,6 +11,7 @@ variables:
   - ``GHG_PRODUCT_NAME``  — product / software name (default "Carbontrace").
   - ``GHG_COMPANY_NAME``  — display name shown in titles, footers, PDF.
   - ``GHG_COMPANY_SHORT`` — short name for browser tab / page_title.
+  - ``GHG_DASHBOARD_ID``  — dashboard identifier (default "carbontrace").
   - ``GHG_TENANT_ID``     — tenant identifier used by the auth fallback.
   - ``GHG_SITES``         — comma-separated list of site codes (overrides
                             the built-in 7-site default).
@@ -29,7 +30,7 @@ from pathlib import Path
 from typing import Final
 
 DASHBOARD_VERSION: Final[str] = "1.0.0"
-DASHBOARD_ID: Final[str] = "esg-main-2026"
+DASHBOARD_ID: Final[str] = os.getenv("GHG_DASHBOARD_ID", "carbontrace")
 
 _DEFAULT_PRODUCT_NAME: Final[str] = "Carbontrace"
 _DEFAULT_COMPANY_NAME: Final[str] = "Gruppo Ceramiche Gresmalt S.p.A."
@@ -56,6 +57,12 @@ PRODUCT_NAME: Final[str] = _env("GHG_PRODUCT_NAME", _DEFAULT_PRODUCT_NAME)
 COMPANY_NAME: Final[str] = _env("GHG_COMPANY_NAME", _DEFAULT_COMPANY_NAME)
 COMPANY_SHORT: Final[str] = _env("GHG_COMPANY_SHORT", _DEFAULT_COMPANY_SHORT)
 TENANT_ID: Final[str] = _env("GHG_TENANT_ID", _DEFAULT_TENANT_ID)
+
+# Fallback label shown in footers when no published factor sources can be read
+# from the catalog. Override via GHG_FACTOR_SOURCES env var.
+FACTOR_SOURCES_FALLBACK: Final[str] = _env(
+    "GHG_FACTOR_SOURCES", "Vedi catalogo fattori"
+)
 
 
 def _parse_sites(raw: str) -> tuple[str, ...]:

@@ -103,6 +103,11 @@ PERMISSION_MATRIX: Final[dict[str, dict[str, frozenset[str]]]] = {
         "read": frozenset({ROLE_EDITOR, ROLE_ADMIN, ROLE_VIEWER}),
         "write": frozenset({ROLE_EDITOR, ROLE_ADMIN}),
     },
+    "sites": {
+        # ref.sites -- authoritative list of active production sites.
+        # Read is available to all authenticated roles.
+        "read": frozenset({ROLE_EDITOR, ROLE_ADMIN, ROLE_VIEWER}),
+    },
 }
 
 

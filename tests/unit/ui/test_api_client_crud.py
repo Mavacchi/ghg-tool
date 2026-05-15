@@ -17,15 +17,10 @@ from unittest.mock import MagicMock, patch
 import httpx
 import pytest
 
-# Force the agent worktree's src onto sys.path before importing the module
-# so the tests exercise the functions added in this branch, not whichever
-# editable install pip currently resolves to.
-_WORKTREE_SRC = "/home/user/ghg-tool/.claude/worktrees/agent-abb5f05342ad2c88d/src"
-if _WORKTREE_SRC not in sys.path:
-    sys.path.insert(0, _WORKTREE_SRC)
-
-# Evict any already-cached copy of api_client so the path override above
-# takes effect before the first import inside the test bodies.
+# The local src/ directory is already on sys.path via pyproject.toml
+# [tool.pytest.ini_options] pythonpath = ["src"], so no manual path
+# manipulation is needed.  Evict any previously-cached module so that
+# editable-install disambiguation does not silently exercise a stale copy.
 sys.modules.pop("ghg_tool.ui.streamlit_app.lib.api_client", None)
 
 from ghg_tool.ui.streamlit_app.lib.api_client import (  # noqa: E402
@@ -33,6 +28,7 @@ from ghg_tool.ui.streamlit_app.lib.api_client import (  # noqa: E402
     FactorCRUDError,
     correct_emission,
     delete_factor_draft,
+    download_report,
     patch_factor_draft,
 )
 
@@ -220,3 +216,103 @@ class TestCorrectEmission:
             correct_emission(_eid, _payload, token="tok")
 
         assert exc_info.value.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# download_report (BUG-2: Excel export download button)
+# ---------------------------------------------------------------------------
+
+_PATCH_HTTPX_GET = "ghg_tool.ui.streamlit_app.lib.api_client.httpx.get"
+
+
+class TestDownloadReport:
+    """Tests for api_client.download_report — used by the Excel export fix."""
+
+    def test_download_report_returns_bytes_on_200(self) -> None:
+        """download_report returns raw bytes when the server returns 200."""
+        _job_id = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+        _expected = b"PK\x03\x04xlsx-bytes"
+        mock_resp = MagicMock(spec=httpx.Response)
+        mock_resp.status_code = 200
+        mock_resp.content = _expected
+        mock_resp.raise_for_status = MagicMock()  # does not raise
+
+        with (
+            patch(_PATCH_HTTPX_GET, return_value=mock_resp) as mock_g,
+            patch(_PATCH_BASE, return_value=_BASE),
+            patch(
+                "ghg_tool.ui.streamlit_app.lib.api_client._get_headers",
+                return_value={"Authorization": "Bearer tok"},
+            ),
+        ):
+            result = download_report(_job_id)
+
+        assert result == _expected
+        mock_g.assert_called_once()
+        call_url = mock_g.call_args.args[0]
+        assert f"/api/v1/exports/jobs/{_job_id}/download" in call_url
+
+    def test_download_report_returns_none_on_404(self) -> None:
+        """download_report returns None when job is not found (404)."""
+        _job_id = "bbbbbbbb-cccc-dddd-eeee-ffffffffffff"
+        mock_resp = MagicMock(spec=httpx.Response)
+        mock_resp.status_code = 404
+        mock_resp.raise_for_status.side_effect = httpx.HTTPStatusError(
+            "404", request=MagicMock(), response=mock_resp
+        )
+
+        with (
+            patch(_PATCH_HTTPX_GET, return_value=mock_resp),
+            patch(_PATCH_BASE, return_value=_BASE),
+            patch(
+                "ghg_tool.ui.streamlit_app.lib.api_client._get_headers",
+                return_value={"Authorization": "Bearer tok"},
+            ),
+        ):
+            result = download_report(_job_id)
+
+        assert result is None
+
+    def test_download_report_returns_none_on_network_error(self) -> None:
+        """download_report returns None on a network-level error."""
+        _job_id = "cccccccc-dddd-eeee-ffff-000000000001"
+
+        with (
+            patch(
+                _PATCH_HTTPX_GET,
+                side_effect=httpx.RequestError("connection refused"),
+            ),
+            patch(_PATCH_BASE, return_value=_BASE),
+            patch(
+                "ghg_tool.ui.streamlit_app.lib.api_client._get_headers",
+                return_value={"Authorization": "Bearer tok"},
+            ),
+        ):
+            result = download_report(_job_id)
+
+        assert result is None
+
+    def test_delete_factor_draft_raises_404_with_clear_message(self) -> None:
+        """FactorCRUDError(404) carries a human-readable detail, not a raw dict."""
+        _uuid = "11111111-2222-3333-4444-555555555556"
+        # The API returns problem+json; .get("detail") extracts the string.
+        _resp_404 = _mock_response(
+            404,
+            {
+                "type": "about:blank",
+                "title": "Not Found",
+                "status": 404,
+                "detail": "Factor not found.",
+                "error_code": "factor_not_found",
+            },
+        )
+
+        with patch(_PATCH_HTTPX_DELETE, return_value=_resp_404), patch(
+            _PATCH_BASE, return_value=_BASE
+        ), pytest.raises(FactorCRUDError) as exc_info:
+            delete_factor_draft(_uuid, token="bearer-tok")
+
+        assert exc_info.value.status_code == 404
+        # The detail must be the extracted string, not the whole dict repr.
+        assert "Factor not found" in exc_info.value.detail
+        assert "about:blank" not in exc_info.value.detail

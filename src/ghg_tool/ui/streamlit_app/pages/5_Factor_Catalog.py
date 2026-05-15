@@ -328,12 +328,14 @@ if _role == "editor" and raw:
                 if st.session_state.get(_del_confirm_key, False):
                     st.warning(_("factor_delete_confirm", lang))
                     _dc1, _dc2, _dc_spacer = st.columns([1, 1, 4])
+                    _do_rerun_after_delete = False
                     with _dc1:
                         if st.button(
                             "Si, elimina",
                             key=f"del_yes_{_fid}",
                             type="primary",
                         ):
+                            _delete_error: str | None = None
                             with st.spinner("Eliminazione in corso..."):
                                 try:
                                     delete_factor_draft(_fid, token=_token)
@@ -344,11 +346,21 @@ if _role == "editor" and raw:
                                             _clear()
                                         except (AttributeError, TypeError):
                                             pass
-                                    st.toast(_("toast_factor_deleted", lang), icon="✓")
-                                    st.rerun()
+                                    _do_rerun_after_delete = True
                                 except FactorCRUDError as exc:
-                                    st.error(f"Errore eliminazione (HTTP {exc.status_code}): {exc.detail}")
+                                    _delete_error = (
+                                        f"Eliminazione fallita (HTTP {exc.status_code}): "
+                                        f"{exc.detail}"
+                                    )
                                     st.session_state[_del_confirm_key] = False
+                            # st.rerun() and st.toast() are called OUTSIDE the spinner
+                            # context to avoid Streamlit RerunException inside a context
+                            # manager, which suppresses the rerun in some Streamlit builds.
+                            if _delete_error:
+                                st.error(_delete_error)
+                            elif _do_rerun_after_delete:
+                                st.toast(_("toast_factor_deleted", lang), icon="✓")
+                                st.rerun()
                     with _dc2:
                         if st.button("No, annulla", key=f"del_no_{_fid}"):
                             st.session_state[_del_confirm_key] = False

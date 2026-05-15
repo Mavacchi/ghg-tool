@@ -117,13 +117,21 @@ def _parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--username",
-        required=True,
-        help="Login username (must be unique within the tenant).",
+        required=False,
+        default=None,
+        help=(
+            "Login username (must be unique within the tenant). "
+            "Required unless --print-hash-only is set."
+        ),
     )
     parser.add_argument(
         "--email",
-        required=True,
-        help="Contact email (must be unique within the tenant).",
+        required=False,
+        default=None,
+        help=(
+            "Contact email (must be unique within the tenant). "
+            "Required unless --print-hash-only is set."
+        ),
     )
     parser.add_argument(
         "--tenant-code",
@@ -140,6 +148,17 @@ def _parse_args() -> argparse.Namespace:
             "PostgreSQL DSN. "
             "Default: $DATABASE_URL or $SQLALCHEMY_URL, "
             "fallback postgresql://ghg_app:changeme@localhost:5432/ghg_tool."
+        ),
+    )
+    parser.add_argument(
+        "--print-hash-only",
+        action="store_true",
+        default=False,
+        help=(
+            "Prompt for the password interactively, print the bcrypt hash to "
+            "stdout, then exit WITHOUT writing to the database.  Copy the "
+            "printed hash into GHG_BOOTSTRAP_ADMIN_PASSWORD_HASH in .env for "
+            "the bootstrap-admin-from-env pattern."
         ),
     )
     return parser.parse_args()
@@ -272,8 +291,35 @@ def _insert_admin(
 
 
 def main() -> int:
-    """Entry point: parse args, prompt password, insert admin."""
+    """Entry point: parse args, prompt password, insert admin (or print hash).
+
+    When ``--print-hash-only`` is set the function prints the bcrypt hash for
+    the supplied password to stdout and returns without touching the database.
+    Use this to populate ``GHG_BOOTSTRAP_ADMIN_PASSWORD_HASH`` in ``.env``.
+    """
     args = _parse_args()
+
+    if args.print_hash_only:
+        password = _read_password_interactively()
+        print("Hashing password (bcrypt rounds=12)...")
+        password_hash = hash_password(password)
+        print()
+        print("=" * 64)
+        print("  Bcrypt hash (copy to GHG_BOOTSTRAP_ADMIN_PASSWORD_HASH):")
+        print()
+        print(f"  {password_hash}")
+        print()
+        print("  NEVER store the plaintext password in .env.")
+        print("=" * 64)
+        return 0
+
+    if not args.username or not args.email:
+        print(
+            "ERROR: --username and --email are required unless --print-hash-only is set.",
+            file=sys.stderr,
+        )
+        return 2
+
     dsn = _resolve_dsn(args.dsn)
     print(f"DSN: {_redact(dsn)}")
     password = _read_password_interactively()

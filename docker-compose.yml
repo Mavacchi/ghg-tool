@@ -77,6 +77,11 @@ services:
       # .env on first launch; for production deploys provide your own.
       GHG_JWT_SECRET: "${GHG_JWT_SECRET}"
       GHG_CORS_ORIGINS: "${GHG_CORS_ORIGINS:-http://localhost:8501}"
+      # Bootstrap admin persistence — all three must be set together.
+      # Leave empty (default) to skip bootstrap.
+      GHG_BOOTSTRAP_ADMIN_USERNAME: "${GHG_BOOTSTRAP_ADMIN_USERNAME:-}"
+      GHG_BOOTSTRAP_ADMIN_EMAIL: "${GHG_BOOTSTRAP_ADMIN_EMAIL:-}"
+      GHG_BOOTSTRAP_ADMIN_PASSWORD_HASH: "${GHG_BOOTSTRAP_ADMIN_PASSWORD_HASH:-}"
     ports:
       - "8000:8000"
     restart: unless-stopped

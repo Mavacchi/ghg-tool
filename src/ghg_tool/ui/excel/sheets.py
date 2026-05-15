@@ -94,6 +94,7 @@ def write_summary_sheet(wb: Workbook, report_data: dict[str, Any]) -> None:
     anno = report_data.get("anno", "?")
     gwp_set = report_data.get("gwp_set", "AR6")
     emissions = report_data.get("emissions", [])
+    factor_sources_label = report_data.get("factor_sources", "Vedi catalogo fattori")
 
     cols = ["Scope", "Sub-scope", "Totale tCO2e", "Anno",
             "factor_source", "factor_version", "gwp_set", "Note"]
@@ -123,16 +124,16 @@ def write_summary_sheet(wb: Workbook, report_data: dict[str, Any]) -> None:
         ws.append([
             f"Scope {scope_num}", "Totale",
             total, anno,
-            "ISPRA 2024 + IEA 2024", "2024", gwp_set,
+            factor_sources_label, "Vedi catalogo fattori", gwp_set,
             "Non include biogenico (ADR-007)" if scope_num == 1 else "",
         ])
 
     ws.append(["Scope 2", "Location-Based", scope2_lb, anno,
-        "ISPRA 2024", "2024", gwp_set, "",
+        factor_sources_label, "Vedi catalogo fattori", gwp_set, "",
     ])
     ws.append([
         "Scope 2", "Market-Based", scope2_mb, anno,
-        "ISPRA 2024 (residual)", "2024", gwp_set, "",
+        factor_sources_label, "Vedi catalogo fattori", gwp_set, "",
     ])
 
     # Biogenic memo (NOT summed into totals per ADR-007)

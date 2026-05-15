@@ -193,7 +193,11 @@ class TestPDFBuilderHTMLRendering:
             "dashboard_id": "esg-main-2026",
             "dashboard_version": "1.0.0",
         })
-        assert "ISPRA" in html
+        # Factor sources are dynamic now: the fallback either lists the
+        # actually-published factor sources or the placeholder "Vedi catalogo
+        # fattori". Both contain the literal label "Fonti fattori:" which is
+        # the stable invariant the audit trail relies on.
+        assert "Fonti fattori:" in html
 
     def test_scope2_pairs_lb_mb_separated(self) -> None:
         from ghg_tool.ui.pdf.builder import _build_scope2_pairs
