@@ -174,10 +174,16 @@ def upgrade() -> None:
         """
     )
 
+    # NOTE: PostgreSQL CONSTRAINT TRIGGER does NOT support `OF column_name`
+    # (only AFTER {INSERT|UPDATE|DELETE} without column lists). The original
+    # `AFTER INSERT OR UPDATE OF dual_run_id` syntax raised a parse error on
+    # real Postgres. Append-only on ops.calc_runs is enforced by the
+    # deny_calc_runs_mutation trigger added in 0023_M22, so we only need
+    # AFTER INSERT here (the only event allowed to add a dual_run_id value).
     op.execute(
         """
         CREATE CONSTRAINT TRIGGER trg_calc_runs_dual_run_reciprocity
-        AFTER INSERT OR UPDATE OF dual_run_id ON ops.calc_runs
+        AFTER INSERT ON ops.calc_runs
         DEFERRABLE INITIALLY DEFERRED
         FOR EACH ROW
         EXECUTE FUNCTION ops.enforce_dual_run_reciprocity();

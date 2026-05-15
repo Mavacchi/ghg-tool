@@ -134,11 +134,15 @@ def downgrade() -> None:
         """
     )
 
-    # 3. Restore the original M20 trigger (INSERT OR UPDATE OF dual_run_id).
+    # 3. Restore the M20 reciprocity trigger.
+    # Note: the original M20 was specified as `AFTER INSERT OR UPDATE OF
+    # dual_run_id` but PostgreSQL CONSTRAINT TRIGGER does not support
+    # `OF column_name`. M20 was corrected to `AFTER INSERT` only, so the
+    # downgrade target is also `AFTER INSERT`.
     op.execute(
         """
         CREATE CONSTRAINT TRIGGER trg_calc_runs_dual_run_reciprocity
-        AFTER INSERT OR UPDATE OF dual_run_id ON ops.calc_runs
+        AFTER INSERT ON ops.calc_runs
         DEFERRABLE INITIALLY DEFERRED
         FOR EACH ROW
         EXECUTE FUNCTION ops.enforce_dual_run_reciprocity();
