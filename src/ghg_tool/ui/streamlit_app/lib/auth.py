@@ -229,7 +229,10 @@ def _do_login(username: str, password: str) -> bool:
     if not _credentials_valid_shape(username, password):
         return False
 
-    api_base = st.session_state.get("api_base_url", "http://localhost:8000")
+    api_base = st.session_state.get(
+        "api_base_url",
+        os.environ.get("GHG_API_BASE_URL", "http://localhost:8000"),
+    )
     try:
         resp = httpx.post(
             f"{api_base}/api/v1/auth/login",
@@ -338,7 +341,13 @@ def render_login_form(lang: str = "it") -> None:
 
     # Second screen: TOTP challenge (only shown when partial token is pending).
     if st.session_state.get(_TOTP_PENDING_KEY):
-        _render_totp_challenge_form(lang, api_base=st.session_state.get("api_base_url", "http://localhost:8000"))
+        _render_totp_challenge_form(
+            lang,
+            api_base=st.session_state.get(
+                "api_base_url",
+                os.environ.get("GHG_API_BASE_URL", "http://localhost:8000"),
+            ),
+        )
 
     st.stop()
 
