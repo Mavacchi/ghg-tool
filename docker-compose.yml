@@ -40,6 +40,26 @@ services:
       retries: 10
       start_period: 10s
 
+
+  # ---------------------------------------------------------------------------
+  # Redis 7 -- SEC-P1-007 token blacklist + SEC-ADV-008 rate-limiter storage.
+  # ---------------------------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    container_name: ghg_redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--save", "60", "1"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+
   # ---------------------------------------------------------------------------
   # Redis 7 — Celery broker (db 1) + result backend (db 2) — REV-WAVE3-007
   # Also available for future rate-limiter (SEC-ADV-008) and token blacklist
@@ -88,6 +108,8 @@ services:
     depends_on:
       migrate:
         condition: service_completed_successfully
+      redis:
+        condition: service_healthy
     environment:
       SQLALCHEMY_URL: "postgresql+asyncpg://ghg_app:${POSTGRES_PASSWORD:-changeme}@db:5432/ghg_tool"
       DATABASE_URL: "postgresql+asyncpg://ghg_app:${POSTGRES_PASSWORD:-changeme}@db:5432/ghg_tool"
@@ -106,6 +128,8 @@ services:
       GHG_BOOTSTRAP_ADMIN_USERNAME: "${GHG_BOOTSTRAP_ADMIN_USERNAME:-}"
       GHG_BOOTSTRAP_ADMIN_EMAIL: "${GHG_BOOTSTRAP_ADMIN_EMAIL:-}"
       GHG_BOOTSTRAP_ADMIN_PASSWORD_HASH: "${GHG_BOOTSTRAP_ADMIN_PASSWORD_HASH:-}"
+      # SEC-P1-007 + SEC-ADV-008: shared Redis URL for blacklist + rate limit.
+      REDIS_URL: "${REDIS_URL:-redis://redis:6379/0}"
     ports:
       - "8000:8000"
     restart: unless-stopped
@@ -200,3 +224,5 @@ services:
 volumes:
   pgdata:
     name: ghg_pgdata
+  redisdata:
+    name: ghg_redisdata

@@ -70,3 +70,16 @@ class RefreshRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     refresh_token: str = Field(min_length=1)
+
+class LogoutRequest(BaseModel):
+    """Optional payload for ``POST /api/v1/auth/logout``.
+
+    SEC-P1-007: when the caller wishes to revoke their refresh token in
+    addition to the bearer access token, they post the refresh JWT here.
+    The handler is idempotent and the body is optional -- legacy clients
+    can still call /logout with no body and get a 204.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    refresh_token: str | None = Field(default=None, min_length=1)

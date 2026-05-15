@@ -31,6 +31,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from ghg_tool.api.middleware.correlation_id import get_correlation_id
 from ghg_tool.infrastructure.security import jwt as jwt_module
+from ghg_tool.infrastructure.security import token_blacklist
 
 logger = structlog.get_logger(__name__)
 
@@ -253,6 +254,18 @@ async def get_current_user(
         raise _unauthorized(
             "Partial 2FA token cannot be used as Bearer. Complete TOTP challenge first."
         )
+
+    # SEC-P1-007: server-side revocation check.  A token whose jti has been
+    # blacklisted (via /auth/logout or refresh rotation) must be rejected even
+    # though the signature and exp would otherwise validate.
+    jti_claim = claims.get("jti", "")
+    if isinstance(jti_claim, str) and jti_claim and token_blacklist.is_revoked(jti_claim):
+        log.warning(
+            "JWT rejected: jti is on blacklist",
+            jti_prefix=jti_claim[:8],
+            probe_attempt=True,
+        )
+        raise _unauthorized("Token has been revoked")
 
     try:
         user = CurrentUser(

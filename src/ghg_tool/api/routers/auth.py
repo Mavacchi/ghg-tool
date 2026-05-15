@@ -52,14 +52,19 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ghg_tool.api.dependencies.db import get_db_no_auth
 from ghg_tool.api.middleware.correlation_id import get_correlation_id
 from ghg_tool.api.middleware.rate_limit import login_limiter
-from ghg_tool.api.schemas.auth_schemas import LoginRequest, RefreshRequest, TokenResponse
+from ghg_tool.api.schemas.auth_schemas import (
+    LoginRequest,
+    LogoutRequest,
+    RefreshRequest,
+    TokenResponse,
+)
 from ghg_tool.application.services.auth_service import authenticate_user
 from ghg_tool.application.services.session_service import (
     insert_auth_session,
     revoke_auth_session_by_jti,
 )
 from ghg_tool.infrastructure.security import jwt as jwt_module
-from ghg_tool.infrastructure.security import siem
+from ghg_tool.infrastructure.security import siem, token_blacklist
 from ghg_tool.infrastructure.security.constants import (
     ACCESS_TOKEN_TTL_S,
     PARTIAL_TOKEN_TTL_S,
@@ -446,7 +451,7 @@ async def refresh(
     # BUG-16: always use the DB tenant_id, never the refresh-claim tenant_id.
     db_tenant_id: str = str(row.tenant_id)
 
-    # S-006: revoke the old refresh jti.
+    # S-006: revoke the old refresh jti (auth.sessions row).
     if refresh_session_row is not None:
         await session.execute(
             text(
@@ -461,6 +466,15 @@ async def refresh(
             "refresh_legacy_no_session_row",
             jti_prefix=old_refresh_jti[:8],
         )
+
+    # SEC-P1-007: blacklist the old refresh jti in Redis with TTL equal to
+    # its remaining validity.  Belt-and-braces: ``auth.sessions`` is the
+    # authoritative store, but the Redis blacklist guards routes that do
+    # not consult the DB on every request (e.g. read-only endpoints relying
+    # on the JWT signature alone).  Reuse of a revoked jti is still
+    # rejected as a compromise signal earlier in this handler.
+    if old_refresh_jti:
+        token_blacklist.revoke_from_claims(claims, reason="refresh_rotation")
 
     # Issue new access + refresh tokens (rotation).
     new_access = jwt_module.create_access_token(
@@ -500,9 +514,13 @@ async def refresh(
     summary="Logout -- revoke the current session",
     description=(
         "Extracts the jti from the Bearer token and marks the corresponding "
-        "auth.sessions row as revoked (revoked_at=now()). Idempotent: returns "
-        "204 even if the session row does not exist or is already revoked. "
-        "BUG-15: logout now invalidates the server-side session."
+        "auth.sessions row as revoked (revoked_at=now()).  SEC-P1-007: also "
+        "blacklists the access jti in Redis so the token is rejected by the "
+        "JWT dependency on every replica.  If the request body provides a "
+        "refresh_token (LogoutRequest), the refresh jti is also blacklisted.  "
+        "Idempotent: returns 204 even if the session row does not exist or "
+        "is already revoked. BUG-15: logout now invalidates the server-side "
+        "session."
     ),
     responses={204: {"description": "Logged out"}},
 )
@@ -510,11 +528,16 @@ async def logout(
     request: Request,
     credentials: HTTPAuthorizationCredentials | None = Depends(_bearer_scheme),
     session: AsyncSession = Depends(get_db_no_auth),
+    body: LogoutRequest | None = None,
 ) -> None:
-    """Logout endpoint -- revokes the bearer session row.
+    """Logout endpoint -- revokes the bearer session row AND blacklists tokens.
 
     BUG-15: no longer a no-op.  The jti is extracted from the bearer token
     and the corresponding auth.sessions row is marked revoked.
+    SEC-P1-007: the access jti is added to the Redis blacklist with TTL
+    equal to its remaining validity.  When the caller also supplies a
+    refresh_token in the request body, its jti is blacklisted as well so
+    the refresh flow cannot be replayed after logout.
 
     Returns:
         None (204 No Content).
@@ -522,6 +545,7 @@ async def logout(
     correlation_id = get_correlation_id()
     log = logger.bind(correlation_id=correlation_id)
 
+    # ---- Access token revocation ----------------------------------------
     if credentials is not None:
         token = credentials.credentials
         try:
@@ -536,8 +560,27 @@ async def logout(
                     correlation_id=correlation_id,
                 )
                 await session.flush()
+                # SEC-P1-007: blacklist in Redis with TTL == remaining exp.
+                token_blacklist.revoke_from_claims(claims, reason="logout_access")
                 log.info("logout_session_revoked", jti_prefix=jti[:8])
         except Exception:  # noqa: BLE001 -- logout is always idempotent
             log.info("logout_no_valid_token")
+
+    # ---- Refresh token revocation (optional) ----------------------------
+    # SEC-P1-007: when the client posts the refresh token in the body, we
+    # blacklist its jti as well so the rotation flow cannot be replayed.
+    # Failure to decode the refresh token is silent -- logout must remain
+    # idempotent and never leak token diagnostics to the caller.
+    if body is not None and body.refresh_token:
+        try:
+            refresh_claims = jwt_module.decode_token(body.refresh_token)
+            refresh_jti = refresh_claims.get("jti", "")
+            if isinstance(refresh_jti, str) and refresh_jti:
+                token_blacklist.revoke_from_claims(
+                    refresh_claims, reason="logout_refresh"
+                )
+                log.info("logout_refresh_blacklisted", jti_prefix=refresh_jti[:8])
+        except Exception:  # noqa: BLE001 -- idempotent
+            log.info("logout_refresh_invalid")
 
     log.info("logout_called")
