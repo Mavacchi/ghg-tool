@@ -24,7 +24,7 @@ References:
 - User submits a single consumption row through the UI (or API) describing **what was consumed, where, when, in which unit**.
 - The system AUTOMATICALLY resolves the appropriate emission factor from `ref.factor_catalog`, applies the correct formula, returns the `tCO2e` together with the full audit trail (factor_id, version, source, gwp_set, methodology).
 - Two operations are exposed: `preview` (read-only, no DB write) and `insert` (writes one immutable row in `calc.emissions_consolidated`).
-- Coverage in v1: Scope 1 combustion (GAS_NAT, GASOLIO, BENZINA), Scope 1 process (CaCO3 decarbonation), Scope 2 LB, Scope 2 MB (GO + residual), Scope 3 Cat 1 (purchased goods + services), Scope 3 Cat 3 WTT/T&D. Cat 4/5/6/7/9/12 share the same lookup contract but are not gated by this wave (template only — see §12).
+- Coverage in v1 (post customer feedback 2026-05-15): Scope 1 combustion (GAS_NAT, GASOLIO, BENZINA — solo queste 3 categorie), Scope 1 process (CaCO3 decarbonation with **direct-tCO2 input mode** as default), Scope 2 LB, Scope 2 MB (GO + residual), Scope 3 Cat 1 (purchased goods + services), Scope 3 Cat 3 WTT/T&D, **plus Cat 4 / 5 / 6 / 7 / 9 / 12** (customer-confirmed: all Scope 3 categories must accept quantity × factor input in v1, not just Cat 1/3).
 
 ### Out of scope
 
@@ -48,8 +48,8 @@ Lookup key (multi-component): `(scope=1, sub_scope='combustion', combustibile, c
 | User input field | Required | Drives |
 |---|---|---|
 | `scope = 1` | yes | filter |
-| `categoria_s1 = 'combustione' / 'Gas_Naturale' / 'Gasolio_Auto' / 'Benzina_Auto'` | yes | sub_scope dispatch |
-| `combustibile` in {GAS_NAT, GASOLIO, BENZINA} | yes | factor family selection (DEFRA fuel ID) |
+| `categoria_s1` in **`{Gas_Naturale, Gasolio_Auto, Benzina_Auto}`** | yes | sub_scope dispatch + fuel identity. **CUSTOMER FEEDBACK 2026-05-15: queste sono le SOLE 3 categorie di Scope 1 Combustion. La 4ª categoria del CSV (`Processo_Decarb`) appartiene a Scope 1 Process e ha il suo sub-scope dedicato (§2.2).** |
+| `combustibile` in {GAS_NAT, GASOLIO, BENZINA} | yes (derivato da `categoria_s1`) | factor family selection (DEFRA fuel ID) |
 | `codice_sito` | yes | per-site attribution (not lookup) |
 | `anno` | yes | vintage selection (§3) |
 | `quantita`, `unita` | yes | activity data + unit-match (§4) |
@@ -59,7 +59,18 @@ Three factors resolved per row (`COMB_<fuel>_<gas>_DEFRA_<vintage>`). Formula id
 
 ### 2.2 Scope 1 — Process (CaCO3 decarbonation)
 
-Lookup key: `(scope=1, sub_scope='process', categoria_s1='Processo_Decarb', gwp_set, vintage)`. Single factor `STOICH_CACO3_IPCC_2006` (0.4397 tCO2 / t CaCO3). GWP=1 (CO2 only).
+**CUSTOMER FEEDBACK 2026-05-15: l'utente ha il dato in tCO2 già calcolato/stimato e vuole inserirlo direttamente. Supportiamo DUE modalità nello stesso form (toggle "input mode"):**
+
+**Mode A (default, customer-preferred): direct CO2**
+- Input: `quantita` in `tCO2`
+- No factor lookup. `tco2e = quantita * 1.0` (factor virtuale = 1, source = `DIRECT_INPUT`, methodology = `direct_measurement`)
+- Audit trail: `factor_source = 'direct_input'`, `disclosure_notes` registra "Emissioni di processo inserite direttamente dall'utente"
+- Pre-insert DQ: `quantita >= 0` and `unita == 'tCO2'`
+
+**Mode B (alternativa, stoichiometric): mass of raw material**
+- Input: `quantita` in `t CaCO3` (o kg con conversione esatta §4)
+- Lookup key: `(scope=1, sub_scope='process', categoria_s1='Processo_Decarb', gwp_set, vintage)` → `STOICH_CACO3_IPCC_2006` (0.4397 tCO2 / t CaCO3). GWP=1 (CO2 only).
+- Formula: `tco2e = quantita * 0.4397 * KG_TO_TONNE` (se quantita in kg)
 
 Constraint: applicable only to `codice_sito = IANO` per `methodology.md §2`.
 
@@ -116,7 +127,11 @@ Note: per `methodology.md §2` and FR-11, the **fuel quantity for Cat 3 WTT must
 
 ### 2.7 Scope 3 — other categories (Cat 4, 5, 6, 7, 9, 12)
 
-Same contract: lookup key = `(scope=3, sub_scope, methodology, sottocategoria_or_route, gwp_set, vintage)`. The lookup function is generic; only the map `(sottocategoria -> factor_id)` is per-category. Out of v1 wave but contract is forward-compatible.
+**CUSTOMER FEEDBACK 2026-05-15: anche queste categorie devono accettare input quantità + fattore moltiplicativo nella v1. Il principio generale che l'utente ha richiesto è: "voglio sempre poter inserire una quantità e moltiplicarla per un fattore di conversione".**
+
+Same contract: lookup key = `(scope=3, sub_scope, methodology, sottocategoria_or_route, gwp_set, vintage)`. The lookup function is generic; only the map `(sottocategoria -> factor_id)` is per-category. **V1 SCOPE EXPANDED: tutte le categorie (Cat 4, 5, 6, 7, 9, 12) devono essere supportate dalla UI con il pattern quantita × factor.**
+
+Forward-compat: nuove sottocategorie aggiungibili al catalog senza modifiche al code.
 
 ---
 
@@ -417,6 +432,14 @@ Errors: same set as preview, plus 409 Conflict if `ux_emissions_active_natural_k
 ---
 
 ## §12 Open Questions for the Customer
+
+### Risolte (2026-05-15)
+
+- **Scope 1 Combustion categories**: ridotte alle 3 reali (`Gas_Naturale`, `Gasolio_Auto`, `Benzina_Auto`). La 4ª del CSV (`Processo_Decarb`) è Scope 1 Process, separato.
+- **Scope 1 Process input mode**: default è **direct tCO2** (l'utente ha il dato già calcolato). Mode B (massa CaCO3 con stoichiometric factor 0.4397) resta disponibile come toggle.
+- **Scope 3 v1 coverage**: tutte le categorie (Cat 1, 3, 4, 5, 6, 7, 9, 12) devono accettare quantità × fattore nella v1. Principio generale dell'utente: «voglio sempre poter inserire una quantità e moltiplicarla per un fattore di conversione».
+
+### Ancora aperte
 
 1. **Direct-entry raw row**: should a new `raw.direct_entry` staging table back the auto-calc path so that `raw_row_id` is non-NULL (preserving FR-22 universal traceability), or is the `correlation_id` plus the audit-log row sufficient for ISAE 3000? Recommendation: introduce `raw.direct_entry` in a follow-up wave; persist `raw_row_id` for parity with bulk path.
 2. **Multi-country sites**: the LB lookup currently hard-maps all 7 sites to `IT`. If the operational boundary expands abroad, who maintains the `site -> country -> LB factor` map? Recommendation: add `country` column on `ref.sites` and resolve at lookup time.
