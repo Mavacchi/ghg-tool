@@ -98,13 +98,16 @@ echo La prima volta puo' richiedere 3-5 minuti per scaricare
 echo e buildare le immagini. Le volte successive sara' pronto
 echo in meno di 30 secondi.
 echo.
+echo Modalita': PRODUCTION ^(no demo seed, no demo/demo login^).
+echo Per accendere la demo usa start-demo.bat al posto di questo.
+echo.
 
-docker compose -f docker-compose.yml -f docker-compose.quickstart.yml --profile app up -d --build
+docker compose -f docker-compose.yml --profile app up -d --build
 if errorlevel 1 (
     echo.
     echo [ERRORE] Avvio dei container fallito.
     echo Per vedere i log esegui in un nuovo prompt:
-    echo   docker compose -f docker-compose.yml -f docker-compose.quickstart.yml --profile app logs
+    echo   docker compose -f docker-compose.yml --profile app logs
     exit /b 1
 )
 

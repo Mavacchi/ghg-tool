@@ -78,6 +78,39 @@ services:
       - app  # only started when: docker compose --profile app up
 
   # ---------------------------------------------------------------------------
+  # Streamlit dashboard — production-safe defaults (no demo seed, no banner).
+  # The quickstart override (docker-compose.quickstart.yml) adds
+  # GHG_DEMO_MODE=true on top of this base when the demo experience is wanted.
+  # ---------------------------------------------------------------------------
+  streamlit:
+    build:
+      context: .
+      target: runtime
+    container_name: ghg_streamlit
+    depends_on:
+      app:
+        condition: service_started
+    environment:
+      GHG_API_BASE_URL: "http://app:8000"
+      GHG_ENVIRONMENT: "${GHG_ENVIRONMENT:-production}"
+      GHG_LOG_LEVEL: "${GHG_LOG_LEVEL:-INFO}"
+    command:
+      - "python"
+      - "-m"
+      - "streamlit"
+      - "run"
+      - "--server.address=0.0.0.0"
+      - "--server.port=8501"
+      - "--browser.gatherUsageStats=false"
+      - "--server.fileWatcherType=none"
+      - "/usr/local/lib/python3.11/site-packages/ghg_tool/ui/streamlit_app/Home.py"
+    ports:
+      - "8501:8501"
+    restart: unless-stopped
+    profiles:
+      - app  # streamlit is part of the 'app' bundle
+
+  # ---------------------------------------------------------------------------
   # ETL CLI (wave 3 — placeholder)
   # ---------------------------------------------------------------------------
   etl:
