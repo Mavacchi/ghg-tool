@@ -178,11 +178,11 @@ _INSERT_CALC_RUN = text(
     INSERT INTO ops.calc_runs (
         id, tenant_id, correlation_id, anno,
         emissions_written, duration_ms, gwp_set, regulatory_stream,
-        started_at, finished_at, created_by, dual_run_id
+        started_at, finished_at, created_by
     ) VALUES (
         :id, :tenant_id, :correlation_id, :anno,
         :emissions_written, :duration_ms, :gwp_set, :regulatory_stream,
-        :started_at, :finished_at, :created_by, :dual_run_id
+        :started_at, :finished_at, :created_by
     )
     """
 )
@@ -263,7 +263,6 @@ async def _persist_emissions(
     gwp_set: str,
     regulatory_stream: str,
     created_by: str,
-    dual_run_id: uuid.UUID | None = None,
 ) -> None:
     """Bulk-INSERT emissions and a single ops.calc_runs row in one transaction.
 
@@ -313,10 +312,6 @@ async def _persist_emissions(
                 "started_at": started_at,
                 "finished_at": finished_at,
                 "created_by": created_by,
-                # M-05 / FR-34: link CSRD and EU ETS tracks for verifier
-                # traceability per Reg. UE 2018/2067 Art. 6 (methodology.md
-                # §11.1). NULL for single-track runs.
-                "dual_run_id": str(dual_run_id) if dual_run_id is not None else None,
             },
         )
 
@@ -344,7 +339,6 @@ def run_calc_and_persist(
     gwp_set: str = "AR6",
     regulatory_stream: str = "CSRD_ESRS_E1",
     created_by: str = "calc_service",
-    dual_run_id: uuid.UUID | None = None,
 ) -> CalcPersistResult:
     """Run the calc pipeline end-to-end and persist the results.
 
