@@ -161,10 +161,10 @@ def _background_run(
 
     from ghg_tool.application.services.calc_persistence import run_calc_and_persist  # noqa: PLC0415
 
-    raw_dsn = os.getenv("DATABASE_URL") or os.getenv(
+    raw_dsn: str = os.getenv("DATABASE_URL") or os.getenv(
         "SQLALCHEMY_URL",
         "postgresql+asyncpg://ghg_app:changeme@localhost:5432/ghg_tool",
-    )
+    ) or "postgresql+asyncpg://ghg_app:changeme@localhost:5432/ghg_tool"
 
     def _sync_dsn(raw: str) -> str:
         no_driver = re.sub(r"^postgresql\\+\\w+://", "postgresql://", raw)

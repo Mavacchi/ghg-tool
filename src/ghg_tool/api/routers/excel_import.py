@@ -415,7 +415,9 @@ async def import_excel(
             return "'" + value
         return value
 
-    def _write_temp_csv(df: pd.DataFrame) -> tempfile.NamedTemporaryFile:  # type: ignore[type-arg]
+    # tempfile.NamedTemporaryFile is a factory returning a private
+    # _TemporaryFileWrapper class; annotate as Any.
+    def _write_temp_csv(df: pd.DataFrame) -> Any:
         """Write df to a UTF-8-BOM semicolon CSV in /tmp; caller owns the handle.
 
         All string cells are sanitised against formula injection before writing

@@ -80,9 +80,10 @@ def _run_scheduled_calc(
     from ghg_tool.application.services.calc_persistence import run_calc_and_persist  # noqa: PLC0415
 
     _DEFAULT_TENANT_CODE = os.getenv("GHG_SCHEDULER_TENANT_CODE", "GRESMALT")  # noqa: N806
-    _RAW_DSN = os.getenv("DATABASE_URL") or os.getenv(  # noqa: N806
-        "SQLALCHEMY_URL",
-        "postgresql+asyncpg://ghg_app:changeme@localhost:5432/ghg_tool",
+    _RAW_DSN: str = (  # noqa: N806
+        os.getenv("DATABASE_URL")
+        or os.getenv("SQLALCHEMY_URL")
+        or "postgresql+asyncpg://ghg_app:changeme@localhost:5432/ghg_tool"
     )
 
     def _sync_dsn(raw: str) -> str:
