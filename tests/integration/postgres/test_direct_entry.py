@@ -151,6 +151,38 @@ def _build_mock_user(tenant_id: str) -> MagicMock:
     return user
 
 
+async def _insert_user(
+    engine: AsyncEngine,
+    *,
+    tenant_id: str,
+    user_id: str,
+) -> None:
+    """Insert a real ref.users row so audit_log.user_id FK resolves."""
+    async with engine.begin() as conn:
+        # Pick any role for this tenant (or fall back to first available).
+        role_row = await conn.execute(
+            text("SELECT id::text FROM ref.roles LIMIT 1")
+        )
+        role_id = role_row.scalar_one()
+        await conn.execute(
+            text(
+                "INSERT INTO ref.users "
+                "(id, tenant_id, username, email, password_hash, role_id, is_active) "
+                "VALUES "
+                "(CAST(:uid AS uuid), CAST(:tid AS uuid), :uname, :email, "
+                " 'x', CAST(:rid AS uuid), TRUE) "
+                "ON CONFLICT (id) DO NOTHING"
+            ),
+            {
+                "uid": user_id,
+                "tid": tenant_id,
+                "uname": f"test_user_{user_id[:8]}",
+                "email": f"test_{user_id[:8]}@test.local",
+                "rid": role_id,
+            },
+        )
+
+
 async def _insert_factor(
     engine: AsyncEngine,
     *,
@@ -245,6 +277,7 @@ async def test_compute_and_insert_writes_raw_direct_entry(
 
     session_factory = async_sessionmaker(async_engine, expire_on_commit=False)
     user = _build_mock_user(tenant_id)
+    await _insert_user(async_engine, tenant_id=tenant_id, user_id=user.sub)
     catalog = _build_mock_catalog()
 
     fixed_cid = str(uuid.uuid4())
