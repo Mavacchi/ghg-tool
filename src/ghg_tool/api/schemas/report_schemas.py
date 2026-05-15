@@ -1,8 +1,13 @@
-"""Pydantic v2 schemas for /reports endpoints (FR-27, FR-28)."""
+"""Pydantic v2 schemas for /reports and /exports endpoints (FR-27, FR-28).
+
+New schemas introduced for REV-WAVE3-007 Celery migration:
+    CeleryJobAccepted  — 202 response body from POST /exports/pdf|xlsx
+    CeleryJobStatus    — 200 response body from GET /exports/{task_id}/status
+"""
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -69,3 +74,48 @@ class ReportJobStatus(BaseModel):
     download_url: str | None = None
     error_message: str | None = None
     correlation_id: UUID
+
+
+# ---------------------------------------------------------------------------
+# REV-WAVE3-007 — Celery-backed export schemas
+# ---------------------------------------------------------------------------
+
+
+class CeleryJobAccepted(BaseModel):
+    """202 Accepted response for ``POST /api/v1/exports/pdf`` and ``/xlsx``.
+
+    Returned immediately after the Celery task is enqueued.
+
+    Attributes:
+        task_id: Celery task UUID (use for polling and download).
+        status_url: Absolute URL for ``GET /api/v1/exports/{task_id}/status``.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    task_id: str = Field(description="Celery task UUID")
+    status_url: str = Field(description="URL to poll for job status")
+
+
+class CeleryJobStatus(BaseModel):
+    """Response for ``GET /api/v1/exports/{task_id}/status``.
+
+    Maps Celery's internal states to the public API vocabulary:
+        PENDING   — task queued, not yet picked up by a worker
+        STARTED   — worker has started (requires task_track_started=True)
+        SUCCESS   — task completed; ``result`` contains the metadata dict
+        FAILURE   — task failed; ``error`` contains the exception message
+
+    Attributes:
+        task_id: The Celery task UUID.
+        state: Current task state string.
+        result: Metadata dict returned by the task on success (None otherwise).
+        error: Exception message on failure (None otherwise).
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    task_id: str
+    state: Literal["PENDING", "STARTED", "SUCCESS", "FAILURE", "REVOKED", "RETRY"]
+    result: dict[str, Any] | None = None
+    error: str | None = None

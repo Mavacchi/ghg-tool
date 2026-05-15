@@ -2,15 +2,18 @@
 # GHG Tool — Docker Compose (local development + integration test stack)
 #
 # Services:
-#   db        — PostgreSQL 15 with ghg_tool database
-#   migrate   — one-shot Alembic upgrade (depends on db healthcheck)
-#   app       — FastAPI (uvicorn) [wave 3; placeholder command]
-#   etl       — ETL orchestrator CLI [wave 3; placeholder command]
+#   db             — PostgreSQL 15 with ghg_tool database
+#   redis          — Redis 7 broker + result backend for Celery (REV-WAVE3-007)
+#   migrate        — one-shot Alembic upgrade (depends on db healthcheck)
+#   app            — FastAPI (uvicorn) [wave 3; placeholder command]
+#   celery-worker  — Celery worker for PDF/Excel export tasks (REV-WAVE3-007)
+#   etl            — ETL orchestrator CLI [wave 3; placeholder command]
 #
 # Usage:
-#   docker compose up db migrate      # start DB + apply migrations
-#   docker compose up                 # full stack (requires app image built)
-#   docker compose down -v            # stop + remove volumes
+#   docker compose up db redis migrate              # start infra services
+#   docker compose up                               # full stack
+#   docker compose --profile app up                 # app + worker bundle
+#   docker compose down -v                          # stop + remove volumes
 
 services:
   # ---------------------------------------------------------------------------
@@ -38,6 +41,25 @@ services:
       start_period: 10s
 
   # ---------------------------------------------------------------------------
+  # Redis 7 — Celery broker (db 1) + result backend (db 2) — REV-WAVE3-007
+  # Also available for future rate-limiter (SEC-ADV-008) and token blacklist
+  # (SEC-P1-007) without an additional service.
+  # ---------------------------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    container_name: ghg_redis
+    restart: unless-stopped
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+
+  # ---------------------------------------------------------------------------
   # Alembic migrations (run-once on every docker compose up)
   # ---------------------------------------------------------------------------
   migrate:
@@ -47,6 +69,8 @@ services:
     container_name: ghg_migrate
     depends_on:
       db:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     environment:
       SQLALCHEMY_URL: "postgresql+psycopg://ghg_app:${POSTGRES_PASSWORD:-changeme}@db:5432/ghg_tool"
@@ -87,6 +111,38 @@ services:
     restart: unless-stopped
     profiles:
       - app  # only started when: docker compose --profile app up
+
+  # ---------------------------------------------------------------------------
+  # Celery worker — PDF / Excel export background tasks (REV-WAVE3-007)
+  # Concurrency 2: each worker slot can hold one WeasyPrint + one openpyxl
+  # render simultaneously.  Increase --concurrency for more parallel exports.
+  # ---------------------------------------------------------------------------
+  celery-worker:
+    build:
+      context: .
+      target: runtime
+    container_name: ghg_celery_worker
+    command: >
+      celery -A ghg_tool.infrastructure.celery_app worker
+      --loglevel=info
+      --concurrency=2
+      --queues=celery
+    depends_on:
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      CELERY_BROKER_URL: "redis://redis:6379/1"
+      CELERY_RESULT_BACKEND: "redis://redis:6379/2"
+      SQLALCHEMY_URL: "postgresql+asyncpg://ghg_app:${POSTGRES_PASSWORD:-changeme}@db:5432/ghg_tool"
+      DATABASE_URL: "postgresql+asyncpg://ghg_app:${POSTGRES_PASSWORD:-changeme}@db:5432/ghg_tool"
+      GHG_LOG_LEVEL: "${GHG_LOG_LEVEL:-INFO}"
+      GHG_ENVIRONMENT: "${GHG_ENVIRONMENT:-production}"
+      GHG_JWT_SECRET: "${GHG_JWT_SECRET}"
+    restart: unless-stopped
+    profiles:
+      - app  # started together with the app bundle
 
   # ---------------------------------------------------------------------------
   # Streamlit dashboard — production-safe defaults (no demo seed, no banner).

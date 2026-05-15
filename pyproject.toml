@@ -47,6 +47,9 @@ dependencies = [
     "plotly>=5.22,<5.23",
     # Utilities
     "python-dotenv>=1.0,<1.1",
+    # Async task queue (REV-WAVE3-007)
+    "celery>=5.4,<5.5",
+    "redis>=5.0,<6.0",
 ]
 
 [project.optional-dependencies]
@@ -141,6 +144,7 @@ module = [
     "pandera.*", "weasyprint.*", "streamlit.*", "plotly.*", "slowapi.*",
     "openpyxl.*", "jinja2.*", "httpx.*",
     "matplotlib.*", "apscheduler.*",
+    "celery.*", "kombu.*",
 ]
 ignore_missing_imports = true
 

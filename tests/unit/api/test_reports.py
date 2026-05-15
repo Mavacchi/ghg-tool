@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import base64
 import os
 import uuid
+from unittest.mock import MagicMock, patch
 
 os.environ.setdefault("GHG_JWT_ALGORITHM", "HS256")
 os.environ.setdefault("GHG_JWT_SECRET", "test-secret-key-for-unit-tests-only")
@@ -13,6 +15,8 @@ from fastapi.testclient import TestClient
 
 from ghg_tool.api.dependencies.auth import CurrentUser, get_current_user
 from ghg_tool.api.main import app
+
+_XLSX_APPLY_ASYNC = "ghg_tool.application.tasks.export_tasks.export_excel_task.apply_async"
 
 _TENANT_ID = str(uuid.uuid4())
 
@@ -124,34 +128,49 @@ class TestExcelDownload:
     """
 
     def test_excel_job_completes_and_download_endpoint_returns_bytes(self) -> None:
-        """Full round-trip: POST /xlsx -> COMPLETED status -> binary download."""
-        from ghg_tool.api.routers.exports import router as exports_router  # noqa: F401
-        from ghg_tool.application.services.export_service import (
-            _internal_to_wire,
-            get_job_result,
-            get_job_status,
-        )
+        """Full round-trip via Celery: POST /xlsx → 202 → Celery SUCCESS → download.
+
+        REV-WAVE3-007: POST /api/v1/exports/xlsx now enqueues a Celery task and
+        returns CeleryJobAccepted (task_id + status_url) instead of the old
+        in-memory ReportJobStatus.  This test has been updated to use mocks for
+        the Celery broker so no Redis instance is required.
+        """
+        task_id = str(uuid.uuid4())
+        xlsx_bytes = b"PK\x03\x04fake-xlsx-roundtrip"
+        fake_result = {
+            "job_id": task_id,
+            "job_type": "excel",
+            "size_bytes": len(xlsx_bytes),
+            "result_b64": base64.b64encode(xlsx_bytes).decode("ascii"),
+            "tenant_id": _TENANT_ID,
+        }
+
+        mock_async_result = MagicMock()
+        mock_async_result.state = "SUCCESS"
+        mock_async_result.result = fake_result
+
+        mock_task_result = MagicMock()
+        mock_task_result.id = task_id
 
         app.dependency_overrides[get_current_user] = _user_override("editor")
-        with TestClient(app, raise_server_exceptions=False) as client:
+        with patch(_XLSX_APPLY_ASYNC, return_value=mock_task_result), \
+             patch("ghg_tool.api.routers.exports.AsyncResult", return_value=mock_async_result), \
+             TestClient(app, raise_server_exceptions=False) as client:
             create_resp = client.post(
                 "/api/v1/exports/xlsx",
                 json={"anno": 2024, "gwp_set": "AR6"},
             )
+            assert create_resp.status_code == 202
+            body = create_resp.json()
+            assert "task_id" in body
+            assert body["task_id"] == task_id
+
+            # Download directly (task is SUCCESS in mock)
+            dl_resp = client.get(f"/api/v1/exports/{task_id}/download")
         app.dependency_overrides.clear()
 
-        assert create_resp.status_code == 202
-        job_id = create_resp.json()["job_id"]
-
-        # In unit-test context _sync_render runs synchronously (no event loop),
-        # so the job transitions PENDING -> RUNNING -> DONE before we poll.
-        job = get_job_status(uuid.UUID(job_id))
-        assert job is not None
-        # Internal status must be DONE; wire contract maps DONE -> COMPLETED.
-        assert _internal_to_wire(job["status"]) == "COMPLETED"
-        # Result bytes must be available.
-        result_bytes = get_job_result(uuid.UUID(job_id))
-        assert result_bytes is not None
+        assert dl_resp.status_code == 200
+        assert dl_resp.content == xlsx_bytes
 
     def test_excel_status_endpoint_shows_completed(self) -> None:
         """GET /api/v1/exports/jobs/{id} returns 'COMPLETED' (not 'DONE').
