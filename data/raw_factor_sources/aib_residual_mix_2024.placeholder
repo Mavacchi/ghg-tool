@@ -1,0 +1,15 @@
+PLACEHOLDER — Do not commit the real PDF.
+
+File: aib_residual_mix_2024.pdf
+Expected SHA-256 pin: (set in seed_loader.py AIB_PDF_SHA256 after manual retrieval)
+Source URL: https://www.aib-net.org/facts/european-residual-mix/2024
+
+Note: AIB PDF returned HTTP 403 during Phase 2 validation (MG-15 gate).
+Check the AIB website after 2025-05-30 for the published 2024 residual mix.
+
+To use:
+1. Download the PDF from the URL above.
+2. Rename to aib_residual_mix_2024.pdf in this directory.
+3. Run: python -m ghg_tool.infrastructure.factors.seed_loader --check-hash aib
+4. Update AIB_PDF_SHA256 constant in seed_loader.py with the returned hash.
+5. Run: python -m ghg_tool.infrastructure.factors.seed_loader --apply

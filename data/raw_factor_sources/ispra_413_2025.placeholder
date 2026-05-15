@@ -1,0 +1,12 @@
+PLACEHOLDER — Do not commit the real PDF.
+
+File: ispra_413_2025.pdf
+Expected SHA-256 pin: (set in seed_loader.py ISPRA_PDF_SHA256 after manual retrieval)
+Source URL: https://emissioni.sina.isprambiente.it/wp-content/uploads/2025/05/Le-emissioni-di-CO2-nel-settore-elettrico_r413-2025_def.pdf
+
+To use:
+1. Download the PDF from the URL above.
+2. Rename to ispra_413_2025.pdf in this directory.
+3. Run: python -m ghg_tool.infrastructure.factors.seed_loader --check-hash ispra
+4. Update ISPRA_PDF_SHA256 constant in seed_loader.py with the returned hash.
+5. Run: python -m ghg_tool.infrastructure.factors.seed_loader --apply
