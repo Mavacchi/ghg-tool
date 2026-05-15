@@ -1,7 +1,7 @@
 # GHG Methodology — Ceramic Tile Manufacturer
 
-**Version**: 1.0.0 (Phase 9 — initial publication incorporating Phase 7/8 changes)
-**Date**: 2026-05-14
+**Version**: 1.3.0 (Phase 9 — formalises dual_run_id FK linkage per Q1 decision option A)
+**Date**: 2026-05-15
 **Status**: APPROVED — reflects SustainabilityExpertAgent methodology_validation.md v1.0.0 and
 Phase 7/8 security and data-model decisions
 **References**:
@@ -415,6 +415,27 @@ Every emission row carries: `raw_row_id` (FK to the ingestion staging row), `fac
 (FK to `ref.factor_catalog`), `factor_version`, `factor_source`, `gwp_set`, `methodology`,
 `calc_timestamp`, `created_by`, `correlation_id`. No unlinked rows are permitted.
 
+### Verifier reconciliation query — dual-track pair (§11.1)
+
+The `dual_run_id` FK on `ops.calc_runs` (see §11.1) enables a deterministic, single-query
+reconciliation of a dual-track pair. This is the audit-grade alternative to a
+temporal-window join, which would be non-deterministic when multiple runs exist for the same
+reporting year:
+
+```sql
+-- Verifier reconciliation: pair an AR6/CSRD run with its AR5/ETS counterpart
+SELECT a.*, b.*
+FROM   ops.calc_runs a
+JOIN   ops.calc_runs b ON a.dual_run_id = b.id
+WHERE  a.id = :run_id;
+```
+
+The query returns exactly one row (or zero if `:run_id` is a single-track run with
+`dual_run_id IS NULL`). It gives the verifier direct, side-by-side access to both the
+CSRD/AR6 and EU ETS/AR5 calculation records, confirming that both share the same
+`tenant_id`, `anno`, and raw activity-data snapshot as required by Reg. UE 2018/2067 Art. 6
+and ISAE 3000 §A99.
+
 ---
 
 ## 8. Multi-tenant Isolation (Phase 8)
@@ -512,6 +533,60 @@ This is mandated by:
 - **Reg. UE 2018/2067** (Accreditation and Verification Regulation) Art. 6 — the verifier
   checks that AR5-based CO2e totals are reproduced from the same underlying activity data as
   the CSRD report, so both tracks must derive from the same raw ingestion snapshot.
+
+#### Relational linkage via `dual_run_id` (Decision Q1 — option A)
+
+The assertion that "both tracks must derive from the same raw ingestion snapshot" is
+enforceable only through an explicit relational link between the two `ops.calc_runs` rows.
+Temporal-proximity joins or composite-key joins on `(tenant_id, anno, regulatory_stream)`
+are not deterministic: if one track is re-run after a factor update without re-running the
+other, a natural join silently pairs a newer row with an older one that derived from a
+different raw snapshot, breaking reproducibility.
+
+The linkage is therefore enforced relationally via a **`dual_run_id UUID FK` column on
+`ops.calc_runs`**. The column is self-referential (references `ops.calc_runs.id`) and the
+relationship is **reciprocal**: each row in a dual-track pair stores the `id` of the other
+row in its `dual_run_id` field. A partial unique index on `(dual_run_id)` supports
+verifier-join performance. A CHECK constraint `dual_run_id IS NULL OR dual_run_id <> id`
+prevents self-reference.
+
+**Normative anchors requiring this relational linkage**:
+
+- **Reg. UE 2018/2067 Art. 6** — the verifier must confirm that the AR5/ETS tCO2e values
+  and the AR6/CSRD tCO2e values were produced from the same raw activity-data snapshot.
+  Opaque joins do not satisfy this requirement.
+- **GHG Protocol Corporate Standard Ch.5** — recalculation events must be linked to the
+  prior baseline in a way that is "traceable and unambiguous". A re-run of one track is
+  exactly the recalculation pattern Ch.5 addresses; without `dual_run_id` the pairing is
+  ambiguous on its face.
+- **CSRD ESRS E1 §50–§55** — §53–§55 require the reconciliation between disclosed climate
+  metrics and any parallel regulatory reporting (e.g. EU ETS) to be evidenced. A FK column
+  is the canonical relational way to evidence a pairwise reconciliation.
+- **ISAE 3000 §A99** — the verifier must be able to "obtain sufficient evidence"; opaque
+  joins are not sufficient evidence under this standard.
+
+#### Two-row insert pattern (preferred)
+
+The **preferred** implementation uses pre-generated UUIDs for both calc-run rows and inserts
+them inside a single transaction:
+
+1. Generate `run1_id = uuid4()` and `run2_id = uuid4()` before opening the transaction.
+2. Insert the CSRD/AR6 row with `id = run1_id, dual_run_id = run2_id`.
+3. Insert the EU ETS/AR5 row with `id = run2_id, dual_run_id = run1_id`.
+4. Commit.
+
+Both rows are inserted in one atomic transaction; no UPDATE is required. This preserves the
+append-only spirit of `ops.calc_runs`.
+
+An alternative back-fill pattern — insert track 1, obtain `run1_id`, insert track 2 with
+`dual_run_id = run1_id`, then UPDATE track 1 to set `dual_run_id = run2_id` inside the same
+transaction — is also acceptable but **discouraged** because it requires an UPDATE on
+`ops.calc_runs`, breaking append-only semantics.
+
+#### Single-track runs
+
+Single-track runs (CSRD-only for tenants with no Annex I EU ETS installation) leave
+`dual_run_id` NULL — this is valid and audited as such.
 
 Operators must trigger dual-track runs using either:
 - CLI: `python -m scripts.run_calc --anno <year> --dual`
@@ -716,3 +791,4 @@ applicable.
 | 2026-05-14 | 1.0.0 | Initial publication — incorporates SustainabilityExpertAgent methodology_validation.md v1.0.0 decisions; adds Phase 7/8 security and data-model sections (M7 security-barrier views, SEC-P0-004 refresh role re-fetch, SEC-P0-005 PII hygiene, ADR-007 biogenic column confirmation) | None — first publication; no prior baseline to compare |
 | 2026-05-14 | 1.1.0 | Added §13 Factor catalog lifecycle and publication: draft/publish workflow, MG-02 immutability trigger, MG-03 published_at split, separation of duties (data_steward / esg_manager), audit-trail surface. Required for ESRS 2 BP-2. | No change to emission calculations or GWP values. |
 | 2026-05-14 | 1.2.0 | Added §1.1 Consolidation procedure (M-12); §1.2 Reporting period and lock-date (M-20); Scope 1 net-vs-gross statement (M-21); Scope 3 gas-by-gas limitation (M-10); §2.1 Scope 3 materiality assessment (M-22); Cat 12 source citation (M-19); §3.1 GWP100 source-class rationale (M-02); AR5 MRR citation update (M-08); EU Taxonomy rephrasing (M-25); §15 Multi-year outlier detection sigma (M-16); C-025 endpoint URL corrected to GET /api/v1/emissions/{id}/corrections. | No change to emission calculations. Documentation completeness for ESRS 2 BP-2 and CSRD assurance. |
+| 2026-05-15 | 1.3.0 | §11.1 expanded to formalise `dual_run_id UUID FK` on `ops.calc_runs` as the mandatory relational linkage between CSRD/AR6 and EU ETS/AR5 calc-run pairs (sustainability-expert-agent Q1 decision, option A). Documents two-row insert pattern (preferred) vs. back-fill UPDATE (discouraged). Documents single-track NULL validity. §7 gains a verifier-query sub-section with the canonical one-row-pair reconciliation SQL as the audit-grade alternative to temporal-window joins. Normative anchors cited: Reg. UE 2018/2067 Art. 6, GHG Protocol Corporate Standard Ch.5, CSRD ESRS E1 §50–§55, ISAE 3000 §A99. | No change to emission calculations or GWP values. |
