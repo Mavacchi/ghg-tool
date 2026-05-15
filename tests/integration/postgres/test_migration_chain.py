@@ -154,16 +154,6 @@ def test_single_head_after_upgrade() -> None:
         )
 
 
-@pytest.mark.xfail(
-    reason=(
-        "Pre-existing downgrade gap: at least one migration's downgrade() does "
-        "not drop the objects it created (assertion: 2 leftover user tables "
-        "after `alembic downgrade base`). Likely a missing DROP in 0001_M0 or "
-        "in one of the wave-1/2 migrations; outside the calc/dual-track scope "
-        "of this branch. Tracked for migration-cleanup follow-up."
-    ),
-    strict=False,
-)
 @pytest.mark.integration
 def test_downgrade_base_then_upgrade_round_trip() -> None:
     """downgrade base then upgrade head is a clean round-trip with no errors.
