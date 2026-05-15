@@ -6,19 +6,17 @@ EXIOBASE for services.
 
 ADR-007 / GHG Protocol Corporate Standard Section 4.5:
 Cardboard (``ECOINV_CARDBOARD_V3_10``) and pallet
-(``ECOINV_PALLET_V3_10``) carry an embedded biogenic CO2 component in
-the ecoinvent cradle-to-gate factor. Per the GHG Protocol Section 4.5
-and ESRS E1-7 Section 49, biogenic CO2 MUST be reported as a memo line,
-NEVER included in the headline ``tco2e``. This module splits the total
-emissions:
+(``ECOINV_PALLET_V3_10``) must populate ``co2_biogenic_tonne`` AND
+``co2_fossil_tonne`` columns separately. ``tco2e`` carries only the
+fossil + non-CO2 GWP-weighted total -- biogenic CO2 is memo-only and is
+NEVER added to the headline ``tco2e``.
 
-    total_kg = factor.value * quantita
-    biogenic_kg = bio_share * total_kg
-    fossil_kg = total_kg - biogenic_kg
+The catalog field ``biogenic_co2_kg_per_unit`` is "kg biogenic CO2 per
+kg of product" (NOT a share of the total). It is applied directly to
+quantita to obtain the biogenic memo:
 
-and emits ``tco2e = fossil_kg / 1000`` together with the biogenic memo
-in ``co2_biogenic_tonne``. The invariant
-``tco2e + co2_biogenic_tonne == total_kg / 1000`` always holds.
+    tco2e_kg = factor.value * quantita        # fossil + non-CO2 only
+    biogenic_kg = bio_per_unit * quantita     # memo, in addition
 
 Methodology references:
   * GHG Protocol Corporate Standard Section 4.5 (biogenic carbon)
@@ -151,27 +149,28 @@ def _build_record(  # noqa: PLR0913 — internal builder dispatch
     """
     factor = require_factor(factors, factor_id, gwp_set=gwp.code)
     quantita = to_decimal(row["quantita"])
-    # factor.value already CO2e per unit; apply directly.
-    total_kg = (factor.value or Decimal("0")) * quantita
+    # factor.value is fossil + non-CO2 GWP-weighted kg CO2e per unit (kg
+    # of product). It does NOT include biogenic CO2; biogenic is carried
+    # separately by `biogenic_co2_kg_per_unit` on the FactorRecord and is
+    # reported as a memo line per ADR-007 + GHG Protocol Section 4.5.
+    tco2e_total_kg = (factor.value or Decimal("0")) * quantita
+    tco2e_total = tco2e_total_kg * KG_TO_TONNE
 
     co2_biogenic_tonne: Decimal | None = None
     co2_fossil_tonne: Decimal | None = None
 
-    # ADR-007 / GHG Protocol Section 4.5: split biogenic from fossil so the
-    # headline ``tco2e`` is fossil-only and biogenic is memo. The invariant
-    # tco2e + co2_biogenic_tonne == total_kg * KG_TO_TONNE must hold.
+    # ADR-007 / GHG Protocol Section 4.5: biogenic CO2 is a memo line in
+    # ADDITION to the headline tco2e. The factor catalog field
+    # `biogenic_co2_kg_per_unit` is "kg biogenic CO2 per kg of product",
+    # NOT a share of the total. Apply it directly to quantita.
     if factor_id in _BIOGENIC_FACTOR_IDS:
-        bio_share = factors.get_biogenic_share(factor_id, gwp_set=gwp.code)
-        if bio_share is not None:
-            biogenic_kg = bio_share * total_kg
-            fossil_kg = total_kg - biogenic_kg
+        bio_per_unit = factors.get_biogenic_share(factor_id, gwp_set=gwp.code)
+        if bio_per_unit is not None:
+            biogenic_kg = bio_per_unit * quantita
             co2_biogenic_tonne = biogenic_kg * KG_TO_TONNE
-            co2_fossil_tonne = fossil_kg * KG_TO_TONNE
-            tco2e_total = co2_fossil_tonne
-        else:
-            tco2e_total = total_kg * KG_TO_TONNE
-    else:
-        tco2e_total = total_kg * KG_TO_TONNE
+            # tco2e remains the fossil + non-CO2 GWP-weighted total;
+            # biogenic is memo-only and never enters the headline number.
+            co2_fossil_tonne = tco2e_total
 
     return make_emission(
         correlation_id=correlation_id,
