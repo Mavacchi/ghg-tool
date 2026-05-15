@@ -34,10 +34,13 @@ from ghg_tool.ui.streamlit_app.lib.api_client import (  # noqa: E402
     fetch_emissions,
     emissions_to_dataframe,
     post_correction,
+    correct_emission,
+    EmissionCorrectionError,
     list_chart_annotations,
     create_chart_annotation,
     toggle_annotation_visibility,
 )
+from ghg_tool.ui.streamlit_app.lib.auth import get_token  # noqa: E402
 from ghg_tool.ui.streamlit_app.lib.palette import plotly_qualitative, SCOPE_COLOURS  # noqa: E402
 from ghg_tool.ui.streamlit_app.lib.tooltips import build_emission_hovertemplate, CUSTOMDATA_COLS_WITH_CI  # noqa: E402
 
@@ -476,6 +479,145 @@ else:
                 file_name=f"ghg_emissions_{selected_year}_scope{selected_scope or 'all'}.csv",
                 mime="text/csv",
             )
+
+            # -------------------------------------------------------------------
+            # Per-row correction affordance — data_steward only
+            #
+            # Renders an inline "Correggi questa riga" expander next to each row.
+            # Corrections are append-only: the API creates a new row and links the
+            # old via superseded_by; the original row is never modified.
+            #
+            # Roles other than data_steward see no affordance at all (no greyed-
+            # out buttons — they are noise for non-write roles).
+            # -------------------------------------------------------------------
+            _corr_role = st.session_state.get("role", "auditor")
+            if _corr_role == "data_steward" and "id" in df.columns and not df.empty:
+                _corr_token = get_token() or ""
+
+                # Correction reason codes and their i18n labels
+                _CORR_REASONS = {
+                    "FACTOR_UPDATE": _("reason_factor_update", lang),
+                    "DATA_QUALITY": _("reason_data_quality", lang),
+                    "BOUNDARY_CHANGE": _("reason_boundary_change", lang),
+                    "MANUAL_FIX": _("reason_manual_fix", lang),
+                }
+
+                st.divider()
+                st.markdown(f"#### {_('emission_correct_btn', lang)}")
+
+                # Append-only explainer note — static HTML, no user content
+                st.markdown(
+                    '<div class="ct-correction-note">'
+                    '<span class="ct-note-icon">&#8505;</span>'
+                    f"<span>{_('emission_correct_intro', lang)}</span>"
+                    "</div>",
+                    unsafe_allow_html=True,
+                )
+
+                for _ridx, _erow in df.iterrows():
+                    _eid = str(_erow.get("id", ""))
+                    if not _eid:
+                        continue
+
+                    _row_label = (
+                        f"{_erow.get('codice_sito', '?')} · "
+                        f"Scope {_erow.get('scope', '?')} · "
+                        f"{_erow.get('sub_scope', '?')} · "
+                        f"{float(_erow.get('tco2e', 0.0)):,.3f} tCO2e"
+                    )
+                    _corr_open_key = f"corr_open_{_eid}"
+
+                    with st.container(border=True):
+                        _rcols = st.columns([6, 1])
+                        with _rcols[0]:
+                            st.caption(_row_label)
+                        with _rcols[1]:
+                            if st.button(
+                                "⊕ " + _("emission_correct_btn", lang),
+                                key=f"corr_btn_{_eid}",
+                                help=_("emission_correct_btn", lang),
+                            ):
+                                st.session_state[_corr_open_key] = not st.session_state.get(
+                                    _corr_open_key, False
+                                )
+
+                        if st.session_state.get(_corr_open_key, False):
+                            with st.form(key=f"corr_form_{_eid}"):
+                                _ccol1, _ccol2 = st.columns(2)
+                                with _ccol1:
+                                    _sel_reason = st.selectbox(
+                                        "Motivo / Reason",
+                                        options=list(_CORR_REASONS.keys()),
+                                        format_func=lambda k: _CORR_REASONS[k],
+                                        key=f"cf_reason_{_eid}",
+                                    )
+                                with _ccol2:
+                                    _sel_tco2e = st.number_input(
+                                        "Nuovo valore tCO2e",
+                                        value=float(_erow.get("tco2e", 0.0)),
+                                        min_value=0.0,
+                                        step=0.001,
+                                        format="%.3f",
+                                        key=f"cf_tco2e_{_eid}",
+                                    )
+                                _sel_notes = st.text_area(
+                                    "Note",
+                                    key=f"cf_notes_{_eid}",
+                                    max_chars=4000,
+                                    height=80,
+                                    placeholder="Descrivi il motivo della correzione (min 10 caratteri).",
+                                )
+
+                                _csub, _ccan = st.columns([1, 1])
+                                with _csub:
+                                    _corr_submitted = st.form_submit_button(
+                                        _("emission_correct_btn", lang),
+                                        type="primary",
+                                        use_container_width=True,
+                                    )
+                                with _ccan:
+                                    _corr_cancelled = st.form_submit_button(
+                                        "Annulla / Cancel",
+                                        use_container_width=True,
+                                    )
+
+                                if _corr_submitted:
+                                    if not _sel_notes or len(_sel_notes.strip()) < 10:
+                                        st.error(_("justification_too_short", lang))
+                                    else:
+                                        _corr_payload = {
+                                            "reason_code": _sel_reason,
+                                            "tco2e_corrected": _sel_tco2e,
+                                            "notes": _sel_notes.strip(),
+                                        }
+                                        with st.spinner("Salvataggio correzione..."):
+                                            try:
+                                                correct_emission(
+                                                    _eid,
+                                                    _corr_payload,
+                                                    token=_corr_token,
+                                                )
+                                                st.session_state[_corr_open_key] = False
+                                                # Invalidate emissions cache
+                                                _ec = getattr(fetch_emissions, "clear", None)
+                                                if callable(_ec):
+                                                    try:
+                                                        _ec()
+                                                    except (AttributeError, TypeError):
+                                                        pass
+                                                st.toast(
+                                                    _("toast_emission_corrected", lang),
+                                                    icon="✓",
+                                                )
+                                                st.rerun()
+                                            except EmissionCorrectionError as exc:
+                                                st.error(
+                                                    f"Errore correzione (HTTP {exc.status_code}): {exc.detail}"
+                                                )
+
+                                if _corr_cancelled:
+                                    st.session_state[_corr_open_key] = False
+                                    st.rerun()
 
         with _tab_hotspot:
             _render_hotspot_tab(

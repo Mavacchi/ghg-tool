@@ -158,6 +158,42 @@ class FactorCatalogCreate(BaseModel):
         return v
 
 
+class FactorCatalogUpdate(BaseModel):
+    """Payload for ``PATCH /api/v1/factor-catalog/{factor_uuid}`` (data_steward only).
+
+    All fields are optional — send only the fields to update.  Identity
+    fields (``factor_id``, ``version``, ``gwp_set``, ``source``, ``substance``,
+    ``scope``, ``category``) are intentionally excluded: they cannot be
+    changed on an existing row.  Create a new version instead.
+
+    Only applicable to DRAFT rows (``is_published=False``).  Published rows
+    are immutable per ADR-007 / ISAE 3000 §A99 and will receive a 422.
+
+    Attributes:
+        value: Updated numeric factor value (>= 0, or None for licence-only).
+        unit: Updated unit string.
+        applicability_note: Updated applicability description.
+        pdf_source_uri: Updated object-store URI of the source document.
+        biogenic_co2_kg_per_unit: Updated biogenic CO2 companion value.
+        is_licence_only: Updated licence-only flag.
+        is_tbc: Updated TBC flag (to-be-confirmed pending numeric pinning).
+        vintage: Updated publication vintage year string.
+        valid_from: Updated date from which this version applies.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    value: float | None = Field(default=None, ge=0.0)
+    unit: str | None = Field(default=None, min_length=1, max_length=40)
+    applicability_note: str | None = Field(default=None, max_length=2000)
+    pdf_source_uri: str | None = Field(default=None, max_length=512)
+    biogenic_co2_kg_per_unit: float | None = Field(default=None, ge=0.0)
+    is_licence_only: bool | None = None
+    is_tbc: bool | None = None
+    vintage: str | None = Field(default=None, max_length=40)
+    valid_from: date | None = None
+
+
 PublishReasonCode = Literal[
     "INITIAL_PUBLICATION",
     "VERSION_BUMP",

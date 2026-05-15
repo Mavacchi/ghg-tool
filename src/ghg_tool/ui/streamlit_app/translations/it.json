@@ -1,6 +1,6 @@
 {
   "app_title": "Strumento GHG: {company_name}",
-  "hero_tagline": "Contabilità climatica. Pronta per l'audit.",
+  "hero_tagline": "Il registro carbonio per la rendicontazione CSRD.",
   "empty_kpi_title": "Nessuna emissione registrata.",
   "empty_kpi_body": "Il registro è vuoto per i filtri selezionati. Vai a *Inserimento dati* per registrare la prima emissione, oppure cambia l'anno fiscale nella barra laterale.",
   "empty_kpi_cta": "Vai a Inserimento dati",
@@ -30,7 +30,7 @@
   "login_demo_hint": "Demo: inserisci qualsiasi utente/password per token demo.",
   "login_demo_warning": "⚠️ DEMO MODE attiva (GHG_DEMO_MODE=true). L'autenticazione viene bypassata: qualunque utente/password sopra la lunghezza minima entrerà con un token demo. NON usare in produzione.",
   "login_real_hint": "Accesso autenticato. Le credenziali sono verificate dal backend.",
-  "demo_mode_banner": "DEMO MODE: sei autenticato con un token demo. I dati e i ruoli mostrati non sono garantiti dal backend.",
+  "demo_mode_banner": "MODALITÀ DEMO — dati precaricati a scopo dimostrativo. NON usare per rendicontazione reale. Login: demo / demo",
   "logout_btn": "Esci",
   "total_emissions": "Emissioni Totali (Scope 1+2 LB+3)",
   "scope1_total": "Scope 1: Totale",
@@ -282,5 +282,20 @@
   "sbti_create_success": "Obiettivo creato con successo.",
   "sbti_create_error": "Errore nella creazione dell obiettivo.",
   "sbti_section_methodology": "Nota metodologica",
-  "sbti_methodology_text": "Gli obiettivi SBTi seguono l approccio di contrazione assoluta (ACA) definito nello SBTi Corporate Net-Zero Standard v1.2 (2024). Per i dettagli sui threshold ON_TRACK / SLIGHTLY_OFF / OFF_TRACK consultare docs/methodology.md, sezione SBTi."
+  "sbti_methodology_text": "Gli obiettivi SBTi seguono l approccio di contrazione assoluta (ACA) definito nello SBTi Corporate Net-Zero Standard v1.2 (2024). Per i dettagli sui threshold ON_TRACK / SLIGHTLY_OFF / OFF_TRACK consultare docs/methodology.md, sezione SBTi.",
+  "factor_edit_btn": "Modifica bozza",
+  "factor_delete_btn": "Elimina bozza",
+  "factor_delete_confirm": "Sicuro? Questa bozza verra eliminata definitivamente.",
+  "factor_save_btn": "Salva modifiche",
+  "factor_locked_tooltip": "Pubblicato — immutabile per ADR-007 / ISAE 3000",
+  "emission_correct_btn": "Correggi questa riga",
+  "emission_correct_intro": "Le correzioni non sovrascrivono lo storico. Viene inserita una nuova riga e quella precedente rimane visibile con superseded_by valorizzato.",
+  "reason_factor_update": "Aggiornamento fattore",
+  "reason_data_quality": "Correzione qualita dato",
+  "reason_boundary_change": "Cambio perimetro",
+  "reason_manual_fix": "Correzione manuale",
+  "toast_factor_saved": "Modifiche salvate",
+  "toast_factor_deleted": "Bozza eliminata",
+  "toast_emission_corrected": "Correzione registrata — nuova riga creata",
+  "empty_state_drafts": "Nessun fattore in bozza. Crea il primo per iniziare."
 }

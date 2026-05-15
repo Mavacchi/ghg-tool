@@ -19,6 +19,17 @@ from ghg_tool.domain.entities.emission_record import (
 )
 
 # ---------------------------------------------------------------------------
+# Canonical reason codes (must match fn_emit_correction CHECK in M1 migration)
+# ---------------------------------------------------------------------------
+ReasonCodeLiteral = Literal[
+    "DATA_ERROR",
+    "FACTOR_UPDATE",
+    "BOUNDARY_CHANGE",
+    "METHODOLOGY_REVISION",
+    "RESTATEMENT_>5PCT",
+]
+
+# ---------------------------------------------------------------------------
 # Allowed value sets (must match DB CHECK constraints)
 # ---------------------------------------------------------------------------
 
@@ -278,13 +289,7 @@ class EmissionCorrectionCreate(BaseModel):
 
     supersedes_id: UUID
     new_record: EmissionCreate
-    reason_code: Literal[
-        "DATA_ERROR",
-        "FACTOR_UPDATE",
-        "BOUNDARY_CHANGE",
-        "METHODOLOGY_REVISION",
-        "RESTATEMENT_>5PCT",
-    ]
+    reason_code: ReasonCodeLiteral
     justification: str = Field(min_length=10, max_length=1000)
 
 
@@ -335,3 +340,93 @@ class EmissionFilter(BaseModel):
     gwp_set: GwpSetLiteral | None = None
     cursor: str | None = None
     limit: int = Field(default=50, ge=1, le=500)
+
+
+# ---------------------------------------------------------------------------
+# Resource-scoped correction endpoint (POST /{emission_id}/correct)  FR-21
+# ---------------------------------------------------------------------------
+
+
+class EmissionCorrectionRequest(BaseModel):
+    """Request body for ``POST /api/v1/emissions/{emission_id}/correct``.
+
+    The ``emission_id`` path parameter identifies the row to supersede; the
+    body carries only the corrected fields plus the mandatory reason_code.
+    Identity fields (scope, sub_scope, codice_sito, anno, regulatory_stream,
+    gwp_set) are inherited from the predecessor row and MUST NOT change within
+    a correction — a scope or year change would require a new insert, not a
+    correction.
+
+    Required provenance fields (factor_source, factor_version, gwp_set,
+    methodology) must always be supplied so every row is self-describing
+    per FR-22 / CG-04.
+
+    Attributes:
+        reason_code: One of the five canonical FR-21 correction codes
+            (must match fn_emit_correction CHECK in M1 migration).
+        tco2e: Corrected total tCO2e value.  Must be >= 0.
+        factor_id: UUID of the factor catalog entry used for the correction.
+        factor_source: Provider identifier (e.g. DEFRA, ISPRA, IPCC).
+        factor_version: Exact version string of the factor.
+        gwp_set: GWP set used ('AR6' or 'AR5').
+        methodology: Calculation methodology.
+        notes: Optional free-text annotation for disclosure purposes.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    reason_code: ReasonCodeLiteral
+    tco2e: Annotated[float, Field(ge=0.0, description="Corrected tCO2e — must be >= 0")]
+    factor_id: UUID = Field(description="UUID of the factor catalog entry")
+    factor_source: str = Field(
+        min_length=1, max_length=40, description="Factor provider (DEFRA, ISPRA, IPCC …)"
+    )
+    factor_version: str = Field(
+        min_length=1, max_length=40, description="Exact version tag of the factor"
+    )
+    gwp_set: GwpSetLiteral = Field(description="GWP set used: 'AR6' or 'AR5'")
+    methodology: str = Field(
+        min_length=1, max_length=40, description="Calculation methodology"
+    )
+    notes: str | None = Field(
+        default=None, max_length=2000, description="Optional disclosure note"
+    )
+
+    @field_validator("methodology")
+    @classmethod
+    def validate_methodology(cls, v: str) -> str:
+        """Reject methodology strings not in the allowed vocabulary.
+
+        Args:
+            v: Raw methodology string.
+
+        Returns:
+            Validated methodology string.
+
+        Raises:
+            ValueError: If not in the allowed set.
+        """
+        if v not in _ALLOWED_METHODOLOGIES:
+            raise ValueError(
+                f"methodology={v!r} not valid. Allowed: {sorted(_ALLOWED_METHODOLOGIES)}"
+            )
+        return v
+
+
+class EmissionCorrectionDetailResponse(BaseModel):
+    """Response for ``POST /api/v1/emissions/{emission_id}/correct``.
+
+    Attributes:
+        new_id: UUID of the newly inserted replacement row.
+        superseded_id: UUID of the row that was closed (the predecessor).
+        reason_code: The reason code supplied in the request.
+        correlation_id: Fresh request-scoped correlation UUID assigned to the
+            new row.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    new_id: UUID
+    superseded_id: UUID
+    reason_code: ReasonCodeLiteral
+    correlation_id: UUID

@@ -1,6 +1,6 @@
 {
   "app_title": "GHG Tool: {company_name}",
-  "hero_tagline": "Climate accounting. Audit-ready.",
+  "hero_tagline": "Carbon ledger for CSRD-grade reporting.",
   "empty_kpi_title": "No emissions recorded.",
   "empty_kpi_body": "The ledger is empty for the selected filters. Go to *Data entry* to record the first emission, or change the fiscal year in the sidebar.",
   "empty_kpi_cta": "Go to Data entry",
@@ -30,7 +30,7 @@
   "login_demo_hint": "Demo: enter any username/password for a demo token.",
   "login_demo_warning": "⚠️ DEMO MODE active (GHG_DEMO_MODE=true). Authentication is bypassed: any username/password meeting the minimum length will be admitted with a demo token. Do NOT use in production.",
   "login_real_hint": "Authenticated login. Credentials are verified by the backend.",
-  "demo_mode_banner": "DEMO MODE: you are authenticated with a demo token. The data and roles shown are not guaranteed by the backend.",
+  "demo_mode_banner": "DEMO MODE — preloaded data for demonstration only. Do NOT use for real reporting. Login: demo / demo",
   "logout_btn": "Log out",
   "total_emissions": "Total Emissions (Scope 1+2 LB+3)",
   "scope1_total": "Scope 1: Total",
@@ -282,5 +282,20 @@
   "sbti_create_success": "Target created successfully.",
   "sbti_create_error": "Error creating target.",
   "sbti_section_methodology": "Methodology note",
-  "sbti_methodology_text": "SBTi targets follow the Absolute Contraction Approach (ACA) defined in the SBTi Corporate Net-Zero Standard v1.2 (2024). For ON_TRACK / SLIGHTLY_OFF / OFF_TRACK threshold details see docs/methodology.md, SBTi section."
+  "sbti_methodology_text": "SBTi targets follow the Absolute Contraction Approach (ACA) defined in the SBTi Corporate Net-Zero Standard v1.2 (2024). For ON_TRACK / SLIGHTLY_OFF / OFF_TRACK threshold details see docs/methodology.md, SBTi section.",
+  "factor_edit_btn": "Edit draft",
+  "factor_delete_btn": "Delete draft",
+  "factor_delete_confirm": "Sure? This draft will be permanently deleted.",
+  "factor_save_btn": "Save changes",
+  "factor_locked_tooltip": "Published — immutable per ADR-007 / ISAE 3000",
+  "emission_correct_btn": "Correct this row",
+  "emission_correct_intro": "Corrections do not overwrite history. A new row is inserted and the previous one stays visible with superseded_by set.",
+  "reason_factor_update": "Factor update",
+  "reason_data_quality": "Data quality fix",
+  "reason_boundary_change": "Boundary change",
+  "reason_manual_fix": "Manual fix",
+  "toast_factor_saved": "Changes saved",
+  "toast_factor_deleted": "Draft deleted",
+  "toast_emission_corrected": "Correction recorded — new row created",
+  "empty_state_drafts": "No draft factors. Create the first one to get started."
 }

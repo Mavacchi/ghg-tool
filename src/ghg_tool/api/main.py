@@ -78,42 +78,218 @@ _CORS_ORIGINS: Final[list[str]] = [
 
 
 def _demo_mode_enabled() -> bool:
-    """Return True iff GHG_DEMO_MODE is set to a truthy value."""
+    """Return True when demo mode is appropriate for the current environment.
+
+    Rules (defense-in-depth):
+    - ``ENV=production`` -> ALWAYS False, even if GHG_DEMO_MODE is set.
+      Production must never run with hardcoded demo credentials.
+    - ``ENV in ('development', 'demo')`` -> True automatically (no flag needed).
+    - Any other environment (staging, test, …) -> only True when
+      GHG_DEMO_MODE is explicitly set to a truthy value.
+    """
+    if _ENVIRONMENT == "production":
+        return False
+    if _ENVIRONMENT in ("development", "demo"):
+        return True
     return os.environ.get("GHG_DEMO_MODE", "").lower() in ("1", "true", "yes")
+
+
+async def _ensure_demo_user() -> None:
+    """Insert a demo user into ``ref.users`` if one does not already exist.
+
+    The demo user is created with:
+      - username:  demo
+      - password:  bcrypt("demo")
+      - role:      data_steward
+      - is_active: TRUE
+      - tenant:    the launch tenant (GRESMALT, falling back to CERAMIC_TILE_CO)
+      - email:     demo@demo.local (synthetic; never used for real mail)
+
+    Credentials are logged at WARNING level so they appear in operational
+    logs without being buried.  The password itself is never logged.
+
+    Failures are caught and logged; they do NOT abort startup.
+    """
+    try:
+        import asyncio  # noqa: PLC0415
+
+        from sqlalchemy import text  # noqa: PLC0415
+
+        from ghg_tool.infrastructure.db.session import AsyncSessionFactory  # noqa: PLC0415
+        from ghg_tool.infrastructure.security.password import hash_password  # noqa: PLC0415
+
+        def _hash() -> str:
+            # Run bcrypt in a thread so it does not block the event loop.
+            return hash_password("demo")
+
+        async with AsyncSessionFactory() as session:
+            # Check whether a "demo" user already exists (any tenant).
+            exists_result = await session.execute(
+                text("SELECT COUNT(*) FROM ref.users WHERE username = 'demo'")
+            )
+            if int(exists_result.scalar_one()) > 0:
+                logger.info("demo_user_already_exists")
+                return
+
+            # Resolve tenant: prefer GRESMALT (post-M8 rebrand), fall back
+            # to CERAMIC_TILE_CO (pre-M8 or test environments).
+            tenant_result = await session.execute(
+                text(
+                    "SELECT id FROM ref.tenants "
+                    "WHERE code IN ('GRESMALT', 'CERAMIC_TILE_CO') "
+                    "ORDER BY CASE code WHEN 'GRESMALT' THEN 0 ELSE 1 END "
+                    "LIMIT 1"
+                )
+            )
+            tenant_row = tenant_result.fetchone()
+            if tenant_row is None:
+                logger.warning(
+                    "demo_user_seed_skipped",
+                    reason="no_launch_tenant_found",
+                )
+                return
+            tenant_id = str(tenant_row[0])
+
+            # Resolve role_id for data_steward.
+            role_result = await session.execute(
+                text(
+                    "SELECT id FROM ref.roles WHERE role_code = 'data_steward'"
+                )
+            )
+            role_row = role_result.fetchone()
+            if role_row is None:
+                logger.warning(
+                    "demo_user_seed_skipped",
+                    reason="data_steward_role_not_found",
+                )
+                return
+            role_id = str(role_row[0])
+
+            password_hash = await asyncio.to_thread(_hash)
+
+            await session.execute(
+                text(
+                    "INSERT INTO ref.users "
+                    "  (tenant_id, username, email, password_hash, role_id, is_active) "
+                    "VALUES "
+                    "  (CAST(:tid AS uuid), :uname, :email, :phash, "
+                    "   CAST(:rid AS uuid), TRUE)"
+                ),
+                {
+                    "tid": tenant_id,
+                    "uname": "demo",
+                    "email": "demo@demo.local",
+                    "phash": password_hash,
+                    "rid": role_id,
+                },
+            )
+            await session.commit()
+
+        # Log credentials prominently so they surface in container logs.
+        # The literal password string "demo" is intentional and documented.
+        logger.warning(
+            "demo_user_seeded",
+            username="demo",
+            password="demo (CHANGE BEFORE PRODUCTION)",  # noqa: S106 — demo cred, not real secret
+            role="data_steward",
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "demo_user_seed_failed",
+            error_type=type(exc).__name__,
+        )
 
 
 async def _seed_demo_data_if_empty() -> None:
     """Auto-seed the staging tables on first launch in demo mode.
 
     Guards (defense in depth, integrity-critical for a CSRD ledger):
-      1. ``GHG_ENVIRONMENT`` must NOT be 'production' - a mis-set demo flag
+      1. ``GHG_ENVIRONMENT`` must NOT be 'production' — a mis-set demo flag
          must never auto-seed a real production DB.
-      2. ``GHG_DEMO_MODE`` must be truthy.
-      3. ``raw.scope1_ingestions`` must be empty.
+      2. ``_demo_mode_enabled()`` must return True.
+      3. Real production data must be absent: if ``ref.tenants`` contains more
+         than the M0 seed row the DB is considered live and seeding is skipped.
 
-    Failures are logged but never abort startup.
+    Seed-CSV handling: if the CSVs are missing from the deployed image the
+    function logs a clear warning and skips seeding without crashing.
+
+    Failures are logged but never abort startup — the API remains reachable
+    even when seeding partially fails.
     """
     if _ENVIRONMENT == "production":
         logger.info("demo_seed_skipped_production_environment")
         return
     if not _demo_mode_enabled():
         return
+
+    # Emit a visible warning so operators know demo mode is active.
+    logger.warning(
+        "demo_mode_active",
+        env=_ENVIRONMENT,
+        note="hardcoded demo credentials present — NEVER run in production",
+    )
+
     try:
         # Local imports keep these heavy deps off the import-time graph
         # of the API process when demo mode is disabled.
         import asyncio  # noqa: PLC0415
+        from pathlib import Path as _Path  # noqa: PLC0415
 
         from sqlalchemy import text  # noqa: PLC0415
 
         from ghg_tool.infrastructure.db.session import AsyncSessionFactory  # noqa: PLC0415
 
+        # ------------------------------------------------------------------
+        # Guard 1: skip if real data is present (more than the M0 tenant row).
+        # We check raw.scope1_ingestions row count as the canonical signal
+        # that real activity data has been loaded.
+        # ------------------------------------------------------------------
         async with AsyncSessionFactory() as session:
-            result = await session.execute(
+            tenant_result = await session.execute(
+                text("SELECT COUNT(*) FROM ref.tenants")
+            )
+            tenant_count = int(tenant_result.scalar_one())
+
+            s1_result = await session.execute(
                 text("SELECT COUNT(*) FROM raw.scope1_ingestions")
             )
-            count = result.scalar_one()
-        if count and int(count) > 0:
-            logger.info("demo_seed_skipped_already_populated", row_count=int(count))
+            s1_count = int(s1_result.scalar_one())
+
+        if tenant_count > 1:
+            logger.info(
+                "demo_seed_skipped_real_data_present",
+                tenant_count=tenant_count,
+            )
+            await _ensure_demo_user()
+            return
+
+        if s1_count > 0:
+            logger.info(
+                "demo_seed_skipped_already_populated",
+                row_count=s1_count,
+            )
+            await _ensure_demo_user()
+            return
+
+        # ------------------------------------------------------------------
+        # Guard 2: verify seed CSVs exist before trying to run the pipeline.
+        # Missing CSVs in a slim image should produce a clear warning, not a
+        # hard crash.
+        # ------------------------------------------------------------------
+        _data_dir = _Path(__file__).resolve().parent.parent.parent.parent / "data" / "raw"
+        _required_csvs = [
+            _data_dir / "scope1_combustione.csv",
+            _data_dir / "scope2_elettricita.csv",
+            _data_dir / "scope3_categorie.csv",
+        ]
+        _missing = [str(p) for p in _required_csvs if not p.exists()]
+        if _missing:
+            logger.warning(
+                "demo_seed_skipped_missing_csvs",
+                missing=_missing,
+                note="deploy data/raw/ CSVs to enable auto-seeding",
+            )
+            await _ensure_demo_user()
             return
 
         logger.info("demo_seed_starting", reason="empty_raw_tables")
@@ -127,14 +303,34 @@ async def _seed_demo_data_if_empty() -> None:
         # The seed script uses sync psycopg, so run it in a worker thread
         # to avoid blocking the asyncio event loop.
         exit_code = await asyncio.to_thread(_run_seed)
-        logger.info("demo_seed_finished", exit_code=exit_code)
-    except (ImportError, FileNotFoundError, OSError, RuntimeError) as exc:
+
+        # Log per-scope row counts after a successful seed.
+        async with AsyncSessionFactory() as session:
+            counts: dict[str, int] = {}
+            for tbl in ("scope1_ingestions", "scope2_ingestions", "scope3_ingestions"):
+                res = await session.execute(
+                    text(f"SELECT COUNT(*) FROM raw.{tbl}")  # noqa: S608
+                )
+                counts[tbl] = int(res.scalar_one())
+
+        logger.info(
+            "demo_seed_finished",
+            exit_code=exit_code,
+            scope1_rows=counts.get("scope1_ingestions", 0),
+            scope2_rows=counts.get("scope2_ingestions", 0),
+            scope3_rows=counts.get("scope3_ingestions", 0),
+        )
+    except (ImportError, FileNotFoundError, OSError, RuntimeError, Exception) as exc:  # noqa: BLE001
         logger.warning(
             "demo_seed_failed",
             error_type=type(exc).__name__,
             # Do NOT include the raw message: it may contain DSN / paths
             # we don't want in container logs.
         )
+        # Do NOT re-raise — the API must remain reachable even if seeding fails.
+
+    # Always attempt to create the demo user, even if CSV seeding failed.
+    await _ensure_demo_user()
 
 
 @asynccontextmanager

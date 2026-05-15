@@ -30,6 +30,7 @@ from ghg_tool.api.schemas.factor_schemas import (
     FactorCatalogPublishRequest,
     FactorCatalogPublishResponse,
     FactorCatalogResponse,
+    FactorCatalogUpdate,
     FactorFilter,
 )
 from ghg_tool.infrastructure.db.models.audit_log import AuditLog
@@ -974,4 +975,297 @@ async def publish_factor(
         client_ip=client_ip,
         user_agent=user_agent,
         log=log,
+    )
+
+
+# ---------------------------------------------------------------------------
+# PATCH /{factor_uuid}  — edit draft factor fields
+# ---------------------------------------------------------------------------
+
+@router.patch(
+    "/{factor_uuid}",
+    response_model=FactorCatalogResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Update mutable fields on a DRAFT factor (data_steward only)",
+    description=(
+        "Allows partial updates to a factor catalog entry **before** it is "
+        "published.  Send only the fields you want to change.\n\n"
+        "**Immutability**: published rows (``is_published=True``) are protected "
+        "by both the DB trigger ``trg_factor_immutable`` (MG-02) and an "
+        "app-layer guard that returns 422 ``factor_already_published`` before "
+        "any SQL UPDATE is attempted.  This guarantees that audit-trail "
+        "integrity per ADR-007 / ISAE 3000 §A99 is maintained even if the "
+        "trigger is temporarily disabled.\n\n"
+        "Identity fields (``factor_id``, ``version``, ``gwp_set``, ``source``, "
+        "``substance``, ``scope``, ``category``) are not patchable.  Create a "
+        "new version instead."
+    ),
+    responses={
+        200: {"description": "Factor updated; returns the full updated row."},
+        401: {"description": "Not authenticated"},
+        403: {"description": "Insufficient role - data_steward required"},
+        404: {"description": "Factor not found or belongs to a different tenant"},
+        422: {"description": "factor_already_published: row is immutable per ADR-007"},
+    },
+)
+async def patch_factor(
+    factor_uuid: uuid.UUID,
+    request: Request,
+    body: FactorCatalogUpdate,
+    user: CurrentUser = Depends(require_permission("factor_catalog", "write")),
+    session: AsyncSession = Depends(get_db),
+) -> FactorCatalogResponse:
+    """Partial update of a DRAFT factor row.
+
+    Args:
+        factor_uuid: UUID primary key of the target factor row.
+        request: HTTP request (for audit metadata).
+        body: ``FactorCatalogUpdate`` payload; all fields optional.
+        user: Authenticated data_steward user.
+        session: Async DB session.
+
+    Returns:
+        The updated ``FactorCatalogResponse``.
+
+    Raises:
+        HTTPException: 404 if factor not found or tenant mismatch.
+        HTTPException: 422 if factor is already published.
+    """
+    correlation_id = get_correlation_id()
+    client_ip = request.client.host if request.client else None
+    user_agent = request.headers.get("user-agent")
+    log = logger.bind(
+        correlation_id=correlation_id,
+        user=user.sub[:8],
+        tenant_id=user.tenant_id,
+        factor_uuid=str(factor_uuid),
+    )
+    log.info("patch_factor_draft")
+
+    repo = FactorCatalogRepository(session)
+    factor = await repo.get_by_uuid(
+        tenant_id=uuid.UUID(user.tenant_id),
+        factor_uuid=factor_uuid,
+    )
+
+    if factor is None:
+        log.warning("patch_factor_not_found")
+        raise _problem(
+            status.HTTP_404_NOT_FOUND,
+            "Not Found",
+            f"Factor {factor_uuid} not found.",
+            "factor_not_found",
+            correlation_id,
+        )
+
+    # App-layer immutability guard (ADR-007).  The DB trigger is the last line
+    # of defence, but we raise 422 here to give the caller a machine-readable
+    # error code before touching the DB.
+    if factor.is_published:
+        log.warning("patch_factor_already_published")
+        raise _problem(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            "Unprocessable Entity",
+            (
+                f"Factor {factor.factor_id}/{factor.version} is already published "
+                "and immutable per ADR-007. Use the correction workflow instead."
+            ),
+            "factor_already_published",
+            correlation_id,
+        )
+
+    # Capture before-state for audit log.
+    before_state: dict[str, Any] = {
+        "value": float(factor.value) if factor.value is not None else None,
+        "unit": factor.unit,
+        "applicability_note": factor.applicability_note,
+        "pdf_source_uri": factor.pdf_source_uri,
+        "biogenic_co2_kg_per_unit": (
+            float(factor.biogenic_co2_kg_per_unit)
+            if factor.biogenic_co2_kg_per_unit is not None
+            else None
+        ),
+        "is_licence_only": factor.is_licence_only,
+        "is_tbc": factor.is_tbc,
+        "vintage": factor.vintage,
+        "valid_from": factor.valid_from.isoformat() if factor.valid_from else None,
+    }
+
+    # Apply only the fields explicitly provided in the body.
+    update_data = body.model_dump(exclude_unset=True)
+    for field, value in update_data.items():
+        setattr(factor, field, value)
+
+    await session.flush()
+
+    after_state: dict[str, Any] = {
+        "value": float(factor.value) if factor.value is not None else None,
+        "unit": factor.unit,
+        "applicability_note": factor.applicability_note,
+        "pdf_source_uri": factor.pdf_source_uri,
+        "biogenic_co2_kg_per_unit": (
+            float(factor.biogenic_co2_kg_per_unit)
+            if factor.biogenic_co2_kg_per_unit is not None
+            else None
+        ),
+        "is_licence_only": factor.is_licence_only,
+        "is_tbc": factor.is_tbc,
+        "vintage": factor.vintage,
+        "valid_from": factor.valid_from.isoformat() if factor.valid_from else None,
+        "updated_by": user.sub,
+    }
+
+    session.add(
+        AuditLog(
+            tenant_id=uuid.UUID(user.tenant_id),
+            correlation_id=uuid.UUID(correlation_id),
+            user_role=user.role,
+            action="factor_draft_updated",
+            resource="factor_catalog",
+            resource_id=factor.id,
+            request_method="PATCH",
+            request_path=f"/api/v1/factor-catalog/{factor_uuid}",
+            status_code=200,
+            ip_address=client_ip,
+            user_agent=user_agent,
+            before_state=before_state,
+            after_state=after_state,
+        )
+    )
+    await session.flush()
+
+    log.info(
+        "factor_draft_updated",
+        factor_id=factor.factor_id,
+        version=factor.version,
+        fields_changed=list(update_data.keys()),
+    )
+
+    return FactorCatalogResponse.model_validate(factor)
+
+
+# ---------------------------------------------------------------------------
+# DELETE /{factor_uuid}  — remove draft factor
+# ---------------------------------------------------------------------------
+
+@router.delete(
+    "/{factor_uuid}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    response_model=None,
+    summary="Delete a DRAFT factor row (data_steward only)",
+    description=(
+        "Permanently removes a factor catalog entry that has **not yet been "
+        "published** (``is_published=False``).\n\n"
+        "**Immutability**: published rows (``is_published=True``) are protected "
+        "by both the DB trigger ``trg_factor_immutable`` (MG-02) and an "
+        "app-layer guard that returns 422 ``factor_already_published``.  "
+        "Published rows are never hard-deleted; use the correction workflow "
+        "to supersede them.\n\n"
+        "Writes an audit_log row on success.  Returns 204 No Content."
+    ),
+    responses={
+        204: {"description": "Factor deleted successfully."},
+        401: {"description": "Not authenticated"},
+        403: {"description": "Insufficient role - data_steward required"},
+        404: {"description": "Factor not found or belongs to a different tenant"},
+        422: {"description": "factor_already_published: row is immutable per ADR-007"},
+    },
+)
+async def delete_factor(
+    factor_uuid: uuid.UUID,
+    request: Request,
+    user: CurrentUser = Depends(require_permission("factor_catalog", "write")),
+    session: AsyncSession = Depends(get_db),
+) -> None:
+    """Delete a DRAFT factor row (data_steward only).
+
+    Args:
+        factor_uuid: UUID primary key of the target factor row.
+        request: HTTP request (for audit metadata).
+        user: Authenticated data_steward user.
+        session: Async DB session.
+
+    Returns:
+        None (204 No Content).
+
+    Raises:
+        HTTPException: 404 if factor not found or tenant mismatch.
+        HTTPException: 422 if factor is already published.
+    """
+    correlation_id = get_correlation_id()
+    client_ip = request.client.host if request.client else None
+    user_agent = request.headers.get("user-agent")
+    log = logger.bind(
+        correlation_id=correlation_id,
+        user=user.sub[:8],
+        tenant_id=user.tenant_id,
+        factor_uuid=str(factor_uuid),
+    )
+    log.info("delete_factor_draft")
+
+    repo = FactorCatalogRepository(session)
+    factor = await repo.get_by_uuid(
+        tenant_id=uuid.UUID(user.tenant_id),
+        factor_uuid=factor_uuid,
+    )
+
+    if factor is None:
+        log.warning("delete_factor_not_found")
+        raise _problem(
+            status.HTTP_404_NOT_FOUND,
+            "Not Found",
+            f"Factor {factor_uuid} not found.",
+            "factor_not_found",
+            correlation_id,
+        )
+
+    # App-layer immutability guard (ADR-007).
+    if factor.is_published:
+        log.warning("delete_factor_already_published")
+        raise _problem(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            "Unprocessable Entity",
+            (
+                f"Factor {factor.factor_id}/{factor.version} is already published "
+                "and immutable per ADR-007. Published rows cannot be deleted."
+            ),
+            "factor_already_published",
+            correlation_id,
+        )
+
+    before_state: dict[str, Any] = {
+        "factor_id": factor.factor_id,
+        "version": factor.version,
+        "gwp_set": factor.gwp_set,
+        "source": factor.source,
+        "scope": factor.scope,
+        "is_published": factor.is_published,
+        "deleted_by": user.sub,
+    }
+
+    await session.delete(factor)
+
+    session.add(
+        AuditLog(
+            tenant_id=uuid.UUID(user.tenant_id),
+            correlation_id=uuid.UUID(correlation_id),
+            user_role=user.role,
+            action="factor_draft_deleted",
+            resource="factor_catalog",
+            resource_id=factor_uuid,
+            request_method="DELETE",
+            request_path=f"/api/v1/factor-catalog/{factor_uuid}",
+            status_code=204,
+            ip_address=client_ip,
+            user_agent=user_agent,
+            before_state=before_state,
+            after_state=None,
+        )
+    )
+    await session.flush()
+
+    log.info(
+        "factor_draft_deleted",
+        factor_id=factor.factor_id,
+        version=factor.version,
     )

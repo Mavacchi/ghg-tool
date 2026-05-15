@@ -51,7 +51,7 @@ _GHG_ENVIRONMENT: Final[str] = os.getenv("GHG_ENVIRONMENT", "development").lower
 _DEMO_MODE_REQUESTED: Final[bool] = (
     os.getenv("GHG_DEMO_MODE", "").lower() in ("1", "true", "yes")
 )
-_DEMO_ALLOWED_ENVS: Final[frozenset[str]] = frozenset({"development", "test"})
+_DEMO_ALLOWED_ENVS: Final[frozenset[str]] = frozenset({"development", "test", "demo"})
 
 if _DEMO_MODE_REQUESTED and _GHG_ENVIRONMENT not in _DEMO_ALLOWED_ENVS:
     # Refuse demo mode outside development/test.  Import-time logging uses the
@@ -86,12 +86,37 @@ def is_demo_mode() -> bool:
 
 
 def render_demo_mode_banner(lang: str = "it") -> None:
-    """Render a visible warning banner when the session is in demo mode.
+    """Render a highly visible sticky banner when the session is in demo mode.
 
-    Call after ``require_auth`` on any page that should make the bypass
-    obvious to the user — they must never confuse it with a real login.
+    The banner uses raw HTML so it floats at the top of every page above the
+    Streamlit chrome.  It is deliberately non-dismissable: users must always
+    be aware they are looking at preloaded demo data and cannot confuse it
+    with a real authenticated session.
+
+    Call after ``require_auth`` on any page that renders data.
     """
-    st.warning(_("demo_mode_banner", lang), icon="⚠️")
+    message = _("demo_mode_banner", lang)
+    st.markdown(
+        f"""
+<div style="
+    position: sticky;
+    top: 0;
+    z-index: 9999;
+    background: #ff6b00;
+    color: #ffffff;
+    font-weight: 700;
+    font-size: 0.95rem;
+    text-align: center;
+    padding: 0.55rem 1rem;
+    letter-spacing: 0.03em;
+    border-bottom: 3px solid #cc5500;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.25);
+">
+    ⚠️&nbsp;&nbsp;{message}&nbsp;&nbsp;⚠️
+</div>
+""",
+        unsafe_allow_html=True,
+    )
 
 
 def get_token() -> str | None:
