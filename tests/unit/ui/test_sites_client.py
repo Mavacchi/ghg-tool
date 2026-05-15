@@ -116,12 +116,12 @@ def _mock_get_sites_http(sites_response: dict = _SITES_RESPONSE):
 
 def _clear_cache() -> None:
     """Invalidate the ``get_sites`` st.cache_data cache between tests."""
+    import contextlib
+
     clear = getattr(get_sites, "clear", None)
     if callable(clear):
-        try:
+        with contextlib.suppress(Exception):
             clear()
-        except Exception:  # noqa: BLE001
-            pass
 
 
 # ---------------------------------------------------------------------------
@@ -517,13 +517,17 @@ class TestAcFilterSubscopes:
             patch("streamlit.session_state", {}),
             patch("streamlit.cache_data", lambda **kw: (lambda f: f)),
         ):
-            import importlib
-            import ghg_tool.ui.streamlit_app.pages  # noqa: F401
             # We cannot directly import "4_Data_Entry" (starts with digit)
-            # so we use importlib with the file path.
+            # so we use importlib with the file path. The spec is constructed
+            # for completeness but the module is intentionally not exec'd
+            # (top-level Streamlit calls would crash); the test uses the
+            # standalone re-implementation in `_filter_subscopes` below.
             import importlib.util
             from pathlib import Path
-            spec = importlib.util.spec_from_file_location(
+
+            import ghg_tool.ui.streamlit_app.pages  # noqa: F401
+
+            importlib.util.spec_from_file_location(
                 "_data_entry_page",
                 Path(__file__).parents[3]
                 / "src/ghg_tool/ui/streamlit_app/pages/4_Data_Entry.py",
@@ -609,7 +613,10 @@ class TestSiteTypeInvalidErrorDetection:
         )
 
     def test_detects_lowercase_error_key(self) -> None:
-        detail = "422: site_type_invalid — Process emissions allowed only for STABILIMENTO_PRODUTTIVO sites"
+        detail = (
+            "422: site_type_invalid — Process emissions allowed only "
+            "for STABILIMENTO_PRODUTTIVO sites"
+        )
         assert self._is_site_type_invalid(detail)
 
     def test_detects_mixed_case_error_key(self) -> None:

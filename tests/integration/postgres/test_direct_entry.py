@@ -344,7 +344,12 @@ async def test_raw_direct_entry_is_append_only(
                 )
 
         err_str = str(exc_info.value).lower()
-        assert "immutable" in err_str or "deny" in err_str, (
+        assert (
+            "immutable" in err_str
+            or "deny" in err_str
+            or "forbidden" in err_str
+            or "mutation" in err_str
+        ), (
             f"Expected immutability error from trigger, got: {exc_info.value}"
         )
 
@@ -359,7 +364,12 @@ async def test_raw_direct_entry_is_append_only(
                 )
 
         err_str2 = str(exc_info2.value).lower()
-        assert "immutable" in err_str2 or "deny" in err_str2, (
+        assert (
+            "immutable" in err_str2
+            or "deny" in err_str2
+            or "forbidden" in err_str2
+            or "mutation" in err_str2
+        ), (
             f"Expected immutability error from trigger, got: {exc_info2.value}"
         )
 

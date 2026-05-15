@@ -166,10 +166,12 @@ async def test_country_column_is_it_for_all_sites(
     async with async_engine.connect() as conn:
         result = await conn.execute(
             text(
-                "SELECT codice_sito, country "
-                "FROM ref.sites "
-                "WHERE codice_sito = ANY(:sites) "
-                "ORDER BY codice_sito"
+                "SELECT s.codice_sito, s.country "
+                "FROM ref.sites s "
+                "JOIN ref.tenants t ON s.tenant_id = t.id "
+                "WHERE t.code = 'CERAMIC_TILE_CO' "
+                "  AND s.codice_sito = ANY(:sites) "
+                "ORDER BY s.codice_sito"
             ),
             {"sites": _ALL_SITE_CODES},
         )
@@ -289,7 +291,7 @@ async def _insert_direct_entry(
                 " request_payload, factor_id, factor_vintage, tco2e) "
                 "VALUES "
                 "(CAST(:id AS uuid), CAST(:tid AS uuid), CAST(:corr AS uuid), "
-                " :inserted_by, :payload::jsonb, :factor_id, :vintage, :tco2e)"
+                " :inserted_by, CAST(:payload AS jsonb), :factor_id, :vintage, :tco2e)"
             ),
             {
                 "id": row_id,
@@ -581,7 +583,7 @@ async def test_idempotency_keys_insert_succeeds(
                 " response_status, response_body) "
                 "VALUES "
                 "(:key, CAST(:tid AS uuid), :endpoint, :req_hash, "
-                " :status, :body::jsonb)"
+                " :status, CAST(:body AS jsonb))"
             ),
             {
                 "key": idem_key,
@@ -633,7 +635,7 @@ async def test_idempotency_keys_expires_at_defaults_to_24h(
                 " response_status, response_body) "
                 "VALUES "
                 "(:key, CAST(:tid AS uuid), :endpoint, :req_hash, "
-                " :status, :body::jsonb)"
+                " :status, CAST(:body AS jsonb))"
             ),
             {
                 "key": idem_key,
@@ -685,7 +687,7 @@ async def test_idempotency_keys_primary_key_unique(
                 " response_status, response_body) "
                 "VALUES "
                 "(:key, CAST(:tid AS uuid), :endpoint, :req_hash, "
-                " :status, :body::jsonb)"
+                " :status, CAST(:body AS jsonb))"
             ),
             {
                 "key": idem_key,
@@ -707,7 +709,7 @@ async def test_idempotency_keys_primary_key_unique(
                     " response_status, response_body) "
                     "VALUES "
                     "(:key, CAST(:tid AS uuid), :endpoint, :req_hash, "
-                    " :status, :body::jsonb)"
+                    " :status, CAST(:body AS jsonb))"
                 ),
                 {
                     "key": idem_key,
@@ -773,7 +775,7 @@ async def test_idempotency_keys_app_side_lookup_pattern(
                 " response_status, response_body) "
                 "VALUES "
                 "(:key, CAST(:tid AS uuid), :endpoint, :req_hash, "
-                " :status, :body::jsonb)"
+                " :status, CAST(:body AS jsonb))"
             ),
             {
                 "key": fresh_key,
@@ -792,7 +794,7 @@ async def test_idempotency_keys_app_side_lookup_pattern(
                 " response_status, response_body, expires_at) "
                 "VALUES "
                 "(:key, CAST(:tid AS uuid), :endpoint, :req_hash, "
-                " :status, :body::jsonb, now() - INTERVAL '1 second')"
+                " :status, CAST(:body AS jsonb), now() - INTERVAL '1 second')"
             ),
             {
                 "key": expired_key,
