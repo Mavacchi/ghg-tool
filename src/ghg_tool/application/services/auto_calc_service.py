@@ -1304,8 +1304,31 @@ async def compute_and_insert(
     correlation_id = uuid.UUID(get_correlation_id())
     now = datetime.now(UTC)
 
-    # Nil UUID kept for factor FK (catalog FK is still sentinel per existing pattern)
+    # Resolve emissions_consolidated.factor_id FK -> ref.factor_catalog.id
+    # by looking up the row whose business code matches the factor selected
+    # by compute_preview. Falls back to nil UUID only if no row is found
+    # (the FK constraint will then fail and the transaction rolls back —
+    # surfacing a missing factor as a database error rather than a silent
+    # nil-UUID corruption).
     nil_uuid = str(uuid.UUID(int=0))
+    factor_uuid_row = await session.execute(
+        text(
+            "SELECT id FROM ref.factor_catalog "
+            "WHERE tenant_id = CAST(:tid AS uuid) "
+            "  AND factor_id = :code "
+            "  AND gwp_set = :gwp "
+            "ORDER BY valid_from DESC LIMIT 1"
+        ),
+        {
+            "tid": str(tenant_id),
+            "code": preview.factor_id,
+            "gwp": request.gwp_set,
+        },
+    )
+    factor_uuid_scalar = factor_uuid_row.scalar_one_or_none()
+    factor_uuid_fk = (
+        str(factor_uuid_scalar) if factor_uuid_scalar is not None else nil_uuid
+    )
 
     sub_scope_map: dict[str, str] = {
         "combustion": "combustion",
@@ -1414,7 +1437,7 @@ async def compute_and_insert(
             "n2o_tco2e": None,
             "co2_biogenic_tonne": preview.co2_biogenic_tonne,
             "co2_fossil_tonne": preview.co2_fossil_tonne,
-            "factor_id": nil_uuid,
+            "factor_id": factor_uuid_fk,
             "factor_version": preview.factor_version,
             "factor_source": preview.factor_source,
             "gwp_set": request.gwp_set,

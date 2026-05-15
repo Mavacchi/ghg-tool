@@ -151,6 +151,38 @@ def _build_mock_user(tenant_id: str) -> MagicMock:
     return user
 
 
+async def _insert_factor(
+    engine: AsyncEngine,
+    *,
+    tenant_id: str,
+    factor_id_code: str = "LB_IT_GRID_ISPRA_2024",
+    gwp_set: str = "AR6",
+    value: Decimal = Decimal("0.27"),
+) -> None:
+    """Insert a real ref.factor_catalog row so the FK from emissions_consolidated
+    resolves to a valid UUID when compute_and_insert performs its lookup."""
+    async with engine.begin() as conn:
+        await conn.execute(
+            text(
+                "INSERT INTO ref.factor_catalog "
+                "(id, tenant_id, factor_id, version, substance, scope, "
+                " category, source, value, unit, gwp_set, valid_from, "
+                " is_published, published_at, published_by) "
+                "VALUES "
+                "(gen_random_uuid(), CAST(:tid AS uuid), :code, '2025', "
+                " 'CO2', 2, 'electricity', 'ISPRA', :val, 'kg CO2 / kWh', "
+                " :gwp, '2024-01-01', TRUE, now(), 'test_runner') "
+                "ON CONFLICT (tenant_id, factor_id, version, gwp_set) DO NOTHING"
+            ),
+            {
+                "tid": tenant_id,
+                "code": factor_id_code,
+                "val": value,
+                "gwp": gwp_set,
+            },
+        )
+
+
 def _build_mock_catalog(
     *,
     factor_value: Decimal = Decimal("0.27"),
@@ -209,6 +241,7 @@ async def test_compute_and_insert_writes_raw_direct_entry(
     codice_sito = "IANO"
 
     await _insert_tenant_and_site(async_engine, tenant_id=tenant_id, codice_sito=codice_sito)
+    await _insert_factor(async_engine, tenant_id=tenant_id)
 
     session_factory = async_sessionmaker(async_engine, expire_on_commit=False)
     user = _build_mock_user(tenant_id)
