@@ -1,12 +1,12 @@
 # GHG Methodology — Ceramic Tile Manufacturer
 
-**Version**: 1.3.0 (Phase 9 — formalises dual_run_id FK linkage per Q1 decision option A)
+**Version**: 1.4.0 (Phase 9 — role renaming M24: esg_manager/data_steward/auditor -> admin/editor/viewer)
 **Date**: 2026-05-15
 **Status**: APPROVED — reflects SustainabilityExpertAgent methodology_validation.md v1.0.0 and
 Phase 7/8 security and data-model decisions
 **References**:
 - `docs/methodology_validation.md` v1.0.0 (SustainabilityExpertAgent — authoritative source)
-- `docs/requirements.md` v1.2.2 (APPROVED)
+- `docs/requirements.md` v1.2.3 (APPROVED)
 - `docs/architecture.md` v1.0.0 (Phase 4)
 - GHG Protocol Corporate Standard (2004) + Scope 2 Guidance (2015) + Scope 3 Standard (2011)
 - IPCC AR6 WG1 Chapter 7 SM Table 7.SM.7
@@ -17,6 +17,10 @@ Phase 7/8 security and data-model decisions
 This document is the canonical methodology reference for v1. Every calculation parameter
 derives from methodology_validation.md unless otherwise cited. This document does not
 introduce new methodology; it records and structures existing validated decisions.
+
+**Role naming**: from migration M24 the application roles are `admin / editor / viewer`.
+Pre-M24 deployments used `esg_manager / data_steward / auditor` (1:1 mapping).
+Separation-of-duties per ISAE 3000 §A99 is unchanged — only the labels differ.
 
 ---
 
@@ -381,7 +385,7 @@ exceeds 10% AND the absolute delta is at least 100 tCO2e (CSRD Article 23
 "single material item" convention).
 
 Snapshots are append-only; the trigger `trg_report_snapshots_deny_mutation` blocks
-UPDATE and DELETE. Snapshot creation is gated to `esg_manager` and writes a
+UPDATE and DELETE. Snapshot creation is gated to `admin` (formerly `esg_manager`) and writes a
 `calc.audit_log` row + emits a `report_snapshot_created` SIEM event in the same
 transaction.
 
@@ -405,7 +409,7 @@ per (tenant_id, scope, sub_scope, codice_sito, anno, regulatory_stream, gwp_set)
 
 ### Point-in-time queries
 
-An auditor can query the state of the emission inventory at any past timestamp T by
+A `viewer` (auditor) can query the state of the emission inventory at any past timestamp T by
 selecting rows where `valid_from <= T AND (valid_to IS NULL OR valid_to > T)`. This
 supports ISAE 3000 Limited assurance of any historical reporting period.
 
@@ -485,7 +489,7 @@ updated role, not the role from the original login session.
 
 The refresh token intentionally carries no `role` claim. The previous implementation that
 used `claims.get("role", "data_steward")` as a default was a privilege elevation vector
-(any user could obtain a `data_steward` token via /refresh); this has been corrected.
+(any user could obtain a `data_steward` / `editor` token via /refresh); this has been corrected.
 
 Any refresh attempt for a user with `is_active = False` is rejected with HTTP 401.
 
@@ -590,7 +594,7 @@ Single-track runs (CSRD-only for tenants with no Annex I EU ETS installation) le
 
 Operators must trigger dual-track runs using either:
 - CLI: `python -m scripts.run_calc --anno <year> --dual`
-- API: `POST /api/v1/calc/run-dual` (esg_manager role required)
+- API: `POST /api/v1/calc/run-dual` (`admin` role required; formerly `esg_manager`)
 
 Running only the CSRD track before an EU ETS filing is a compliance defect.
 
@@ -628,18 +632,19 @@ disclosure rules); NACE Rev. 2 code C 23.31 (manufacture of ceramic tiles and fl
 
 This section documents how emission factor records move from draft to published state, the
 immutability rule applied to published factors (MG-02), and the separation of duties
-between the `data_steward` and `esg_manager` roles. It is required for ESRS 2 BP-2
+between the `editor` and `admin` roles (formerly `data_steward` and `esg_manager`). It is required for ESRS 2 BP-2
 (methodologies and significant judgements disclosure).
 
 ### Draft state
 
 Factor records are created via `POST /api/v1/factor-catalog/` by users holding the
-`data_steward` role. A newly created record has `is_published=false`, `published_at=NULL`,
-and `published_by=NULL` (the `published_at` / `published_by` columns were split from
-`created_at` in migration MG-03, file `alembic/versions/0010_M9_factor_published_at_split.py`,
-which resolved an ambiguity where the creation timestamp was being misread as the publication
-date). Drafts are fully editable by the `data_steward`: values, units, source references,
-and methodology notes may be corrected at any time before publication.
+`editor` role (formerly `data_steward`). A newly created record has `is_published=false`,
+`published_at=NULL`, and `published_by=NULL` (the `published_at` / `published_by` columns
+were split from `created_at` in migration MG-03, file
+`alembic/versions/0010_M9_factor_published_at_split.py`, which resolved an ambiguity where
+the creation timestamp was being misread as the publication date). Drafts are fully editable
+by the `editor`: values, units, source references, and methodology notes may be corrected at
+any time before publication.
 
 Drafts are **invisible to the calculation engine**. The calc orchestrator filters
 `ref.factor_catalog` with `WHERE is_published = true`; draft rows are never selected for
@@ -647,8 +652,8 @@ emission calculations.
 
 ### Publication workflow
 
-Only the `esg_manager` role may publish a factor. This endpoint is intentionally inaccessible
-to `data_steward` (separation of duties — see §13.5 below).
+Only the `admin` role (formerly `esg_manager`) may publish a factor. This endpoint is
+intentionally inaccessible to `editor` (separation of duties — see §13.5 below).
 
 **Endpoint**: `POST /api/v1/factor-catalog/{factor_uuid}/publish`
 
@@ -697,9 +702,9 @@ References: MG-02; `alembic/versions/` (migration that installs `trg_factor_immu
 
 | Role | Permitted actions | Blocked actions |
 |---|---|---|
-| `data_steward` | Create drafts; edit drafts; view all draft and published factors | Publish; withdraw |
-| `esg_manager` | Publish drafts; view all draft and published factors | Create or edit draft field values (by convention) |
-| `auditor` | SELECT on `calc.audit_log`, `ref.factor_catalog` | INSERT / UPDATE / DELETE on any table |
+| `editor` (formerly `data_steward`) | Create drafts; edit drafts; view all draft and published factors | Publish; withdraw |
+| `admin` (formerly `esg_manager`) | Publish drafts; view all draft and published factors | Create or edit draft field values (by convention) |
+| `viewer` (formerly `auditor`) | SELECT on `calc.audit_log`, `ref.factor_catalog` | INSERT / UPDATE / DELETE on any table |
 
 The `published_by` column records the publisher's UUID for every published factor. The
 `calc.audit_log` row for `factor_published` additionally records the client IP address and
@@ -711,9 +716,9 @@ review and authorisation).
 
 ### Audit-trail surface
 
-The `calc.audit_log` table is queryable by users with the `auditor` role. Row-Level Security
-(M4) grants `auditor` SELECT on all `audit_log` rows within the tenant and blocks
-INSERT / UPDATE / DELETE. Auditors should query using:
+The `calc.audit_log` table is queryable by users with the `viewer` role (formerly `auditor`).
+Row-Level Security (M4) grants `viewer` SELECT on all `audit_log` rows within the tenant and
+blocks INSERT / UPDATE / DELETE. Auditors should query using:
 
 ```sql
 SELECT * FROM calc.audit_log
@@ -726,7 +731,7 @@ The `after_state` JSONB column carries the complete published snapshot, includin
 `reason_code`, `publish_notes`, `published_by`, and `published_at`. Container logs also
 emit a structured event named `factor_published` with the same fields. Audits must verify
 that both sources (DB row and container log) are consistent; discrepancies must be reported
-to the `esg_manager` and escalated to ComplianceAgent.
+to the `admin` (formerly `esg_manager`) and escalated to ComplianceAgent.
 
 ---
 
@@ -792,3 +797,4 @@ applicable.
 | 2026-05-14 | 1.1.0 | Added §13 Factor catalog lifecycle and publication: draft/publish workflow, MG-02 immutability trigger, MG-03 published_at split, separation of duties (data_steward / esg_manager), audit-trail surface. Required for ESRS 2 BP-2. | No change to emission calculations or GWP values. |
 | 2026-05-14 | 1.2.0 | Added §1.1 Consolidation procedure (M-12); §1.2 Reporting period and lock-date (M-20); Scope 1 net-vs-gross statement (M-21); Scope 3 gas-by-gas limitation (M-10); §2.1 Scope 3 materiality assessment (M-22); Cat 12 source citation (M-19); §3.1 GWP100 source-class rationale (M-02); AR5 MRR citation update (M-08); EU Taxonomy rephrasing (M-25); §15 Multi-year outlier detection sigma (M-16); C-025 endpoint URL corrected to GET /api/v1/emissions/{id}/corrections. | No change to emission calculations. Documentation completeness for ESRS 2 BP-2 and CSRD assurance. |
 | 2026-05-15 | 1.3.0 | §11.1 expanded to formalise `dual_run_id UUID FK` on `ops.calc_runs` as the mandatory relational linkage between CSRD/AR6 and EU ETS/AR5 calc-run pairs (sustainability-expert-agent Q1 decision, option A). Documents two-row insert pattern (preferred) vs. back-fill UPDATE (discouraged). Documents single-track NULL validity. §7 gains a verifier-query sub-section with the canonical one-row-pair reconciliation SQL as the audit-grade alternative to temporal-window joins. Normative anchors cited: Reg. UE 2018/2067 Art. 6, GHG Protocol Corporate Standard Ch.5, CSRD ESRS E1 §50–§55, ISAE 3000 §A99. | No change to emission calculations or GWP values. |
+| 2026-05-15 | 1.4.0 | Role naming aligned to M24 migration: `esg_manager` -> `admin`, `data_steward` -> `editor`, `auditor` -> `viewer`. Added role-naming note in document header. All prose references to old role names updated with new names (old names retained in parentheses for traceability). Separation-of-duties per ISAE 3000 §A99 unchanged. | No change to emission calculations or GWP values. |
