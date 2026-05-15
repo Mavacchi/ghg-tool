@@ -187,7 +187,7 @@ def _preview_s1_combustion(
     from ghg_tool.domain.ports.gwp_table import GWPSetTable
     from ghg_tool.domain.value_objects.gwp_set import get_gwp_values
 
-    gwp_values = get_gwp_values(req.gwp_set)  # type: ignore[arg-type]
+    gwp_values = get_gwp_values(req.gwp_set)
     gwp = GWPSetTable(gwp_values)
 
     combustibile = req.combustibile  # already validated non-None
@@ -1054,7 +1054,7 @@ async def compute_preview(
             f"scope={request.scope} sub_scope={request.sub_scope!r}"
         )
 
-    preview = handler(request, factor_catalog)
+    preview: CalcPreviewResponse = handler(request, factor_catalog)
     log.info("auto_calc_preview_complete", tco2e=str(preview.tco2e))
     return preview
 
