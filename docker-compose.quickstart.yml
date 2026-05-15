@@ -1,36 +1,23 @@
 ---
-# GHG Tool — Quickstart override (Windows/Mac/Linux double-click launch).
+# GHG Tool — Quickstart override (demo mode ON).
 #
-# Usage:
-#   docker compose -f docker-compose.yml -f docker-compose.quickstart.yml \
-#       --profile app up -d --build
+# Usage (Windows): double-click start-demo.bat
+# Usage (manual):
+#   docker compose -f docker-compose.yml \
+#                  -f docker-compose.quickstart.yml \
+#                  --profile app up -d --build
 #
-# IMPORTANT: pass `--profile app` so the `app` service from docker-compose.yml
-# is enabled (it is profile-gated in the base file). The `streamlit` service
-# defined here depends on `app` and will fail validation otherwise.
+# This override layers DEMO env vars on top of the production-safe base
+# docker-compose.yml.  It does NOT redefine the `app` or `streamlit`
+# services — the base file already does, with `GHG_ENVIRONMENT=production`
+# as default.  Here we flip the relevant env vars so the demo seed runs,
+# the demo/demo login is enabled, and the sticky DEMO banner is shown.
 #
-# This override:
-#   - Adds a `streamlit` service serving the dashboard on port 8501
-#   - Sets development-only env vars (named test-only JWT secret,
-#     demo-mode fallback, permissive CORS for localhost:8501)
-#
-# DO NOT use this file in production. See docs/deployment.md for the
+# DO NOT use this file in production.  See docs/deployment.md for the
 # production runbook with real secrets, TLS, and Redis rate-limiter.
-#
-# Demo mode is enabled HERE explicitly (GHG_ENVIRONMENT=development +
-# GHG_DEMO_MODE=true).  In the default docker-compose.yml the API is
-# production-safe (no demo seed, no /docs).  Run with this override
-# ONLY when you want the preloaded demo dataset and the demo/demo
-# login bypass.
 
 services:
   app:
-    # NOTE: the `app` service is profile-gated in docker-compose.yml.
-    # Enable it by running compose with `--profile app` (see start.bat).
-    # We deliberately do NOT try to override `profiles` here because an
-    # empty list does not reliably reset the parent profiles across all
-    # Docker Compose versions and would cause:
-    #   service "streamlit" depends on undefined service "app"
     environment:
       SQLALCHEMY_URL: "postgresql+asyncpg://ghg_app:${POSTGRES_PASSWORD:-changeme}@db:5432/ghg_tool"
       SQLALCHEMY_ASYNC_URL: "postgresql+asyncpg://ghg_app:${POSTGRES_PASSWORD:-changeme}@db:5432/ghg_tool"
@@ -42,27 +29,8 @@ services:
       GHG_LOG_LEVEL: "INFO"
 
   streamlit:
-    build:
-      context: .
-      target: runtime
-    container_name: ghg_streamlit
-    depends_on:
-      app:
-        condition: service_started
     environment:
       GHG_API_BASE_URL: "http://app:8000"
+      GHG_ENVIRONMENT: "development"
       GHG_DEMO_MODE: "true"
       GHG_LOG_LEVEL: "INFO"
-    command:
-      - "python"
-      - "-m"
-      - "streamlit"
-      - "run"
-      - "--server.address=0.0.0.0"
-      - "--server.port=8501"
-      - "--browser.gatherUsageStats=false"
-      - "--server.fileWatcherType=none"
-      - "/usr/local/lib/python3.11/site-packages/ghg_tool/ui/streamlit_app/Home.py"
-    ports:
-      - "8501:8501"
-    restart: unless-stopped

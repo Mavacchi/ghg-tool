@@ -8,6 +8,9 @@ echo  Arresto GHG Tool
 echo ===============================================
 echo.
 
+REM Ferma entrambe le configurazioni (production e quickstart) per essere
+REM sicuro di abbattere tutti i container indipendentemente da come sono
+REM stati avviati (start.bat vs start-demo.bat).
 docker compose -f docker-compose.yml -f docker-compose.quickstart.yml --profile app down
 
 if errorlevel 1 (
