@@ -1,22 +1,14 @@
 """Integration tests for API endpoints against a live PostgreSQL database.
 
-XFAIL NOTE (pre-existing): every test in this module currently returns
-401 ``session_not_found`` because the SEC wave added a session_check
-middleware that requires the JWT jti to be present in ``auth.sessions``
-before the route is invoked.  The fixtures in this module build JWTs
-client-side via ``create_access_token`` but never INSERT a row into
-``auth.sessions``, so the middleware rejects every request.
-
-Fix requires either:
-  (a) a fixture that inserts an auth.sessions row before each test, OR
-  (b) a test-mode bypass of the session middleware.
-
-Tracked for SEC-integration-test follow-up; outside the calc/dual-track
-scope of this branch.
-
 All tests are marked ``@pytest.mark.integration`` and are skipped in
 unit-test CI runs.  When a live DB is available, the ``SQLALCHEMY_ASYNC_URL``
 env var must point to the test database.
+
+The ``seeded_auth_session`` fixture (defined in ``tests/integration/api/conftest.py``)
+satisfies the ``SessionCheckMiddleware`` contract: it inserts a real row into
+``auth.sessions`` (and a throw-away ``ref.users`` row for the FK) for every JWT
+minted in a test, so the middleware's ``jti`` lookup succeeds.  The fixture
+handles teardown via targeted DELETE statements.
 
 Design notes
 ------------
@@ -43,11 +35,15 @@ from __future__ import annotations
 
 import os
 import uuid
+from typing import TYPE_CHECKING
 
 import pytest
 from httpx import AsyncClient
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
+
+if TYPE_CHECKING:
+    from tests.integration.api.conftest import SessionMinter
 
 # Ensure test JWT settings before importing app
 os.environ.setdefault("GHG_JWT_ALGORITHM", "HS256")
@@ -180,14 +176,6 @@ async def _sql_insert_emission(
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.xfail(
-    reason=(
-        "Pre-existing SEC middleware gap: session_check requires auth.sessions "
-        "row for the JWT jti, but the fixtures here mint JWTs without seeding "
-        "the session row. Tracked for SEC-integration-test follow-up."
-    ),
-    strict=False,
-)
 @pytest.mark.integration
 class TestEmissionsIntegration:
     """Integration tests for /api/v1/emissions against a live database."""
@@ -198,6 +186,7 @@ class TestEmissionsIntegration:
         rls_session: AsyncSession,
         tenant_id: str,
         stoich_factor_id: str,
+        seeded_auth_session: SessionMinter,
     ) -> None:
         """POST /emissions creates a row that GET /emissions returns.
 
@@ -210,7 +199,7 @@ class TestEmissionsIntegration:
         We verify via the rls_session that the row is readable within the
         transaction.
         """
-        token = _data_steward_token(tenant_id)
+        token = await seeded_auth_session.mint("data_steward")
 
         # sub_scope must be one of the enum values enforced by the
         # EmissionCreate Pydantic validator at the API boundary. The CI
@@ -274,6 +263,7 @@ class TestEmissionsIntegration:
     async def test_delete_emission_returns_405(
         self,
         tenant_id: str,
+        seeded_auth_session: SessionMinter,
     ) -> None:
         """DELETE /emissions/{id} returns 405 even against a live DB.
 
@@ -281,7 +271,7 @@ class TestEmissionsIntegration:
         rows (append-only invariant enforced at the API layer).  FastAPI
         returns 405 Method Not Allowed when no handler matches.
         """
-        token = _data_steward_token(tenant_id)
+        token = await seeded_auth_session.mint("data_steward")
         fake_id = str(uuid.uuid4())
 
         async with AsyncClient(app=fastapi_app, base_url="http://testserver") as client:
@@ -300,6 +290,7 @@ class TestEmissionsIntegration:
         rls_session: AsyncSession,
         tenant_id: str,
         stoich_factor_id: str,
+        seeded_auth_session: SessionMinter,
     ) -> None:
         """POST /emissions/correction creates new row and closes predecessor.
 
@@ -324,7 +315,7 @@ class TestEmissionsIntegration:
         )
         await rls_session.commit()
 
-        token = _data_steward_token(tenant_id)
+        token = await seeded_auth_session.mint("data_steward")
 
         # POST /api/v1/emissions/correction expects EmissionCorrectionCreate:
         # supersedes_id (UUID of the row to close), new_record (nested
@@ -386,12 +377,19 @@ class TestEmissionsIntegration:
         rls_session: AsyncSession,
         tenant_id: str,
         stoich_factor_id: str,
+        seeded_auth_session: SessionMinter,
     ) -> None:
         """RLS at DB level blocks cross-tenant row access (SG-02/03).
 
         Insert a row for the seeded tenant.  Then query with a JWT that
         carries a different (non-existent) tenant_id.  The GET /emissions/
         response must return 0 rows or 401/403 (not the seeded tenant's row).
+
+        Note: the cross-tenant JWT is still seeded in auth.sessions under the
+        *real* tenant so that the middleware's jti lookup succeeds (the
+        middleware checks the session table, not whether the token's tenant_id
+        matches the row's tenant_id).  The RLS isolation test is performed by
+        the route handler / DB layer, not the middleware.
         """
         # Insert a row for the real tenant
         await _sql_insert_emission(
@@ -400,9 +398,15 @@ class TestEmissionsIntegration:
             factor_id=stoich_factor_id,
         )
 
-        # Mint a token for a completely different tenant
+        # Mint a token whose JWT tenant_id claim carries a non-existent tenant
+        # UUID.  The auth.sessions row is inserted under the real seeded tenant
+        # (FK constraint satisfied) so the middleware's jti lookup succeeds.
+        # The route handler / RLS then evaluates the JWT claim's tenant and
+        # returns 0 rows or an auth error — proving cross-tenant isolation.
         other_tenant_id = str(uuid.uuid4())
-        token = _data_steward_token(other_tenant_id)
+        token = await seeded_auth_session.mint(
+            "data_steward", jwt_tenant_id_override=other_tenant_id
+        )
 
         async with AsyncClient(app=fastapi_app, base_url="http://testserver") as client:
             resp = await client.get(
@@ -433,10 +437,6 @@ class TestEmissionsIntegration:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.xfail(
-    reason="Same SEC session_check gap (see module docstring).",
-    strict=False,
-)
 @pytest.mark.integration
 class TestAuditTrailIntegration:
     """Integration tests for /api/v1/audit-trail."""
@@ -447,6 +447,7 @@ class TestAuditTrailIntegration:
         rls_session: AsyncSession,
         tenant_id: str,
         stoich_factor_id: str,
+        seeded_auth_session: SessionMinter,
     ) -> None:
         """Audit trail row links emission → factor provenance (FR-22).
 
@@ -470,7 +471,7 @@ class TestAuditTrailIntegration:
         )
 
         # esg_manager and auditor roles are required for the audit trail endpoint
-        token = _esg_manager_token(tenant_id)
+        token = await seeded_auth_session.mint("esg_manager")
 
         async with AsyncClient(app=fastapi_app, base_url="http://testserver") as client:
             resp = await client.get(
@@ -495,10 +496,6 @@ class TestAuditTrailIntegration:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.xfail(
-    reason="Same SEC session_check gap (see module docstring).",
-    strict=False,
-)
 @pytest.mark.integration
 class TestGoCertificateIntegration:
     """Integration tests for /api/v1/go-certificates."""
@@ -508,6 +505,7 @@ class TestGoCertificateIntegration:
         self,
         rls_session: AsyncSession,
         tenant_id: str,
+        seeded_auth_session: SessionMinter,
     ) -> None:
         """POST GO cert + PATCH validate creates append-only version chain.
 
@@ -538,7 +536,7 @@ class TestGoCertificateIntegration:
         site_id = str(site_row[0])
         go_id = f"GO-TEST-{uuid.uuid4().hex[:12].upper()}"
 
-        token = _data_steward_token(tenant_id)
+        token = await seeded_auth_session.mint("data_steward")
 
         go_payload = {
             "go_id": go_id,

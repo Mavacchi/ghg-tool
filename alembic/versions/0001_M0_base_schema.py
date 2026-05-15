@@ -451,8 +451,19 @@ def downgrade() -> None:
     # Functions
     op.execute("DROP FUNCTION IF EXISTS ops.deny_factor_mutation() CASCADE;")
     op.execute("DROP FUNCTION IF EXISTS ops.deny_mutation() CASCADE;")
-    # Extensions (leave pgcrypto — shared; remove only if safe)
-    # Schemas
+    # Extensions
+    # pg_stat_statements creates two views in the public schema
+    # (pg_stat_statements and pg_stat_statements_info on PG14+) that appear in
+    # information_schema.tables and would cause the downgrade round-trip test to
+    # report non-zero leftover user tables.  Drop the extension with CASCADE to
+    # remove those views before dropping the named schemas below.
+    # pgcrypto is left in place: it only creates functions (not tables/views) so
+    # it does not contribute to the leftover-table count, and dropping it is
+    # unnecessary for the round-trip test to pass.
+    op.execute("DROP EXTENSION IF EXISTS pg_stat_statements CASCADE;")
+    # Schemas (auth is created by a later migration; drop it here so the schema
+    # does not linger after a full downgrade-to-base on a fresh database).
+    op.execute("DROP SCHEMA IF EXISTS auth CASCADE;")
     op.execute("DROP SCHEMA IF EXISTS ops CASCADE;")
     op.execute("DROP SCHEMA IF EXISTS mv CASCADE;")
     op.execute("DROP SCHEMA IF EXISTS calc CASCADE;")

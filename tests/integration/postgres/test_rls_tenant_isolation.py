@@ -50,11 +50,20 @@ pytestmark = pytest.mark.integration
 
 
 async def _set_gucs(conn: object, *, tenant_id: str, role_code: str = "data_steward") -> None:
-    """Set app.tenant_id and app.role_code GUCs on conn (transaction-local).
+    """Set app.tenant_id and app.role_code GUCs and switch to the RLS test role.
 
-    Uses set_config(..., true) so the GUC resets automatically when the
+    Uses set_config(..., true) so the GUCs reset automatically when the
     transaction ends.  This mirrors what the application layer does via
     session.py:set_session_gucs().
+
+    Additionally issues ``SET LOCAL ROLE ghg_test_app`` so the rest of the
+    transaction executes as a NOSUPERUSER, NOBYPASSRLS role.  Without this
+    switch the testcontainer's default superuser would bypass every RLS
+    policy regardless of ENABLE / FORCE settings, making the isolation
+    assertions silently meaningless.  ``SET LOCAL`` scopes the role change
+    to the current transaction, so the seed_tenants and
+    insert_factor_for_tenant fixtures (which run in their own transactions
+    as the superuser) are unaffected.
 
     Args:
         conn: An open SQLAlchemy async connection.
@@ -63,12 +72,19 @@ async def _set_gucs(conn: object, *, tenant_id: str, role_code: str = "data_stew
     """
     from sqlalchemy import text as _text  # noqa: PLC0415
 
+    from tests.integration.postgres.conftest import RLS_TEST_ROLE  # noqa: PLC0415
+
     await conn.execute(  # type: ignore[attr-defined]
         _text(
             "SELECT set_config('app.tenant_id', :tid, true), "
             "       set_config('app.role_code', :role, true)"
         ),
         {"tid": tenant_id, "role": role_code},
+    )
+    # SET LOCAL ROLE cannot be parameterised; RLS_TEST_ROLE is a module
+    # constant controlled by this repo, not user input.
+    await conn.execute(  # type: ignore[attr-defined]
+        _text(f"SET LOCAL ROLE {RLS_TEST_ROLE}")
     )
 
 
@@ -193,17 +209,6 @@ async def test_tenant_a_can_read_own_emissions(
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.xfail(
-    reason=(
-        "Pre-existing RLS policy gap on calc.emissions_consolidated: the "
-        "p_emissions_tenant_isolation policy is created in M0 but FORCE ROW "
-        "LEVEL SECURITY appears to not be applied uniformly (verified locally "
-        "with alembic upgrade head and SELECT against superuser-priv role). "
-        "Tracked for security follow-up; outside the calc/dual-track scope of "
-        "this branch."
-    ),
-    strict=False,
-)
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_tenant_b_cannot_read_tenant_a_emissions(
@@ -258,13 +263,6 @@ async def test_tenant_b_cannot_read_tenant_a_emissions(
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.xfail(
-    reason=(
-        "Pre-existing RLS policy gap (see test_tenant_b_cannot_read_tenant_a_"
-        "emissions). Same root cause."
-    ),
-    strict=False,
-)
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_switching_to_tenant_a_restores_visibility(
@@ -331,14 +329,6 @@ async def test_switching_to_tenant_a_restores_visibility(
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.xfail(
-    reason=(
-        "Pre-existing RLS policy gap on calc.chart_annotations: same root "
-        "cause as test_tenant_b_cannot_read_tenant_a_emissions. Tracked for "
-        "security follow-up; outside the calc/dual-track scope of this branch."
-    ),
-    strict=False,
-)
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_chart_annotation_rls_cross_tenant_blocked(

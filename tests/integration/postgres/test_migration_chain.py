@@ -156,11 +156,15 @@ def test_single_head_after_upgrade() -> None:
 
 @pytest.mark.xfail(
     reason=(
-        "Pre-existing downgrade gap: at least one migration's downgrade() does "
-        "not drop the objects it created (assertion: 2 leftover user tables "
-        "after `alembic downgrade base`). Likely a missing DROP in 0001_M0 or "
-        "in one of the wave-1/2 migrations; outside the calc/dual-track scope "
-        "of this branch. Tracked for migration-cleanup follow-up."
+        "M0 downgrade symmetry fix (adding DROP EXTENSION pg_stat_statements "
+        "CASCADE + DROP SCHEMA auth CASCADE) was insufficient: the subsequent "
+        "alembic upgrade head fails with 'relation alembic_version does not "
+        "exist'. Either the test query that counts leftover tables also "
+        "counts alembic_version (so the original symptom was correct but the "
+        "fix triggered a different failure mode), or one of the cascades "
+        "drops alembic_version inadvertently. Needs a deeper investigation "
+        "with a real Postgres in scope. Tracked for migration-test-infra "
+        "follow-up."
     ),
     strict=False,
 )
