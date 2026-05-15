@@ -1216,6 +1216,15 @@ with tab_autocalc:
             ),
         )
 
+    # Task 1: when the user switches to Scope 3, reset the site state to None
+    # so that any previously-selected site does not leak into the S3 payload.
+    _prev_scope_key = "ac_scope_prev"
+    _prev_scope = st.session_state.get(_prev_scope_key)
+    if _prev_scope is not None and _prev_scope != ac_scope and ac_scope == 3:
+        st.session_state.pop("ac_site", None)
+        st.session_state.pop("ac_site_s3", None)
+    st.session_state[_prev_scope_key] = ac_scope
+
     # For Scope 1 we need the site BEFORE building the sub-scope list
     # (decision #7): show the site picker in col2 first, then sub-scope below.
     # For Scope 2/3 we keep the original ordering (scope → sub-scope → site).
@@ -1334,16 +1343,13 @@ with tab_autocalc:
                     ),
                 )
         elif is_s3:
-            # Optional for Scope 3 categories
-            s3_site_options = ["(nessuno)"] + _ac_site_codes
-            s3_site = st.selectbox(
-                "Codice sito (opzionale)",
-                options=s3_site_options,
-                format_func=lambda c: "(nessuno)" if c == "(nessuno)" else _all_site_labels.get(c, c),
-                key="ac_site_s3",
-                help="Per le categorie Scope 3 il sito è opzionale. Ometti per imputazione corporate.",
+            # Task 1: Scope 3 è corporate — nessun codice sito.
+            # Il dropdown "Codice sito" è nascosto e codice_sito è sempre None.
+            st.caption(
+                "ℹ️ Scope 3 è corporate: il calcolo aggrega per tutto il gruppo, "
+                "non per singola sede."
             )
-            ac_codice_sito = None if s3_site == "(nessuno)" else s3_site
+            ac_codice_sito = None
         else:
             # Scope 2: live site list from API
             ac_codice_sito = st.selectbox(
@@ -1508,13 +1514,13 @@ with tab_autocalc:
         )
 
     if clear_clicked:
-        # Clear form-related state keys
+        # Clear form-related state keys (ac_site_s3 removed: S3 no longer has a site picker)
         for key in (
-            "ac_scope", "ac_subscope", "ac_site", "ac_site_s3", "ac_anno",
+            "ac_scope", "ac_subscope", "ac_site", "ac_anno",
             "ac_quantita", "ac_unita", "ac_gwp", "ac_note",
             "ac_strumento_mb", "ac_sottocategoria", "ac_metodo",
             "ac_preview_result", "ac_preview_payload", "ac_preview_error",
-            "_inflight_ac_insert",
+            "_inflight_ac_insert", "ac_scope_prev",
         ):
             st.session_state.pop(key, None)
         st.rerun()
@@ -1679,6 +1685,26 @@ with tab_autocalc:
                             icon="🔍",
                         )
 
+                    # Task 2: "Replica come Cat3 WTT" — shown only after a
+                    # successful Scope 1 Combustion insert (decisione #5).
+                    if is_s1_combustion:
+                        _combustibile_map_inv = {
+                            "combustion_GAS_NAT": "GAS_NAT",
+                            "combustion_GASOLIO": "GASOLIO",
+                            "combustion_BENZINA": "BENZINA",
+                        }
+                        _s1_combustibile = _combustibile_map_inv.get(
+                            ac_subscope_key, ""
+                        )
+                        # Persist the WTT pre-fill data in session_state so the
+                        # button click on rerun can populate the form.
+                        st.session_state["ac_wtt_prefill"] = {
+                            "quantita": q_float,
+                            "unita": ac_unita,
+                            "combustibile": _s1_combustibile,
+                            "anno": int(ac_anno),
+                        }
+
                     # Reset form state for next entry
                     for key in (
                         "ac_preview_result", "ac_preview_payload",
@@ -1743,6 +1769,134 @@ with tab_autocalc:
                 if st.button("Annulla — torna al form", key="ac_anomaly_cancel"):
                     st.session_state.pop("ac_anomaly_pending", None)
                     st.session_state.pop("ac_anomaly_payload", None)
+                    st.rerun()
+
+    # -----------------------------------------------------------------------
+    # Task 2 — "Replica come Cat3 WTT" button + pre-filled WTT form
+    #
+    # Shown after a successful Scope 1 Combustion insert.  The session_state
+    # key ``ac_wtt_prefill`` is set in the insert success branch above and
+    # cleared when the user submits or dismisses the WTT form.
+    # -----------------------------------------------------------------------
+    _wtt_prefill = st.session_state.get("ac_wtt_prefill")
+    if _wtt_prefill is not None and role in ("editor", "admin"):
+        st.divider()
+        if st.button(
+            "Replica come Cat3 WTT (Well-To-Tank)",
+            key="ac_btn_wtt_replicate",
+            help=(
+                "Crea automaticamente la corrispondente riga Cat3 'Well-To-Tank' "
+                "per le emissioni upstream del combustibile (estrazione, raffinazione, "
+                "trasporto). Da fare per coerenza con GHG Protocol Scope 3 Standard Cat. 3."
+            ),
+        ):
+            st.session_state["ac_wtt_form_open"] = True
+
+    if st.session_state.get("ac_wtt_form_open") and _wtt_prefill is not None:
+        with st.container(border=True):
+            st.markdown("**Pre-compilazione Cat3 WTT (Well-To-Tank)**")
+            st.caption(
+                "Verifica i valori pre-compilati dalla riga Scope 1 e conferma "
+                "per registrare la corrispondente riga Cat3 upstream."
+            )
+            _wtt_q = st.number_input(
+                "Quantità",
+                value=float(_wtt_prefill.get("quantita", 0.0)),
+                min_value=0.0,
+                step=0.001,
+                format="%.6f",
+                key="ac_wtt_quantita",
+                help="Pre-compilato dalla riga Scope 1 appena inserita.",
+            )
+            _wtt_unit_opts = _AC_UNITS.get("Cat3", ["Sm3", "kWh", "MWh", "t"])
+            _wtt_unit_default = _wtt_prefill.get("unita", _wtt_unit_opts[0])
+            _wtt_unit_idx = (
+                _wtt_unit_opts.index(_wtt_unit_default)
+                if _wtt_unit_default in _wtt_unit_opts
+                else 0
+            )
+            _wtt_unita = st.selectbox(
+                "Unità",
+                options=_wtt_unit_opts,
+                index=_wtt_unit_idx,
+                key="ac_wtt_unita",
+                help="Stessa unità della riga Scope 1.",
+            )
+            _wtt_sottocategoria = st.text_input(
+                "Sottocategoria / combustibile",
+                value=_wtt_prefill.get("combustibile", ""),
+                key="ac_wtt_sottocategoria",
+                help=(
+                    "Pre-compilato dal combustibile Scope 1. "
+                    "Lascia invariato per il fattore WTT default."
+                ),
+            )
+            _wtt_anno = st.number_input(
+                "Anno fiscale",
+                value=int(_wtt_prefill.get("anno", dt.date.today().year - 1)),
+                min_value=2020,
+                max_value=dt.date.today().year + 1,
+                step=1,
+                key="ac_wtt_anno",
+            )
+            _wtt_col1, _wtt_col2 = st.columns([1, 1])
+            with _wtt_col1:
+                if st.button(
+                    "Conferma e registra Cat3 WTT",
+                    type="primary",
+                    key="ac_wtt_confirm",
+                    disabled=st.session_state.get("_inflight_ac_wtt", False),
+                ):
+                    if _wtt_q <= 0:
+                        st.error("La quantità deve essere maggiore di zero.")
+                    elif not _wtt_sottocategoria.strip():
+                        st.error("Inserisci la sottocategoria / combustibile.")
+                    elif not st.session_state.get("_inflight_ac_wtt"):
+                        st.session_state["_inflight_ac_wtt"] = True
+                        _wtt_payload = {
+                            "scope": 3,
+                            "sub_scope": "Cat3",
+                            "categoria_s3": 3,
+                            "sottocategoria": _wtt_sottocategoria.strip() or "WTT_FUEL",
+                            "metodo": "fuel-based",
+                            "codice_sito": None,
+                            "anno": int(_wtt_anno),
+                            "quantita": f"{_wtt_q:.6f}".rstrip("0").rstrip("."),
+                            "unita": _wtt_unita,
+                            "gwp_set": "AR6",
+                            "regulatory_stream": "CSRD_ESRS_E1",
+                            "disclosure_notes": "Cat3 WTT replica da S1 combustione",
+                        }
+                        _tok_wtt = st.session_state.get("token", "")
+                        with st.spinner("Registrazione Cat3 WTT in corso..."):
+                            try:
+                                _res_wtt = calc_insert(_wtt_payload, token=_tok_wtt)
+                                _eid_wtt = _res_wtt.get("emission_id", "—")
+                                st.success(
+                                    f"Cat3 WTT inserita. Emission ID: `{_eid_wtt}`",
+                                    icon="✅",
+                                )
+                                for fn in (fetch_emissions, fetch_factor_catalog):
+                                    _clr = getattr(fn, "clear", None)
+                                    if callable(_clr):
+                                        try:
+                                            _clr()
+                                        except (AttributeError, TypeError):
+                                            pass
+                                for key in (
+                                    "ac_wtt_prefill", "ac_wtt_form_open",
+                                    "_inflight_ac_wtt",
+                                ):
+                                    st.session_state.pop(key, None)
+                            except AutoCalcError as exc:
+                                st.error(str(exc.detail), icon="🚫")
+                                st.session_state["_inflight_ac_wtt"] = False
+            with _wtt_col2:
+                if st.button("Annulla WTT", key="ac_wtt_cancel"):
+                    for key in (
+                        "ac_wtt_prefill", "ac_wtt_form_open", "_inflight_ac_wtt",
+                    ):
+                        st.session_state.pop(key, None)
                     st.rerun()
 
     st.markdown("</div>", unsafe_allow_html=True)
