@@ -143,7 +143,7 @@ def _is_admin() -> bool:
 # Page header
 # ---------------------------------------------------------------------------
 
-render_role_chip()
+render_role_chip(st.session_state.get("role"), lang)
 render_context_bar()
 
 st.title(_("sbti_page_title"))
