@@ -1,4 +1,4 @@
-/* Carbontrace · Gresmalt brand chrome
+/* Carbontrace brand chrome
  *
  * Style intent: refined editorial. Generous whitespace, restrained
  * motion, hairline dividers, tabular numerals on figures, single
@@ -393,8 +393,8 @@ html, body,
  * ------------------------------------------------------------------ */
 .carbontrace-hero {
   padding-top: 1rem;
-  padding-bottom: 0.5rem;
-  margin-bottom: 1.25rem;
+  padding-bottom: 0.75rem;
+  margin-bottom: 1.5rem;
 }
 
 .carbontrace-hero .ct-brand-rule {
@@ -424,20 +424,21 @@ html, body,
 
 .carbontrace-hero .ct-hero-tagline {
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-  font-weight: 400;
+  font-weight: 500;
   font-size: 1.02rem;
-  line-height: 1.45;
-  letter-spacing: 0.005em;
+  line-height: 1.5;
+  letter-spacing: 0.01em;
   color: #788B99;
-  margin: 0 0 0.35rem 0;
+  margin: 0 0 0.5rem 0;
 }
 
 .carbontrace-hero .ct-hero-company {
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
   font-weight: 400;
-  font-size: 0.78rem;
+  font-size: 0.76rem;
   line-height: 1.4;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
   color: #9a9a9a;
   margin: 0;
 }
@@ -449,7 +450,7 @@ html, body,
  * ------------------------------------------------------------------ */
 .ct-login-hero {
   padding-top: 2rem;
-  padding-bottom: 0.5rem;
+  padding-bottom: 0.75rem;
 }
 .ct-login-hero h1.ct-hero-title {
   font-size: 2.1rem;
@@ -459,6 +460,8 @@ html, body,
 }
 .ct-login-hero .ct-hero-company {
   font-size: 0.72rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
 }
 
 /* --------------------------------------------------------------------
@@ -657,7 +660,8 @@ html, body,
     font-size: 0.92rem;
   }
   .carbontrace-hero .ct-hero-company {
-    font-size: 0.72rem;
+    font-size: 0.70rem;
+    letter-spacing: 0.07em;
   }
 
   /* Metric value can overflow when 5 metrics share a row on a narrow
