@@ -125,12 +125,12 @@ class TestExcelDownload:
 
     def test_excel_job_completes_and_download_endpoint_returns_bytes(self) -> None:
         """Full round-trip: POST /xlsx -> COMPLETED status -> binary download."""
+        from ghg_tool.api.routers.exports import router as exports_router  # noqa: F401
         from ghg_tool.application.services.export_service import (
             _internal_to_wire,
             get_job_result,
             get_job_status,
         )
-        from ghg_tool.api.routers.exports import router as exports_router  # noqa: F401
 
         app.dependency_overrides[get_current_user] = _user_override("editor")
         with TestClient(app, raise_server_exceptions=False) as client:
