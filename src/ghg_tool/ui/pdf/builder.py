@@ -151,6 +151,14 @@ class PDFBuilder:
             for r in emissions
         )
 
+        # Derive distinct published factor sources for footer/disclaimer
+        _pub_sources = sorted({
+            f.get("source", "")
+            for f in factors
+            if f.get("is_published") and f.get("source")
+        })
+        factor_sources = " · ".join(_pub_sources) if _pub_sources else "Vedi catalogo fattori"
+
         template_ctx: dict[str, Any] = {
             "anno": anno,
             "gwp_set": gwp_set,
@@ -174,6 +182,7 @@ class PDFBuilder:
             "dashboard_id": DASHBOARD_ID,
             "dashboard_version": DASHBOARD_VERSION,
             "disclaimer_text": _get_disclaimer(language),
+            "factor_sources": factor_sources,
             "css_path": str(_CSS_PATH),
         }
 
@@ -281,7 +290,7 @@ def _fallback_html(ctx: dict[str, Any]) -> str:
 <h1>{company_name} — GHG Report ESRS E1-6 — {anno}</h1>
 <p>GWP set: {gwp_set} | Metodologia: GHG Protocol Corporate Standard</p>
 <p>Generato: {generated_at} | Dashboard: {dashboard_id} v{dashboard_version}</p>
-<p>API v1 | Fonti fattori: ISPRA 2024 + IEA 2024</p>
+<p>API v1 | Fonti fattori: Vedi catalogo fattori</p>
 <p><strong>ADR-007:</strong> Le emissioni biogeniche di CO2 dalla combustione di biomasse
 e biogas sono disclosed separatamente in E1-7. Non sono incluse nei totali Scope 1/2/3
 ai sensi di ADR-007 e del GHG Protocol Corporate Standard §4.5.</p>

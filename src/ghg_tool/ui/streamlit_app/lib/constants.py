@@ -58,6 +58,12 @@ COMPANY_NAME: Final[str] = _env("GHG_COMPANY_NAME", _DEFAULT_COMPANY_NAME)
 COMPANY_SHORT: Final[str] = _env("GHG_COMPANY_SHORT", _DEFAULT_COMPANY_SHORT)
 TENANT_ID: Final[str] = _env("GHG_TENANT_ID", _DEFAULT_TENANT_ID)
 
+# Fallback label shown in footers when no published factor sources can be read
+# from the catalog. Override via GHG_FACTOR_SOURCES env var.
+FACTOR_SOURCES_FALLBACK: Final[str] = _env(
+    "GHG_FACTOR_SOURCES", "Vedi catalogo fattori"
+)
+
 
 def _parse_sites(raw: str) -> tuple[str, ...]:
     parts = [p.strip() for p in raw.split(",") if p.strip()]

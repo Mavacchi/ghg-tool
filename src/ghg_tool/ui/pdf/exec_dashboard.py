@@ -462,6 +462,19 @@ class ExecDashboardBuilder:
         assurance_status = str(data.get("assurance_status", "none")).lower()
         signed_by = data.get("signed_by_esg_manager") or None
 
+        # Derive factor_sources from supplied factor list (option a) or
+        # fall back to the value supplied directly in data (option b/c).
+        _raw_factors: list[dict[str, Any]] = list(data.get("factors") or [])
+        if _raw_factors:
+            _pub_sources = sorted({
+                f.get("source", "")
+                for f in _raw_factors
+                if f.get("is_published") and f.get("source")
+            })
+            factor_sources = " · ".join(_pub_sources) if _pub_sources else "Vedi catalogo fattori"
+        else:
+            factor_sources = str(data.get("factor_sources") or "Vedi catalogo fattori")
+
         ctx: dict[str, Any] = {
             "anno": anno,
             "prior_anno": prior_anno,
@@ -483,6 +496,7 @@ class ExecDashboardBuilder:
             "dq_summary": dq_summary,
             "assurance_status": assurance_status,
             "signed_by_esg_manager": signed_by,
+            "factor_sources": factor_sources,
             "css_path": str(_CSS_PATH),
         }
         ctx.update(_labels(language))

@@ -100,7 +100,7 @@
   "audit_reason": "Correction Reason",
   "footer_api_version": "API v1",
   "footer_gwp_set": "GWP set",
-  "footer_factor_source": "Factor sources: ISPRA 2024 + IEA 2024",
+  "footer_factor_source": "Factor sources: See factor catalog",
   "footer_methodology": "Methodology: GHG Protocol Corporate Standard",
   "footer_dashboard_version": "Dashboard v",
   "viano_banner": "Reduced operation at VIANO site in 2025: interpret YoY comparisons with caution.",

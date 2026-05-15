@@ -6,7 +6,7 @@ Displays:
   - VIANO 2025 banner (FR-24, MG-12) when conditions are met
   - Biogenic ADR-007 memo card
 
-Footer: "Generated from API v1, GWP set: AR6, factor_source: ISPRA 2024 + IEA 2024,
+Footer: "Generated from API v1, GWP set: AR6, factor_sources: <dynamic from catalog>,
 methodology: GHG Protocol Corporate Standard"
 """
 
@@ -19,6 +19,7 @@ from ghg_tool.ui.streamlit_app.lib.constants import (
     COMPANY_SHORT,
     DASHBOARD_ID,
     DASHBOARD_VERSION,
+    FACTOR_SOURCES_FALLBACK,
     KNOWN_SITES,
     PRODUCT_NAME,
     page_icon,
@@ -45,10 +46,41 @@ from ghg_tool.ui.streamlit_app.lib.brand import apply_brand_chrome, render_conte
 from ghg_tool.ui.streamlit_app.lib.filters import sidebar_gwp_filter, sidebar_year_filter  # noqa: E402
 from ghg_tool.ui.streamlit_app.lib.help import _help  # noqa: E402
 from ghg_tool.ui.streamlit_app.lib.i18n import _  # noqa: E402
-from ghg_tool.ui.streamlit_app.lib.api_client import fetch_kpis, emissions_to_dataframe  # noqa: E402
+from ghg_tool.ui.streamlit_app.lib.api_client import fetch_kpis, fetch_factor_catalog, emissions_to_dataframe  # noqa: E402
 from ghg_tool.ui.streamlit_app.lib.palette import SCOPE_COLOURS, BLUE, VERMILION, BLUISH_GREEN, ORANGE  # noqa: E402
 
 apply_brand_chrome()
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def _get_factor_sources_label(lang: str) -> str:
+    """Return a human-readable list of published factor sources for the footer.
+
+    Reads distinct ``source`` values from the published factor catalog (cached
+    1 h). Falls back to ``FACTOR_SOURCES_FALLBACK`` when the catalog is empty
+    or unreachable.
+
+    Args:
+        lang: UI language ('it' or 'en').
+
+    Returns:
+        Localised footer string, e.g. "Fonti fattori: DEFRA · ISPRA · IEA".
+    """
+    label_it = "Fonti fattori"
+    label_en = "Factor sources"
+    label = label_it if lang == "it" else label_en
+    try:
+        factors = fetch_factor_catalog(limit=200) or []
+        sources = sorted({
+            f["source"]
+            for f in factors
+            if f.get("is_published") and f.get("source")
+        })
+        value = " · ".join(sources) if sources else FACTOR_SOURCES_FALLBACK
+    except Exception:  # noqa: BLE001
+        value = FACTOR_SOURCES_FALLBACK
+    return f"{label}: {value}"
+
 
 # ---------------------------------------------------------------------------
 # Sidebar — language toggle + auth
@@ -182,7 +214,7 @@ if not kpis or (total_lb <= 0.0 and scope2_mb_total <= 0.0):
         f"{_('footer_dashboard_version', lang)}{DASHBOARD_VERSION} | "
         f"{_('footer_api_version', lang)} | "
         f"{_('footer_gwp_set', lang)}: {selected_gwp} | "
-        f"{_('footer_factor_source', lang)} | "
+        f"{_get_factor_sources_label(lang)} | "
         f"{_('footer_methodology', lang)} | "
         f"as_of: {as_of}"
     )
