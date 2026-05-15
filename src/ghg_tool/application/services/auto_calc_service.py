@@ -1467,7 +1467,7 @@ async def compute_and_insert(
         ) VALUES (
             :id, :tenant_id, :correlation_id, :user_id, :user_role,
             :action, :resource, :resource_id, :request_method, :request_path,
-            :status_code, :after_state
+            :status_code, CAST(:after_state AS jsonb)
         )
         """
     )
@@ -1486,11 +1486,14 @@ async def compute_and_insert(
             "request_method": "POST",
             "request_path": "/api/v1/calc/insert",
             "status_code": 201,
-            # PII-free: UUID only
-            "after_state": {
-                "emission_id": str(emission_id),
-                "raw_entry_id": str(raw_entry_id),
-            },
+            # PII-free: UUID only. JSON-encoded for asyncpg JSONB binding.
+            "after_state": _json.dumps(
+                {
+                    "emission_id": str(emission_id),
+                    "raw_entry_id": str(raw_entry_id),
+                },
+                sort_keys=True,
+            ),
         },
     )
 
