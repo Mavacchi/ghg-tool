@@ -36,12 +36,9 @@ from __future__ import annotations
 import os
 import threading
 import time
-from typing import TYPE_CHECKING, Protocol, runtime_checkable
+from typing import Protocol, runtime_checkable
 
 import structlog
-
-if TYPE_CHECKING:  # pragma: no cover -- import only for type checking
-    import redis as _redis_module
 
 _log = structlog.get_logger(__name__)
 

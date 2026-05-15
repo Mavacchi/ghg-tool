@@ -112,7 +112,7 @@ def revoke_from_claims(claims: dict[str, object], *, reason: str = "revoked") ->
         return
     exp_raw = claims.get("exp")
     exp_int = 0
-    if isinstance(exp_raw, (int, float)):
+    if isinstance(exp_raw, int | float):
         exp_int = int(exp_raw)
     elif isinstance(exp_raw, str):
         try:

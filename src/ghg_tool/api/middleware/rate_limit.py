@@ -36,7 +36,14 @@ from starlette.responses import Response
 from ghg_tool.api.middleware.error_handler import build_problem_response
 
 if TYPE_CHECKING:  # pragma: no cover
-    pass
+    from typing import Protocol
+
+    class _RateLimiter(Protocol):
+        """Public contract every rate-limit backend must satisfy."""
+
+        def is_allowed(self, key: str) -> bool: ...
+        def reset(self) -> None: ...
+
 
 _log = structlog.get_logger(__name__)
 
@@ -162,7 +169,9 @@ class _RedisSlidingWindow:
 # ---------------------------------------------------------------------------
 
 
-def _build_counter(*, window_s: int, limit: int, namespace: str) -> object:
+def _build_counter(
+    *, window_s: int, limit: int, namespace: str
+) -> _RateLimiter:
     """Construct a per-bucket counter, preferring Redis when available."""
     from ghg_tool.infrastructure import redis_client  # noqa: PLC0415
 
