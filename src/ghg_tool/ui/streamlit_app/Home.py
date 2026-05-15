@@ -82,6 +82,35 @@ def _get_factor_sources_label(lang: str) -> str:
     return f"{label}: {value}"
 
 
+def _humanize_as_of(raw: str, lang: str) -> str:
+    """Format an ISO 8601 ``as_of`` timestamp for display in UI footers.
+
+    Converts "2026-05-15T14:50:21.374947Z" → "2026-05-15 14:50 UTC".
+    Returns the localised label + formatted value, or falls back to the
+    raw string when parsing fails.
+
+    Args:
+        raw: ISO 8601 timestamp string from the API ``as_of`` field.
+        lang: UI language ('it' or 'en').
+
+    Returns:
+        Localised label + formatted timestamp string.
+    """
+    from datetime import UTC, datetime
+
+    label_it = "Dati aggiornati al"
+    label_en = "Data refreshed at"
+    label = label_it if lang == "it" else label_en
+    try:
+        # Accept both "…Z" and "…+00:00" variants
+        normalized = raw.replace("Z", "+00:00")
+        dt = datetime.fromisoformat(normalized).astimezone(UTC)
+        formatted = dt.strftime("%Y-%m-%d %H:%M UTC")
+    except (ValueError, AttributeError):
+        formatted = raw  # fallback: show raw string unchanged
+    return f"{label}: {formatted}"
+
+
 # ---------------------------------------------------------------------------
 # Sidebar — language toggle + auth
 # ---------------------------------------------------------------------------
@@ -216,7 +245,7 @@ if not kpis or (total_lb <= 0.0 and scope2_mb_total <= 0.0):
         f"{_('footer_gwp_set', lang)}: {selected_gwp} | "
         f"{_get_factor_sources_label(lang)} | "
         f"{_('footer_methodology', lang)} | "
-        f"as_of: {as_of}"
+        f"{_humanize_as_of(as_of, lang)}"
     )
     st.stop()
 
@@ -416,7 +445,11 @@ st.caption(
     f"{_('footer_dashboard_version', lang)}{DASHBOARD_VERSION} | "
     f"{_('footer_api_version', lang)} | "
     f"{_('footer_gwp_set', lang)}: {selected_gwp} | "
-    f"{_('footer_factor_source', lang)} | "
+    f"{_get_factor_sources_label(lang)} | "
     f"{_('footer_methodology', lang)} | "
-    f"as_of: {as_of}"
+    f"{_humanize_as_of(as_of, lang)}"
+)
+st.caption(
+    f"_{_('footer_as_of_help', lang)}_",
+    unsafe_allow_html=False,
 )

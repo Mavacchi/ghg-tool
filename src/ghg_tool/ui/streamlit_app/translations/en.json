@@ -103,6 +103,7 @@
   "footer_factor_source": "Factor sources: See factor catalog",
   "footer_methodology": "Methodology: GHG Protocol Corporate Standard",
   "footer_dashboard_version": "Dashboard v",
+  "footer_as_of_help": "Timestamp of the last metrics synchronisation from the materialized view.",
   "viano_banner": "Reduced operation at VIANO site in 2025: interpret YoY comparisons with caution.",
   "biogenic_adv007": "Biogenic CO2 emissions from combustion of biomass and biogas are disclosed separately under E1-7. They are not included in Scope 1/2/3 totals per ADR-007 and GHG Protocol Corporate Standard §4.5.",
   "no_data": "No data available for the selected filters.",
