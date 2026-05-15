@@ -30,7 +30,7 @@
   "login_demo_hint": "Demo: enter any username/password for a demo token.",
   "login_demo_warning": "⚠️ DEMO MODE active (GHG_DEMO_MODE=true). Authentication is bypassed: any username/password meeting the minimum length will be admitted with a demo token. Do NOT use in production.",
   "login_real_hint": "Authenticated login. Credentials are verified by the backend.",
-  "demo_mode_banner": "DEMO MODE: you are authenticated with a demo token. The data and roles shown are not guaranteed by the backend.",
+  "demo_mode_banner": "DEMO MODE — preloaded data for demonstration only. Do NOT use for real reporting. Login: demo / demo",
   "logout_btn": "Log out",
   "total_emissions": "Total Emissions (Scope 1+2 LB+3)",
   "scope1_total": "Scope 1: Total",
