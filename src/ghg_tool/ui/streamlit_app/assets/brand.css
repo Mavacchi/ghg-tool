@@ -980,3 +980,224 @@ button.ct-btn-destructive:hover {
   --ct-bluish-green: #009E73;
   --ct-brand-steel: #788B99;
 }
+
+/* ====================================================================
+ * AUTO-CALC: preview metric card and breakdown table
+ *
+ * .ct-preview-card  — wrapper for the tCO2e result card shown after a
+ *   successful preview call. A prominent brand-steel top stripe and a
+ *   soft background surface distinguish it from generic metric cards.
+ *
+ * .ct-breakdown-table — compact data table for factor/gas breakdown.
+ *   Uses tabular numerals and reduced padding for data density.
+ *
+ * .ct-formula-block — monospace display of the human-readable formula.
+ *
+ * .ct-recent-entries — history strip of the last 5 quick-repeat items.
+ *
+ * All selectors use class-based hooks (set via st.markdown) rather than
+ * data-testid so they survive Streamlit minor version updates.
+ * ================================================================ */
+
+/* Preview card container */
+.ct-preview-card {
+  background: #FFFFFF;
+  border: 1px solid #ECE5DC;
+  border-top: 3px solid #788B99;
+  border-radius: 0 0 10px 10px;
+  padding: 1.25rem 1.5rem 1rem 1.5rem;
+  margin-top: 0.5rem;
+  box-shadow: 0 2px 8px rgba(26, 26, 26, 0.04);
+}
+
+/* tCO2e hero number inside the preview card */
+.ct-preview-tco2e {
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  font-size: 2.4rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums lining-nums;
+  letter-spacing: -0.02em;
+  color: #1a1a1a;
+  line-height: 1.05;
+}
+
+.ct-preview-unit {
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: #788B99;
+  margin-left: 0.3rem;
+  vertical-align: super;
+  letter-spacing: 0.02em;
+}
+
+/* GWP chip next to the total */
+.ct-gwp-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.15rem 0.55rem;
+  border-radius: 999px;
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  background: rgba(120, 139, 153, 0.12);
+  color: #5d7280;
+  border: 1px solid rgba(120, 139, 153, 0.24);
+  margin-left: 0.5rem;
+  vertical-align: middle;
+}
+
+/* Vintage-offset warning badge */
+.ct-vintage-warn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.2rem 0.6rem;
+  border-radius: 6px;
+  font-size: 0.75rem;
+  font-weight: 500;
+  background: rgba(230, 159, 0, 0.10);
+  color: #946800;
+  border: 1px solid rgba(230, 159, 0, 0.30);
+  margin-top: 0.5rem;
+  line-height: 1.4;
+}
+
+/* Formula block */
+.ct-formula-block {
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  font-size: 0.82rem;
+  font-variant-numeric: tabular-nums;
+  background: #F7F5F2;
+  border: 1px solid #ECE5DC;
+  border-radius: 6px;
+  padding: 0.65rem 0.9rem;
+  color: #2a2a2a;
+  line-height: 1.55;
+  overflow-x: auto;
+  white-space: pre;
+  margin-top: 0.5rem;
+}
+
+/* Breakdown table: compact, alternating rows */
+.ct-breakdown-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.82rem;
+  font-variant-numeric: tabular-nums lining-nums;
+  margin-top: 0.75rem;
+}
+.ct-breakdown-table th {
+  text-align: left;
+  font-weight: 600;
+  font-size: 0.7rem;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: #9a9a9a;
+  border-bottom: 1px solid #ECE5DC;
+  padding: 0.3rem 0.5rem 0.4rem 0.5rem;
+}
+.ct-breakdown-table td {
+  padding: 0.35rem 0.5rem;
+  color: #2a2a2a;
+  border-bottom: 1px solid #F3EDE5;
+  vertical-align: top;
+}
+.ct-breakdown-table tr:last-child td {
+  border-bottom: none;
+}
+.ct-breakdown-table tr:nth-child(even) td {
+  background: rgba(240, 235, 229, 0.25);
+}
+.ct-breakdown-table td.ct-num {
+  text-align: right;
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+}
+
+/* Recent-entries strip */
+.ct-recent-entries {
+  margin-top: 1rem;
+}
+.ct-recent-entry {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.4rem 0.65rem;
+  border: 1px solid #ECE5DC;
+  border-radius: 6px;
+  background: #FFFFFF;
+  font-size: 0.8rem;
+  color: #2a2a2a;
+  cursor: pointer;
+  transition: border-color 180ms ease, box-shadow 180ms ease;
+  margin-bottom: 0.4rem;
+}
+.ct-recent-entry:hover {
+  border-color: #788B99;
+  box-shadow: 0 2px 6px rgba(120, 139, 153, 0.10);
+}
+.ct-recent-entry .ct-re-tco2e {
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  font-weight: 600;
+  color: #1a1a1a;
+  font-variant-numeric: tabular-nums;
+  min-width: 6rem;
+  text-align: right;
+}
+.ct-recent-entry .ct-re-label {
+  flex: 1;
+  color: #5a5a5a;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Empty state specific to auto-calc preview area */
+.ct-preview-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.6rem;
+  padding: 2rem 1.5rem;
+  border-radius: 10px;
+  border: 1.5px dashed #DDD3C5;
+  background: #FAFAFA;
+  text-align: center;
+  color: #9a9a9a;
+  font-size: 0.88rem;
+  margin-top: 0.5rem;
+}
+.ct-preview-empty .ct-pe-icon {
+  font-size: 2rem;
+  color: #C8BCA8;
+  line-height: 1;
+}
+.ct-preview-empty .ct-pe-text {
+  max-width: 340px;
+  line-height: 1.55;
+}
+
+/* ====================================================================
+ * AUTO-CALC: mobile responsive overrides (<=480px)
+ * ================================================================ */
+@media (max-width: 480px) {
+  .ct-preview-card {
+    padding: 0.85rem 0.85rem 0.75rem 0.85rem;
+  }
+  .ct-preview-tco2e {
+    font-size: 1.8rem;
+  }
+  .ct-formula-block {
+    font-size: 0.74rem;
+    padding: 0.5rem 0.65rem;
+  }
+  .ct-breakdown-table {
+    font-size: 0.75rem;
+  }
+  /* Collapse auto-calc form to single column on phone portrait. */
+  .ct-autocalc-form [data-testid="column"] {
+    flex: 0 0 100% !important;
+    max-width: 100% !important;
+  }
+}

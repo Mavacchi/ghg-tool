@@ -499,6 +499,43 @@ def download_report(job_id: str) -> bytes | None:
         return None
 
 
+def fetch_excel_template(*, token: str | None = None) -> bytes | None:
+    """Scarica il template Excel vuoto da GET /api/v1/raw/excel/template.
+
+    Chiama l'endpoint che genera il workbook .xlsx con i 3 fogli scope +
+    il foglio _README con istruzioni. Il file restituito può essere
+    passato direttamente a ``st.download_button``.
+
+    Args:
+        token: Bearer JWT per la sessione corrente. Se None usa il token
+            da ``st.session_state`` (o il token demo se in modalità demo).
+
+    Returns:
+        Bytes del file .xlsx, oppure None in caso di errore di rete o auth.
+    """
+    from ghg_tool.ui.streamlit_app.lib.auth import _DEMO_MODE, _DEMO_TOKEN  # noqa: PLC0415
+
+    if not token:
+        token = st.session_state.get("token")
+    if not token:
+        token = _DEMO_TOKEN if _DEMO_MODE else None
+
+    headers: dict[str, str] = {}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+
+    try:
+        resp = httpx.get(
+            f"{_get_base_url()}/api/v1/raw/excel/template",
+            headers=headers,
+            timeout=_TIMEOUT,
+        )
+        resp.raise_for_status()
+        return resp.content
+    except (httpx.HTTPStatusError, httpx.RequestError):
+        return None
+
+
 def import_excel(file_bytes: bytes) -> dict[str, Any]:
     """POST an Excel workbook to /api/v1/raw/excel/import.
 
@@ -552,6 +589,131 @@ def import_excel(file_bytes: bytes) -> dict[str, Any]:
         }
     except httpx.RequestError as exc:
         return {"error": str(exc)}
+
+
+class AutoCalcError(Exception):
+    """Raised by ``calc_preview`` and ``calc_insert`` on typed API errors.
+
+    Attributes:
+        detail: Human-readable error message extracted from the API response.
+    """
+
+    def __init__(self, detail: str) -> None:
+        super().__init__(detail)
+        self.detail = detail
+
+
+def calc_preview(payload: dict[str, Any], *, token: str) -> dict[str, Any]:
+    """POST to ``/api/v1/calc/preview`` — compute tCO2e without DB write.
+
+    The endpoint is read-only (no row is persisted).  Safe to call
+    repeatedly as the user edits the form.  ``quantita`` MUST be sent as a
+    string to preserve ``Decimal`` precision (§9 of the auto-calc design).
+
+    Args:
+        payload: ``CalcInputRequest`` dict — keys include ``scope``,
+            ``sub_scope``, ``codice_sito``, ``anno``, ``quantita`` (str),
+            ``unita``, ``gwp_set``, and optional scope-specific fields
+            (``combustibile``, ``strumento_mb``, ``sottocategoria``, etc.).
+        token: Bearer JWT for the current session (editor or admin role).
+
+    Returns:
+        ``CalcPreviewResponse`` dict on HTTP 200, containing ``tco2e``,
+        ``breakdown``, ``factor_metadata``, ``gwp_set``, ``methodology``,
+        ``disclosure_notes``, and ``dq_findings``.
+
+    Raises:
+        AutoCalcError: On HTTP 422 (validation / missing factor), 403
+            (insufficient role), or network-level errors.
+    """
+    headers: dict[str, str] = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {token}",
+    }
+    try:
+        resp = httpx.post(
+            f"{_get_base_url()}/api/v1/calc/preview",
+            headers=headers,
+            json=payload,
+            timeout=_TIMEOUT,
+        )
+        if resp.status_code in (200, 201):
+            return resp.json()
+        # Extract detail from response body (problem+json or FastAPI format).
+        try:
+            body = resp.json()
+            detail = body.get("detail", str(body))
+            if isinstance(detail, list):
+                # FastAPI validation errors return a list of dicts.
+                detail = "; ".join(
+                    str(e.get("msg", e)) for e in detail
+                )
+        except Exception:  # noqa: BLE001
+            detail = resp.text or f"HTTP {resp.status_code}"
+        if resp.status_code == 403:
+            raise AutoCalcError("Ruolo insufficiente: solo editor/admin")
+        raise AutoCalcError(str(detail))
+    except AutoCalcError:
+        raise
+    except httpx.RequestError as exc:
+        raise AutoCalcError(f"Errore di rete: backend non raggiungibile — {exc}") from exc
+
+
+def calc_insert(payload: dict[str, Any], *, token: str) -> dict[str, Any]:
+    """POST to ``/api/v1/calc/insert`` — compute tCO2e and write one ledger row.
+
+    Identical request body to :func:`calc_preview`.  On success the backend
+    returns the preview payload **plus** ``emission_id`` (UUID of the new
+    ``calc.emissions_consolidated`` row) and ``audit_log_id``.
+
+    This path is guarded by the append-only ledger trigger.  Never call it
+    twice with the same payload: use the optional ``idempotency_key`` field
+    in the payload to de-dup network retries.
+
+    Args:
+        payload: ``CalcInputRequest`` dict — same shape as for
+            :func:`calc_preview`, with an optional ``idempotency_key``
+            (UUID string) for retry safety.
+        token: Bearer JWT (editor or admin role required).
+
+    Returns:
+        ``CalcInsertResponse`` dict on HTTP 201 — preview body plus
+        ``emission_id`` and ``audit_log_id``.
+
+    Raises:
+        AutoCalcError: On HTTP 422 (validation / DQ failure), 403
+            (insufficient role), 409 (duplicate active row — caller must
+            use the FR-21 correction workflow), or network errors.
+    """
+    headers: dict[str, str] = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {token}",
+    }
+    try:
+        resp = httpx.post(
+            f"{_get_base_url()}/api/v1/calc/insert",
+            headers=headers,
+            json=payload,
+            timeout=_TIMEOUT,
+        )
+        if resp.status_code in (200, 201):
+            return resp.json()
+        try:
+            body = resp.json()
+            detail = body.get("detail", str(body))
+            if isinstance(detail, list):
+                detail = "; ".join(
+                    str(e.get("msg", e)) for e in detail
+                )
+        except Exception:  # noqa: BLE001
+            detail = resp.text or f"HTTP {resp.status_code}"
+        if resp.status_code == 403:
+            raise AutoCalcError("Ruolo insufficiente: solo editor/admin")
+        raise AutoCalcError(str(detail))
+    except AutoCalcError:
+        raise
+    except httpx.RequestError as exc:
+        raise AutoCalcError(f"Errore di rete: backend non raggiungibile — {exc}") from exc
 
 
 class FactorCRUDError(Exception):

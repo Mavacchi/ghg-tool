@@ -298,5 +298,19 @@
   "toast_factor_saved": "Modifiche salvate",
   "toast_factor_deleted": "Bozza eliminata",
   "toast_emission_corrected": "Correzione registrata — nuova riga creata",
-  "empty_state_drafts": "Nessun fattore in bozza. Crea il primo per iniziare."
+  "empty_state_drafts": "Nessun fattore in bozza. Crea il primo per iniziare.",
+  "auto_calc_tab_title": "Calcolo automatico",
+  "auto_calc_scope": "Scope",
+  "auto_calc_subscope": "Sub-scope / Categoria",
+  "auto_calc_quantita": "Quantita",
+  "auto_calc_unita": "Unita di misura",
+  "auto_calc_preview_btn": "Calcola anteprima",
+  "auto_calc_insert_btn": "Conferma e registra",
+  "auto_calc_clear_btn": "Pulisci campi",
+  "auto_calc_no_factor": "Nessun fattore disponibile per i parametri selezionati. Verifica il catalogo o contatta l'amministratore.",
+  "auto_calc_inserted_ok": "Registrato — ID emissione:",
+  "auto_calc_process_mode_direct": "Inserisci direttamente le tonnellate di CO2 emesse",
+  "auto_calc_process_mode_caco3": "Inserisci la massa di CaCO3 cotto (kg/t)",
+  "auto_calc_formula_label": "Formula applicata",
+  "auto_calc_factor_used_label": "Fattore utilizzato"
 }

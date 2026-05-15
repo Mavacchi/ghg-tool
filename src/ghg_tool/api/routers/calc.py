@@ -1,9 +1,17 @@
-"""Calc pipeline trigger and status endpoints — FR-34, Task 3B/C/D.
+"""Calc pipeline trigger, status, and auto-calc endpoints.
 
-Endpoints:
+Endpoints (existing):
     POST /api/v1/calc/run        — trigger a single-track run (admin).
     POST /api/v1/calc/run-dual   — trigger CSRD + EU ETS dual-track run (admin).
     GET  /api/v1/calc/runs/{cid} — poll run status from ops.calc_runs (all roles).
+
+Endpoints (new — auto_calc_design.md §10):
+    POST /api/v1/calc/preview    — compute tCO2e from quantity × factor, no DB write.
+    POST /api/v1/calc/insert     — same as preview + append row to emissions_consolidated.
+
+Auth for new endpoints: ``emissions.write`` permission (editor role per PERMISSION_MATRIX).
+Preview is read-only (no DB write); insert requires emissions.write.
+Admin role is NOT in emissions.write per PERMISSION_MATRIX — only editor.
 
 Design notes:
 - Runs are spawned as FastAPI BackgroundTasks so the endpoint returns
@@ -31,7 +39,18 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ghg_tool.api.dependencies.auth import CurrentUser
 from ghg_tool.api.dependencies.db import get_db
 from ghg_tool.api.middleware.correlation_id import get_correlation_id
-from ghg_tool.api.middleware.rbac import require_role
+from ghg_tool.api.middleware.rbac import require_permission, require_role
+from ghg_tool.api.schemas.calc_schemas import (
+    CalcInputRequest,
+    CalcInsertResponse,
+    CalcPreviewResponse,
+)
+from ghg_tool.application.services.auto_calc_service import (
+    UnitConversionError,
+    compute_and_insert,
+    compute_preview,
+)
+from ghg_tool.domain.exceptions.calc_errors import MissingFactorError
 
 logger = structlog.get_logger(__name__)
 
@@ -432,3 +451,225 @@ async def get_calc_run_status(
         finished_at=str(row["finished_at"]),
         created_by=str(row["created_by"]),
     )
+
+
+# ---------------------------------------------------------------------------
+# Auto-calc dependencies
+# ---------------------------------------------------------------------------
+
+def get_factor_catalog() -> object:
+    """FastAPI dependency: return a SqlFactorCatalogAdapter bound to env DSN.
+
+    In production this builds a sync Engine per request (lightweight; the
+    adapter caches factor records for the lifetime of the request).  In tests
+    this dependency is overridden with an InMemoryFactorCatalog.
+
+    Returns:
+        An object satisfying FactorCatalogPort.
+    """
+    import os
+    import re
+    import uuid as _uuid
+
+    from sqlalchemy import create_engine
+
+    from ghg_tool.infrastructure.factors.sql_adapter import SqlFactorCatalogAdapter
+
+    raw_dsn: str = os.getenv("DATABASE_URL") or os.getenv(
+        "SQLALCHEMY_URL",
+        "postgresql+asyncpg://ghg_app:changeme@localhost:5432/ghg_tool",
+    ) or "postgresql+asyncpg://ghg_app:changeme@localhost:5432/ghg_tool"
+
+    def _sync_dsn(raw: str) -> str:
+        no_driver = re.sub(r"^postgresql\+\w+://", "postgresql://", raw)
+        return no_driver.replace("postgresql://", "postgresql+psycopg://", 1)
+
+    sync_engine = create_engine(_sync_dsn(raw_dsn), pool_pre_ping=True, pool_size=1, max_overflow=0)
+
+    # Tenant ID is not available at dependency construction time without the
+    # auth dependency; use a nil UUID sentinel that the adapter handles
+    # gracefully (the RLS GUC on the session provides real filtering in practice).
+    # Tests override get_factor_catalog entirely.
+    sentinel_tenant = _uuid.UUID(int=0)
+    return SqlFactorCatalogAdapter(sentinel_tenant, sync_engine=sync_engine)
+
+
+# ---------------------------------------------------------------------------
+# Auto-calc endpoints (auto_calc_design.md §10)
+# ---------------------------------------------------------------------------
+
+@router.post(
+    "/preview",
+    status_code=status.HTTP_200_OK,
+    response_model=CalcPreviewResponse,
+    summary="Auto-calc preview: quantity × factor → tCO2e (no DB write)",
+    description=(
+        "Compute tCO2e for a single activity quantity using the factor catalog "
+        "(closest-prior vintage) without writing to the database. "
+        "Returns the full audit trace: factor_id, factor_value, formula_human, warnings. "
+        "Requires emissions.write permission (editor role)."
+    ),
+    responses={
+        200: {"description": "Preview calc result with full audit trace"},
+        403: {"description": "Insufficient permission (requires emissions.write)"},
+        422: {
+            "description": (
+                "Validation error or missing factor "
+                "(MissingFactorError / UnitConversionError)"
+            )
+        },
+    },
+)
+async def calc_preview(
+    body: CalcInputRequest,
+    user: Annotated[CurrentUser, Depends(require_permission("emissions", "write"))],
+    factor_catalog: Annotated[object, Depends(get_factor_catalog)],
+) -> CalcPreviewResponse:
+    """Compute a tCO2e preview for the given activity record.
+
+    No database write is performed. The factor catalog is queried with
+    closest-prior vintage selection for the requested anno.
+
+    Args:
+        body: Universal auto-calc input (scope, sub_scope, quantita, unita, …).
+        user: Authenticated user with emissions.write permission.
+        factor_catalog: Factor catalog port (SQL adapter in production, test double in tests).
+
+    Returns:
+        CalcPreviewResponse with tco2e, factor provenance, and formula trace.
+
+    Raises:
+        HTTPException 422: On missing factor, unit conversion error, or validation failure.
+    """
+    log = logger.bind(
+        correlation_id=get_correlation_id(),
+        user=user.sub,
+        scope=body.scope,
+        sub_scope=body.sub_scope,
+        anno=body.anno,
+    )
+    log.info("calc_preview_request")
+    try:
+        return await compute_preview(body, factor_catalog=factor_catalog)  # type: ignore[arg-type]
+    except MissingFactorError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "type": "about:blank",
+                "title": "Missing Factor",
+                "status": 422,
+                "detail": str(exc),
+            },
+        ) from exc
+    except UnitConversionError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "type": "about:blank",
+                "title": "Unit Conversion Error",
+                "status": 422,
+                "detail": str(exc),
+            },
+        ) from exc
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "type": "about:blank",
+                "title": "Calculation Error",
+                "status": 422,
+                "detail": str(exc),
+            },
+        ) from exc
+
+
+@router.post(
+    "/insert",
+    status_code=status.HTTP_201_CREATED,
+    response_model=CalcInsertResponse,
+    summary="Auto-calc insert: quantity × factor → tCO2e + append to emissions_consolidated",
+    description=(
+        "Compute tCO2e and append a new row to calc.emissions_consolidated "
+        "(append-only; raw_row_id=NULL for direct API entry). "
+        "An audit_log entry with action='emission_auto_calc' is written atomically. "
+        "Requires emissions.write permission (editor role)."
+    ),
+    responses={
+        201: {"description": "Emission row inserted; returns preview data + emission_id"},
+        403: {"description": "Insufficient permission (requires emissions.write)"},
+        422: {
+            "description": (
+                "Validation error, missing factor, or unit conversion error"
+            )
+        },
+    },
+)
+async def calc_insert(
+    body: CalcInputRequest,
+    user: Annotated[CurrentUser, Depends(require_permission("emissions", "write"))],
+    session: Annotated[AsyncSession, Depends(get_db)],
+    factor_catalog: Annotated[object, Depends(get_factor_catalog)],
+) -> CalcInsertResponse:
+    """Compute tCO2e and insert an emission record into the ledger.
+
+    The emission row is inserted directly into calc.emissions_consolidated with
+    raw_row_id=NULL (not via the bulk ETL pipeline). An audit_log row is
+    appended atomically in the same session transaction.
+
+    Args:
+        body: Universal auto-calc input.
+        user: Authenticated user with emissions.write permission.
+        session: Async DB session with RLS GUCs pre-set (tenant_id + role).
+        factor_catalog: Factor catalog port.
+
+    Returns:
+        CalcInsertResponse: preview data + emission_id + correlation_id + created_at.
+
+    Raises:
+        HTTPException 422: On missing factor, unit conversion error, or validation failure.
+    """
+    log = logger.bind(
+        correlation_id=get_correlation_id(),
+        user=user.sub,
+        scope=body.scope,
+        sub_scope=body.sub_scope,
+        anno=body.anno,
+    )
+    log.info("calc_insert_request")
+    try:
+        return await compute_and_insert(
+            body,
+            factor_catalog=factor_catalog,  # type: ignore[arg-type]
+            session=session,
+            user=user,
+        )
+    except MissingFactorError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "type": "about:blank",
+                "title": "Missing Factor",
+                "status": 422,
+                "detail": str(exc),
+            },
+        ) from exc
+    except UnitConversionError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "type": "about:blank",
+                "title": "Unit Conversion Error",
+                "status": 422,
+                "detail": str(exc),
+            },
+        ) from exc
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "type": "about:blank",
+                "title": "Calculation Error",
+                "status": 422,
+                "detail": str(exc),
+            },
+        ) from exc

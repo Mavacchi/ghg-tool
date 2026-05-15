@@ -30,6 +30,7 @@ from typing import Any
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, status
 from fastapi import File as FastAPIFile
+from fastapi.responses import Response
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -37,6 +38,7 @@ from ghg_tool.api.dependencies.auth import CurrentUser
 from ghg_tool.api.dependencies.db import get_db
 from ghg_tool.api.middleware.correlation_id import get_correlation_id
 from ghg_tool.api.middleware.rbac import require_permission
+from ghg_tool.etl.builders.excel_template import build_excel_template
 from ghg_tool.etl.orchestrator import run_ingestion_pipeline
 from ghg_tool.etl.readers.excel_reader import (
     InvalidExcelFormatError,
@@ -102,6 +104,79 @@ class ExcelImportResponse(BaseModel):
     scope3_rows: int = Field(ge=0)
     dq_findings: int = Field(ge=0)
     blocked: bool
+
+
+# ---------------------------------------------------------------------------
+# Template endpoint
+# ---------------------------------------------------------------------------
+
+_XLSX_CONTENT_TYPE = (
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+)
+_TEMPLATE_FILENAME = "carbontrace_template.xlsx"
+
+_DEFAULT_KNOWN_SITES = [
+    "SASSUOLO", "FIORANO", "VIANO", "VIANO_GARGOLA",
+    "CASALGRANDE", "IANO", "FRASSINORO",
+]
+
+
+@router.get(
+    "/template",
+    status_code=200,
+    summary="Scarica il modello Excel vuoto per l'import bulk emissioni",
+    description=(
+        "Restituisce un file .xlsx con 3 fogli (scope1, scope2, scope3) "
+        "pre-popolati con le intestazioni canoniche e una riga di esempio, "
+        "più un foglio _README con istruzioni in italiano e inglese. "
+        "Il template è pronto per essere compilato e poi caricato tramite "
+        "POST /api/v1/raw/excel/import. "
+        "Richiede ruolo editor o admin (permesso raw_ingestions.import)."
+    ),
+    responses={
+        200: {
+            "description": "File .xlsx del template",
+            "content": {_XLSX_CONTENT_TYPE: {}},
+        },
+        401: {"description": "Non autenticato"},
+        403: {"description": "Ruolo insufficiente (editor o admin richiesto)"},
+    },
+)
+async def download_excel_template(
+    user: CurrentUser = Depends(require_permission("raw_ingestions", "import")),
+) -> Response:
+    """Genera e restituisce il template Excel vuoto per l'import bulk.
+
+    Il template include:
+    - Foglio scope1 con le colonne Scope, Anno, Codice_Sito, Categoria_S1, ...
+    - Foglio scope2 con le colonne Scope, Anno, Codice_Sito, Voce_S2, ...
+    - Foglio scope3 con le colonne Scope, Anno, Categoria_S3, Sottocategoria, ...
+    - Foglio _README con istruzioni bilingue (IT/EN)
+
+    Args:
+        user: Utente autenticato con permesso raw_ingestions.import.
+
+    Returns:
+        Response binaria con content-type xlsx e header Content-Disposition.
+    """
+    correlation_id = get_correlation_id()
+    logger.bind(
+        correlation_id=correlation_id,
+        user=user.sub[:8],
+        tenant_id=user.tenant_id,
+    ).info("excel_template_download_requested")
+
+    xlsx_bytes = build_excel_template(known_sites=_DEFAULT_KNOWN_SITES)
+
+    return Response(
+        content=xlsx_bytes,
+        media_type=_XLSX_CONTENT_TYPE,
+        headers={
+            "Content-Disposition": f'attachment; filename="{_TEMPLATE_FILENAME}"',
+            "Content-Length": str(len(xlsx_bytes)),
+            "X-Correlation-Id": correlation_id or "",
+        },
+    )
 
 
 # ---------------------------------------------------------------------------
