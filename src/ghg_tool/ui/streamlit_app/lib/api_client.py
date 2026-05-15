@@ -554,6 +554,173 @@ def import_excel(file_bytes: bytes) -> dict[str, Any]:
         return {"error": str(exc)}
 
 
+class FactorCRUDError(Exception):
+    """Raised when a factor CRUD operation fails with a typed HTTP error.
+
+    Attributes:
+        status_code: HTTP status code returned by the server (422, 404, 403, …).
+        detail: Human-readable error message from the API ``problem+json`` body.
+    """
+
+    def __init__(self, status_code: int, detail: str) -> None:
+        super().__init__(detail)
+        self.status_code = status_code
+        self.detail = detail
+
+
+class EmissionCorrectionError(Exception):
+    """Raised when ``correct_emission`` receives a non-201 response.
+
+    Attributes:
+        status_code: HTTP status code (422, 404, 403, …).
+        detail: Human-readable error detail from the API response body.
+    """
+
+    def __init__(self, status_code: int, detail: str) -> None:
+        super().__init__(detail)
+        self.status_code = status_code
+        self.detail = detail
+
+
+def patch_factor_draft(
+    factor_uuid: str,
+    updates: dict[str, Any],
+    *,
+    token: str,
+) -> dict[str, Any]:
+    """PATCH ``/api/v1/factor-catalog/{uuid}`` to edit a DRAFT factor.
+
+    Only DRAFT factors (``is_published=False``) can be edited.  The server
+    returns 422 when called on a published row (frozen by DB trigger MG-02).
+
+    Args:
+        factor_uuid: UUID of the draft factor to update.
+        updates: Partial ``FactorCatalogUpdate`` payload dict.
+        token: Bearer JWT for the current session (data_steward role required).
+
+    Returns:
+        Updated ``FactorCatalogResponse`` dict on success (HTTP 200).
+
+    Raises:
+        FactorCRUDError: On HTTP 422 (published row), 404 (not found), or
+            403 (forbidden / wrong role).
+    """
+    headers: dict[str, str] = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {token}",
+    }
+    try:
+        resp = httpx.patch(
+            f"{_get_base_url()}/api/v1/factor-catalog/{factor_uuid}",
+            headers=headers,
+            json=updates,
+            timeout=_TIMEOUT,
+        )
+        if resp.status_code == 200:
+            return resp.json()
+        # Extract detail from problem+json if present
+        try:
+            detail = resp.json().get("detail", resp.text)
+        except Exception:  # noqa: BLE001
+            detail = resp.text
+        raise FactorCRUDError(status_code=resp.status_code, detail=str(detail))
+    except FactorCRUDError:
+        raise
+    except httpx.RequestError as exc:
+        raise FactorCRUDError(status_code=0, detail=str(exc)) from exc
+
+
+def delete_factor_draft(
+    factor_uuid: str,
+    *,
+    token: str,
+) -> None:
+    """DELETE ``/api/v1/factor-catalog/{uuid}`` to remove a DRAFT factor.
+
+    Only DRAFT factors can be deleted.  Published factors are immutable and
+    return 422.
+
+    Args:
+        factor_uuid: UUID of the draft factor to delete.
+        token: Bearer JWT for the current session (data_steward role required).
+
+    Returns:
+        None on HTTP 204 (success — no content).
+
+    Raises:
+        FactorCRUDError: On HTTP 422 (published row), 404 (not found), or
+            403 (forbidden / wrong role).
+    """
+    headers: dict[str, str] = {
+        "Authorization": f"Bearer {token}",
+    }
+    try:
+        resp = httpx.delete(
+            f"{_get_base_url()}/api/v1/factor-catalog/{factor_uuid}",
+            headers=headers,
+            timeout=_TIMEOUT,
+        )
+        if resp.status_code == 204:
+            return None
+        try:
+            detail = resp.json().get("detail", resp.text)
+        except Exception:  # noqa: BLE001
+            detail = resp.text
+        raise FactorCRUDError(status_code=resp.status_code, detail=str(detail))
+    except FactorCRUDError:
+        raise
+    except httpx.RequestError as exc:
+        raise FactorCRUDError(status_code=0, detail=str(exc)) from exc
+
+
+def correct_emission(
+    emission_id: str,
+    payload: dict[str, Any],
+    *,
+    token: str,
+) -> dict[str, Any]:
+    """POST ``/api/v1/emissions/{id}/correct`` — append-only correction.
+
+    Creates a new emission row and links the original via ``superseded_by``.
+    The original row is NEVER overwritten (audit immutability).
+
+    Args:
+        emission_id: UUID of the emission row to supersede.
+        payload: ``EmissionCorrectionRequest`` dict with keys
+            ``reason_code``, ``tco2e_corrected``, and ``notes``.
+        token: Bearer JWT for the current session (data_steward role required).
+
+    Returns:
+        ``EmissionCorrectionResponse`` dict on HTTP 201 (new row created).
+
+    Raises:
+        EmissionCorrectionError: On HTTP 422 (validation), 404 (not found),
+            or 403 (forbidden / wrong role).
+    """
+    headers: dict[str, str] = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {token}",
+    }
+    try:
+        resp = httpx.post(
+            f"{_get_base_url()}/api/v1/emissions/{emission_id}/correct",
+            headers=headers,
+            json=payload,
+            timeout=_TIMEOUT,
+        )
+        if resp.status_code == 201:
+            return resp.json()
+        try:
+            detail = resp.json().get("detail", resp.text)
+        except Exception:  # noqa: BLE001
+            detail = resp.text
+        raise EmissionCorrectionError(status_code=resp.status_code, detail=str(detail))
+    except EmissionCorrectionError:
+        raise
+    except httpx.RequestError as exc:
+        raise EmissionCorrectionError(status_code=0, detail=str(exc)) from exc
+
+
 def _safe_patch(url: str, body: dict[str, Any] | None = None) -> dict[str, Any]:
     """Perform a PATCH request with auth; return parsed JSON or error dict.
 
