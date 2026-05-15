@@ -10,9 +10,15 @@ Read-only: no POST / PUT / DELETE on ``/api/v1/sites``.
 SEC-P0-003 — Cross-tenant isolation:
   tenant_id is sourced exclusively from the validated JWT claim.
   No client-supplied tenant filter is accepted.
+
+Migration M6 (0026) adds ``site_type`` (STABILIMENTO_PRODUTTIVO | UFFICIO |
+MAGAZZINO) and ``country`` (CHAR(2), default 'IT') to ``ref.sites``.  Both
+columns are exposed here since M6 is required on the target branch.
 """
 
 from __future__ import annotations
+
+from typing import Literal
 
 import structlog
 from fastapi import APIRouter, Depends, status
@@ -29,18 +35,26 @@ logger = structlog.get_logger(__name__)
 
 router = APIRouter(prefix="/api/v1/sites", tags=["sites"])
 
+# Site-type literal aligned with the DB ENUM introduced in migration M6.
+SiteType = Literal["STABILIMENTO_PRODUTTIVO", "UFFICIO", "MAGAZZINO"]
 
-class SiteRow(BaseModel):
-    """A single active production site.
+
+class SiteOut(BaseModel):
+    """A single active production site (M6-extended schema).
 
     Attributes:
         codice_sito: Site code (e.g. ``IANO``, ``VIANO``).
         full_name: Human-readable full name of the site.
         role: Operational role of the site (e.g. ``production``, ``logistics``).
         geography: ISO-3166 alpha-2 country code or region tag.
+        country: ISO-3166 alpha-2 country code from ``ref.sites.country``
+            (M6, decision #2).  Used for LB factor lookup; default ``'IT'``.
+        site_type: Classification from M6 decision #7.  One of
+            ``STABILIMENTO_PRODUTTIVO``, ``UFFICIO``, ``MAGAZZINO``.
+            Validates Processo_Decarb applicability at the API level.
         eu_ets_installation_id: EU ETS installation identifier; ``None`` if not
             registered.
-        eu_ets_activity: EU ETS Annex I activity code; ``None`` if not applicable.
+        is_active: Whether the site is within the current operational boundary.
     """
 
     model_config = ConfigDict(from_attributes=True, frozen=True)
@@ -49,8 +63,15 @@ class SiteRow(BaseModel):
     full_name: str
     role: str
     geography: str
+    country: str = Field(min_length=2, max_length=2)
+    site_type: SiteType
     eu_ets_installation_id: str | None = None
-    eu_ets_activity: str | None = None
+    is_active: bool = True
+
+
+# Keep the old name as an alias so existing callers that imported SiteRow
+# continue to resolve without a NameError.
+SiteRow = SiteOut
 
 
 class SitesResponse(BaseModel):
@@ -65,7 +86,7 @@ class SitesResponse(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    sites: list[SiteRow] = Field(default_factory=list)
+    sites: list[SiteOut] = Field(default_factory=list)
     tenant_id_prefix: str
     correlation_id: str
 
@@ -79,6 +100,8 @@ class SitesResponse(BaseModel):
         "by the caller's JWT.  The result is the authoritative site list for "
         "the Streamlit UI; the ``GHG_SITES`` env var is a fallback for "
         "offline / pre-migration scenarios only.\n\n"
+        "M6 fields: ``site_type`` (STABILIMENTO_PRODUTTIVO | UFFICIO | MAGAZZINO) "
+        "and ``country`` (ISO-3166 alpha-2, default 'IT') are now included.\n\n"
         "SEC-P0-003: tenant isolation is enforced via the JWT claim — no "
         "client-supplied tenant filter is accepted."
     ),
@@ -103,7 +126,7 @@ async def get_sites(
         session: Async DB session with RLS GUCs set by the auth middleware.
 
     Returns:
-        A ``SitesResponse`` with the active sites for the tenant.
+        A ``SitesResponse`` with the active sites for the tenant (M6 schema).
     """
     tenant_id = user.tenant_id
     correlation_id = get_correlation_id() or ""
@@ -117,7 +140,8 @@ async def get_sites(
     result = await session.execute(
         text(
             "SELECT codice_sito, full_name, role, geography, "
-            "       eu_ets_installation_id, eu_ets_activity "
+            "       country, site_type, "
+            "       eu_ets_installation_id, is_active "
             "FROM ref.sites "
             "WHERE tenant_id = CAST(:tenant_id AS uuid) "
             "  AND is_active = TRUE "
@@ -125,7 +149,7 @@ async def get_sites(
         ),
         {"tenant_id": tenant_id},
     )
-    rows = [SiteRow(**dict(r._mapping)) for r in result]
+    rows = [SiteOut(**dict(r._mapping)) for r in result]
 
     log.info("get_sites_ok", site_count=len(rows))
 
