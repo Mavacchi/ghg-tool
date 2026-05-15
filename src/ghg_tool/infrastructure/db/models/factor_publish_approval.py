@@ -15,8 +15,8 @@ from ghg_tool.infrastructure.db.base import Base
 class FactorPublishApproval(Base):
     """Two-eyes approval record for factor publication (ISAE 3000 §A99).
 
-    A draft factor must be approved by a SECOND esg_manager before it can
-    be published.  The same esg_manager who proposed the approval cannot
+    A draft factor must be approved by a SECOND admin before it can
+    be published.  The same admin who proposed the approval cannot
     also approve it (``proposed_by != approved_by`` enforced in the handler).
 
     The UNIQUE constraint ``(tenant_id, factor_id)`` ensures there is at
@@ -28,9 +28,9 @@ class FactorPublishApproval(Base):
         id: Primary key UUID.
         tenant_id: Owning tenant.
         factor_id: FK to ``calc.factor_catalog.id``.
-        proposed_by: UUID of the esg_manager who created the request.
+        proposed_by: UUID of the admin who created the request.
         proposed_at: Timestamp of the request (DB default = now()).
-        approved_by: UUID of the approving esg_manager (NULL until decided).
+        approved_by: UUID of the approving admin (NULL until decided).
         approved_at: Timestamp of the decision (NULL until decided).
         decision: PENDING | APPROVED | REJECTED.
         decision_notes: Free-text notes for REJECTED decisions.

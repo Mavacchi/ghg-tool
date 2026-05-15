@@ -327,13 +327,13 @@ async def _persist_emissions(
     async with session_factory() as session, session.begin():
         # Inject RLS GUCs immediately after opening the transaction so that
         # all INSERT statements below see app.tenant_id and app.role_code.
-        # The service account writes as esg_manager (PERMISSION_MATRIX key
+        # The service account writes as admin (PERMISSION_MATRIX key
         # "emissions"/"correct") which is the seeded role that owns bulk
-        # calc inserts (rbac.py — ROLE_ESG_MANAGER).
+        # calc inserts (rbac.py — ROLE_ADMIN).
         await set_session_gucs(
             session,
             tenant_id=str(tenant_id),
-            role_code="esg_manager",
+            role_code="admin",
         )
 
         if records:
@@ -432,7 +432,7 @@ async def _persist_dual_track_emissions(
         await set_session_gucs(
             session,
             tenant_id=str(tenant_id),
-            role_code="esg_manager",
+            role_code="admin",
         )
 
         # Insert CSRD emission rows
