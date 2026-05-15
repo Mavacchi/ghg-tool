@@ -135,8 +135,8 @@ else:
     # ---------------------------------------------------------------------------
     # Waiver / acknowledge action (esg_manager only)
     # ---------------------------------------------------------------------------
-    role = st.session_state.get("role", "auditor")
-    if role == "esg_manager" and "id" in df.columns:
+    role = st.session_state.get("role", "viewer")
+    if role == "admin" and "id" in df.columns:
         with st.expander(f"✏️ {_('acknowledge_btn', lang)}", expanded=False):
             finding_ids = df[df["resolution_status"] == "OPEN"]["id"].tolist() \
                 if "resolution_status" in df.columns else df["id"].tolist()

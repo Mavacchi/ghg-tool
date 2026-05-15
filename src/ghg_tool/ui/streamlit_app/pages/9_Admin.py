@@ -54,8 +54,8 @@ render_context_bar(
     role=st.session_state.get("role"),
 )
 
-_role = st.session_state.get("role", "auditor")
-if _role != "esg_manager":
+_role = st.session_state.get("role", "viewer")
+if _role != "admin":
     st.warning(_("admin_role_required", lang), icon="🔒")
     st.stop()
 
@@ -115,7 +115,7 @@ with st.form("admin_create_user", clear_on_submit=True):
     with cols[1]:
         new_role = st.selectbox(
             _("admin_field_role", lang),
-            ("data_steward", "esg_manager", "auditor"),
+            ("editor", "admin", "viewer"),
             format_func=lambda r: _("admin_role_" + r, lang),
         )
         new_password = st.text_input(

@@ -3,7 +3,7 @@
 Layout:
   Section 1: Active targets dataframe (all roles).
   Section 2: Per-target trajectory chart + status banner (all roles).
-  Section 3: Create target form (esg_manager only; disabled notice for others).
+  Section 3: Create target form (admin only; disabled notice for others).
   Section 4: Methodology card with cross-reference to docs/methodology.md.
 """
 
@@ -135,8 +135,8 @@ def _user_role() -> str:
     return str(payload.get("role", ""))
 
 
-def _is_esg_manager() -> bool:
-    return _user_role() == "esg_manager"
+def _is_admin() -> bool:
+    return _user_role() == "admin"
 
 
 # ---------------------------------------------------------------------------
@@ -302,7 +302,7 @@ if targets:
 
 st.subheader(_("sbti_section_create"))
 
-if not _is_esg_manager():
+if not _is_admin():
     st.info(_("sbti_create_disabled_notice"))
 else:
     with st.form("sbti_create_form"):

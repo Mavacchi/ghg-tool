@@ -4,8 +4,8 @@ Lets users:
   1. List the report snapshots for the active year.
   2. Run a diff between a chosen snapshot and the current consolidated state.
   3. Inspect totals, per-row deltas, top-10 contributors, cause breakdown.
-  4. (esg_manager only) freeze a new snapshot.
-  5. (esg_manager only) jump to the correction workflow with a pre-filled
+  4. (admin only) freeze a new snapshot.
+  5. (admin only) jump to the correction workflow with a pre-filled
      restatement justification.
 """
 
@@ -316,7 +316,7 @@ if diff_result:
             st.bar_chart(cb_df.set_index("cause"))
 
     # ----- restatement justification CTA (esg_manager only) -----
-    if role == "esg_manager" and diff_result.get("restatement_required"):
+    if role == "admin" and diff_result.get("restatement_required"):
         st.divider()
         st.markdown(f"### {_('recon_mark_justification', lang)}")
         with st.form("recon_justification_form"):
@@ -351,7 +351,7 @@ if diff_result:
 # ---------------------------------------------------------------------------
 # Section 4: chart annotations panel (M17)
 # ---------------------------------------------------------------------------
-_RECON_WRITE_ROLES = {"data_steward", "esg_manager"}
+_RECON_WRITE_ROLES = {"editor", "admin"}
 _RECON_NOTE_SEVERITIES = {
     "INFO": st.info,
     "WARNING": st.warning,
@@ -420,7 +420,7 @@ with st.expander("Note sul grafico di riconciliazione", expanded=False):
 # ---------------------------------------------------------------------------
 # Section 5: take new snapshot (esg_manager only)
 # ---------------------------------------------------------------------------
-if role == "esg_manager":
+if role == "admin":
     st.divider()
     st.subheader(_("recon_take_snapshot", lang))
     with st.form("recon_take_snapshot_form"):

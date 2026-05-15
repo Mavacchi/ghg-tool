@@ -112,7 +112,7 @@ def render_context_bar(
         lang: Active language code (for IT/EN labels).
         year: Reporting year, e.g. 2025. Omit to hide.
         gwp: GWP set string, e.g. "AR6". Omit to hide.
-        role: Active user role, e.g. "esg_manager". Omit to hide.
+        role: Active user role, e.g. "admin". Omit to hide.
     """
     parts: list[str] = []
     if year is not None:
@@ -149,21 +149,21 @@ def render_context_bar(
 # with the DB role codes returned by the auth API; do not invent new
 # role names here - the backend authoritative source is rbac.py.
 _ROLE_CHIP_PRESENTATION: dict[str, dict[str, str]] = {
-    "auditor": {
+    "viewer": {
         "tier": "viewer",
         "label_it": "Sola lettura",
         "label_en": "Read-only",
         "caption_it": "Puoi consultare i dati e gli audit trail, ma non modificarli.",
         "caption_en": "You can view data and audit trails, but not modify them.",
     },
-    "data_steward": {
+    "editor": {
         "tier": "editor",
         "label_it": "Modifica dati",
         "label_en": "Editor",
         "caption_it": "Inserisci dati, proponi fattori in bozza, registri correzioni.",
         "caption_en": "Add data, propose draft factors, record corrections.",
     },
-    "esg_manager": {
+    "admin": {
         "tier": "admin",
         "label_it": "Amministratore",
         "label_en": "Administrator",
@@ -176,7 +176,7 @@ _ROLE_CHIP_PRESENTATION: dict[str, dict[str, str]] = {
 def render_role_chip(role: str | None, lang: str = "it") -> None:
     """Render a friendly role chip + a one-line caption in the sidebar.
 
-    Maps the DB role code (``auditor`` / ``data_steward`` / ``esg_manager``)
+    Maps the DB role code (``viewer`` / ``editor`` / ``admin``)
     to one of three user-facing tiers (Viewer / Editor / Admin) with a
     plain-language caption explaining the privileges.
 

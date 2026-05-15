@@ -82,7 +82,7 @@ st.info(
 )
 
 # Role + demo banners.
-role = st.session_state.get("role", "auditor")
+role = st.session_state.get("role", "viewer")
 if is_demo_mode():
     st.warning(
         "**Modalità DEMO attiva.** Le operazioni di scrittura verranno rifiutate dall'API "
@@ -91,9 +91,9 @@ if is_demo_mode():
         "compaia in Audit Trail.",
         icon="⚠️",
     )
-elif role == "auditor":
+elif role == "viewer":
     st.warning(
-        "Il tuo ruolo (`auditor`) è di sola lettura. Nessuna operazione di scrittura è abilitata.",
+        "Il tuo ruolo (`viewer`) è di sola lettura. Nessuna operazione di scrittura è abilitata.",
         icon="🔒",
     )
 
@@ -636,10 +636,10 @@ with tab_excel:
         "richiede conferma esplicita prima dell'inserimento."
     )
 
-    if role not in ("data_steward", "esg_manager"):
+    if role not in ("editor", "admin"):
         st.warning(
             "Il tuo ruolo non puo` importare dati. Richiedi l'accesso "
-            "data_steward o esg_manager.",
+            "editor o admin.",
             icon="🔒",
         )
     else:

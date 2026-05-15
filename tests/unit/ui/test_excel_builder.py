@@ -93,7 +93,7 @@ def sample_report_data() -> dict:  # type: ignore[type-arg]
                 "gwp_set": "AR6", "methodology": "activity-based",
                 "calc_timestamp": "2026-01-01T00:00:00Z",
                 "valid_from": "2026-01-01T00:00:00Z", "valid_to": None,
-                "created_by": "data_steward", "reason_code": None,
+                "created_by": "editor", "reason_code": None,
             }
         ],
     }
