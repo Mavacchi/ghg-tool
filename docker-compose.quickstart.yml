@@ -16,6 +16,12 @@
 #
 # DO NOT use this file in production. See docs/deployment.md for the
 # production runbook with real secrets, TLS, and Redis rate-limiter.
+#
+# Demo mode is enabled HERE explicitly (GHG_ENVIRONMENT=development +
+# GHG_DEMO_MODE=true).  In the default docker-compose.yml the API is
+# production-safe (no demo seed, no /docs).  Run with this override
+# ONLY when you want the preloaded demo dataset and the demo/demo
+# login bypass.
 
 services:
   app:
