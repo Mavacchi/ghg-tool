@@ -61,6 +61,16 @@ _REPO_ROOT = os.path.abspath(
 )
 _ALEMBIC_INI = os.path.join(_REPO_ROOT, "alembic.ini")
 
+# Non-superuser role used to exercise RLS in tests.  The testcontainer's
+# default user is a PostgreSQL SUPERUSER and therefore bypasses every RLS
+# policy regardless of ENABLE / FORCE ROW LEVEL SECURITY.  Cross-tenant
+# isolation can only be verified end-to-end by switching the active role
+# (via SET LOCAL ROLE) to a NOSUPERUSER, NOBYPASSRLS role.  Seed and
+# teardown statements remain on the superuser connection so they are not
+# blocked by the tenant-isolation policy themselves.
+RLS_TEST_ROLE: str = "ghg_test_app"
+
+
 
 # ---------------------------------------------------------------------------
 # Named tuple for two-tenant seed
@@ -146,7 +156,86 @@ def migrated_db_url(pg_container: PostgresContainer) -> str:
         else:
             os.environ["SQLALCHEMY_URL"] = original_env
 
+    # Provision the non-superuser test role used to exercise RLS.  Done here
+    # (after `alembic upgrade head`) so the role has GRANTs on every object
+    # introduced by the latest migration.
+    _provision_rls_test_role(sync_url, _PG_PASSWORD)
+
     return sync_url
+
+
+def _provision_rls_test_role(sync_url: str, password: str) -> None:
+    """Create (or refresh grants for) ``RLS_TEST_ROLE`` on the test database.
+
+    The testcontainer's default user is a SUPERUSER, which BYPASSES every
+    RLS policy regardless of FORCE ROW LEVEL SECURITY.  The 3 cross-tenant
+    isolation tests in ``test_rls_tenant_isolation.py`` therefore *must*
+    execute their tenant-scoped queries under a NOSUPERUSER, NOBYPASSRLS
+    role.  We create that role idempotently here and grant it the minimal
+    privileges required to INSERT into and SELECT from the tables touched
+    by the RLS suite (``calc.emissions_consolidated``,
+    ``ops.chart_annotations``, plus the FK targets they reference).
+
+    Tests opt into this role on a per-transaction basis via
+    ``SET LOCAL ROLE ghg_test_app`` inside ``_set_gucs``.  Seed and teardown
+    code keeps running as the superuser owner so it is not blocked by the
+    very policy under test.
+
+    This is an *integration-test* fix, not a production migration: in
+    real deployments the application connects as ``ghg_app`` (NOSUPERUSER)
+    by configuration, not by DDL.
+
+    Args:
+        sync_url: ``postgresql+psycopg://...`` DSN for the migrated DB.
+        password: Password to assign to the test role (matches the
+            container password so dual-role connections share creds).
+    """
+    from sqlalchemy import create_engine  # noqa: PLC0415
+
+    role = RLS_TEST_ROLE
+    # ``password`` is accepted for symmetry with the application bootstrap
+    # but unused: the test role is reached via ``SET ROLE``, not LOGIN, so
+    # no password is required.  Kept in the signature to make the contract
+    # explicit for a future move to a separate LOGIN connection.
+    del password
+    engine = create_engine(sync_url, future=True)
+    try:
+        with engine.begin() as conn:
+            # Idempotent CREATE ROLE.  NOSUPERUSER + NOBYPASSRLS are the two
+            # attributes that *force* RLS to be evaluated for this role; the
+            # other flags are defensive defaults.  No LOGIN: tests reach the
+            # role via ``SET LOCAL ROLE`` on an existing superuser connection.
+            conn.execute(
+                text(
+                    "DO $$ BEGIN "
+                    f"  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '{role}') "
+                    f"  THEN CREATE ROLE {role} NOSUPERUSER NOBYPASSRLS "
+                    "       NOLOGIN NOINHERIT; "
+                    "  END IF; "
+                    "END $$;"
+                )
+            )
+            # Re-issue grants every session: cheap and idempotent.  Schema-wide
+            # grants are intentionally broad because this role is only ever
+            # used inside RLS tests, and the policies are exactly what we're
+            # validating; narrowing privileges further would not strengthen
+            # the test.
+            for schema in ("ref", "raw", "calc", "ops", "auth"):
+                conn.execute(text(f"GRANT USAGE ON SCHEMA {schema} TO {role};"))
+                conn.execute(
+                    text(
+                        f"GRANT SELECT, INSERT, UPDATE, DELETE "
+                        f"ON ALL TABLES IN SCHEMA {schema} TO {role};"
+                    )
+                )
+                conn.execute(
+                    text(
+                        f"GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA {schema} "
+                        f"TO {role};"
+                    )
+                )
+    finally:
+        engine.dispose()
 
 
 # ---------------------------------------------------------------------------
