@@ -154,3 +154,188 @@ not deterministic and does not satisfy verifier traceability under Reg. UE 2018/
    `regulatory_stream='CSRD_ESRS_E1'` and `anno=N` there exists a paired
    `EU_ETS_PHASE_IV` row reachable via `dual_run_id`. Without this, the FK exists but is
    not enforced as a business rule.
+
+### Q2 — Decision (compliance-agent)
+
+**Decision**: **Mandate pre-generated-UUID two-row insert pattern.** The back-fill UPDATE pattern is rejected; both `ops.calc_runs` rows must be inserted with pre-generated UUIDs and reciprocal `dual_run_id` values in a single INSERT batch within one transaction. No UPDATE statement may touch `ops.calc_runs` rows after insertion.
+
+**Verdict**: **APPROVED** (conditional on the implementation requirements below being adopted by backend-agent and test-agent before merge).
+
+**Rationale**:
+
+- **Project's existing append-only invariant on `ops.calc_runs`** (methodology.md §7, Audit Trail Integrity): the table participates in the append-only family enforced by `ops.deny_emissions_mutation()`. Permitting a back-fill UPDATE — even within the same transaction — creates a precedent that erodes the invariant, requires a carve-out in the RLS/trigger policy (`UPDATE` allowed when `dual_run_id` transitions from NULL to non-NULL), and forces every future auditor to verify that no other column was mutated in the same statement. Eliminating the UPDATE path entirely is the only mechanically enforceable rule.
+- **GDPR Art. 5(1)(d) "accuracy" + Art. 30 records-of-processing**: the records-of-processing guarantee is "what data the controller held at time T". A row that briefly exists with `dual_run_id IS NULL` and is then mutated leaves no contemporaneous evidence that the NULL state ever existed in audit log replays; conversely a verifier reading WAL/CDC streams would see two distinct states for the same primary key, complicating the Art. 30 narrative. Pre-generated UUIDs guarantee that every persisted state of a `calc_runs` row is its FINAL state.
+- **Reg. UE 2018/2067 Art. 6 (verifier traceability)**: Art. 6 requires the verifier to obtain evidence of the calculation chain. A pair of rows that were INSERTed atomically with reciprocal FKs is self-evident; a pair where one row was UPDATEd requires the verifier to also inspect transaction logs to confirm the UPDATE happened inside the same TX as the second INSERT. Self-evident evidence > evidence requiring log forensics.
+- **ISAE 3000 §A99 "sufficient appropriate audit evidence"**: §A99 weights "evidence obtained directly" higher than "evidence requiring corroboration". An immutable INSERT-only pair is direct; an INSERT-then-UPDATE pair requires corroborating the transactional boundary, lowering evidence quality.
+- **CSRD / ESRS E1 §50–§55**: the methodology disclosure must describe how dual-track reconciliation is evidenced. "Both rows inserted atomically with reciprocal FKs" is a one-sentence disclosure; "row A is inserted, row B is inserted, row A is then updated to point to row B, all within a single TX with append-only carve-out X" is a four-sentence disclosure with a carve-out that itself must be justified. Disclosure parsimony reduces audit-finding surface.
+- **10-year retention impact**: `pg_dump`-based archival snapshots taken between the two operations of the back-fill pattern (e.g., a scheduled snapshot landing mid-TX is impossible, but a logical replication subscriber lagging is not) could capture the NULL state. Pre-generated UUIDs eliminate this class of replication-lag artefact entirely.
+
+**Implementation requirements (backend-agent)**:
+
+- Public dual-track entry point (`POST /api/v1/calc/run-dual` per methodology §11.1) MUST generate both UUIDs in Python (`uuid.uuid4()`) BEFORE any DB call.
+- `_persist_emissions(...)` MUST accept `run_id: uuid.UUID` as an explicit parameter (no DB-side `DEFAULT gen_random_uuid()` reliance for the dual-track path).
+- Both INSERTs MUST occur inside a single `BEGIN … COMMIT` block; recommend a single `INSERT … VALUES (…), (…)` multi-row statement or two sequential INSERTs with `autocommit=False` and a single `commit()` call at the end.
+- No `UPDATE ops.calc_runs` statement may exist anywhere in `calc_persistence.py`. Add a code-level guard: `grep -RnE "UPDATE\s+(ops\.)?calc_runs"` in pre-commit returns zero matches.
+- The RLS / trigger policy `ops.deny_emissions_mutation()` MUST be extended to `ops.calc_runs` denying both UPDATE and DELETE, with NO carve-out for `dual_run_id`. Document in migration `0019_M18_calc_runs_dual_run_id.py` header comment.
+- Single-track (CSRD-only) runs continue to INSERT one row with `dual_run_id = NULL`. NULL on insert is permitted; NULL→non-NULL transition is forbidden.
+- `correlation_id` and `calc_timestamp` MUST be identical across both rows of a pair to evidence atomic provenance (factor_source / factor_version / gwp_set may legitimately differ across `regulatory_stream`).
+
+**Test requirements (test-agent)**:
+
+- Integration test asserting that attempting `UPDATE ops.calc_runs SET dual_run_id = … WHERE id = …` raises a permission / trigger error (proves the append-only policy is mechanically enforced, not merely conventional).
+- Integration test asserting that on dual-track run, both rows are visible in a single `SELECT … FOR SHARE` snapshot — i.e., neither row was ever visible to another transaction with `dual_run_id IS NULL`.
+- Integration test asserting reciprocity post-insert: `a.dual_run_id = b.id AND b.dual_run_id = a.id AND a.regulatory_stream <> b.regulatory_stream AND a.tenant_id = b.tenant_id AND a.anno = b.anno AND a.correlation_id = b.correlation_id`.
+- Negative test: simulate a partial failure (e.g., raise in the second INSERT) and assert that the first INSERT is rolled back (no orphan with `dual_run_id IS NULL` persists).
+- Logical-replication / WAL test (or unit-level mock thereof) asserting that no intermediate row state with `dual_run_id IS NULL` is ever published for a dual-track run.
+- Pre-commit / CI grep guard test: a meta-test that fails if any future PR introduces an `UPDATE … calc_runs` statement under `src/`.
+
+
+### Q4 — Decision (data-quality-agent)
+
+**Rule name**: `iano_dual_track_pairing_complete`
+
+**Severity**: DQ-CRIT (blocking)
+
+**Justification**: The sustainability-expert-agent decision on Q1 establishes that `dual_run_id`
+is the sole auditable linkage between a CSRD ESRS E1 calc run and its paired EU ETS Phase IV
+calc run for Annex I installations (IANO). If that linkage is absent or broken, any downstream
+`value_tco2e` published under `regulatory_stream='CSRD_ESRS_E1'` cannot be reconciled with
+the verifier-facing ETS figure as required by Reg. UE 2018/2067 Art. 6 and CSRD ESRS E1 §53–§55.
+A WARNING would allow the pipeline to publish a non-reconcilable disclosure — unacceptable
+under both frameworks. DQ-CRIT is the only appropriate severity.
+
+**Detection logic**:
+
+```sql
+-- Step 1: identify all CSRD rows for IANO tenants in the current reporting batch.
+-- "IANO tenant" = tenant whose installation registry includes at least one Annex I
+-- installation (methodology §11; tenant_flag = 'HAS_IANO' or equivalent).
+
+WITH csrd_rows AS (
+    SELECT
+        cr.id           AS calc_run_id,
+        cr.tenant_id,
+        cr.anno,
+        cr.dual_run_id,
+        cr.regulatory_stream
+    FROM ops.calc_runs cr
+    WHERE cr.regulatory_stream = 'CSRD_ESRS_E1'
+      AND cr.anno             = :reporting_anno        -- bound per batch
+      AND cr.tenant_id        IN (                     -- IANO tenants only
+              SELECT tenant_id
+              FROM   ops.tenant_installation_registry
+              WHERE  annex_i_flag = TRUE
+          )
+),
+
+-- Step 2: for each CSRD row check that dual_run_id resolves to
+-- a EU_ETS_PHASE_IV row sharing (tenant_id, anno).
+
+paired AS (
+    SELECT
+        c.calc_run_id,
+        c.tenant_id,
+        c.anno,
+        c.dual_run_id,
+        p.regulatory_stream AS paired_stream
+    FROM csrd_rows c
+    LEFT JOIN ops.calc_runs p
+           ON p.id              = c.dual_run_id
+          AND p.regulatory_stream = 'EU_ETS_PHASE_IV'
+          AND p.tenant_id        = c.tenant_id
+          AND p.anno             = c.anno
+)
+
+-- Step 3: surface unpaired rows (dual_run_id IS NULL OR join found nothing).
+SELECT *
+FROM   paired
+WHERE  paired_stream IS NULL      -- covers both NULL dual_run_id and stale FK
+   OR  dual_run_id   IS NULL;
+```
+
+Coverage threshold: **100 %** — every CSRD ESRS E1 row for an IANO tenant must be
+paired. A tenant-level override (e.g. `dq_overrides.iano_pairing_threshold`) MAY lower
+this to a minimum of 95 % during a defined transition window, but only with explicit
+ComplianceAgent approval and a documented expiry date. The override must itself be
+recorded in `ops.dq_overrides` and surfaced in the DQ report.
+
+**Output when check fails**:
+
+```json
+{
+  "rule":          "iano_dual_track_pairing_complete",
+  "rule_id":       "DQ-CRIT-06",
+  "severity":      "CRIT",
+  "blocks_pipeline": true,
+  "tenant_id":     "<tenant_id>",
+  "anno":          "<N>",
+  "affected_count": 3,
+  "coverage_ratio": 0.70,
+  "sample_rows": [
+    {"calc_run_id": "<uuid>", "dual_run_id": null,    "anno": 2024},
+    {"calc_run_id": "<uuid>", "dual_run_id": "<uuid>", "anno": 2024,
+     "note": "dual_run_id present but target row not EU_ETS_PHASE_IV"}
+  ],
+  "remediation": "Re-run or register the EU ETS Phase IV calc for anno=N and set dual_run_id on the CSRD run before re-triggering the publish pipeline."
+}
+```
+
+The JSON envelope is emitted to the orchestrator's DQ findings sink
+(`calc.dq_findings` table, `rule_id='DQ-CRIT-06'`, `blocks_pipeline=TRUE`) and
+forwarded to ComplianceAgent for audit trail. The publish pipeline (calc/publish
+endpoint) MUST NOT proceed until `affected_count = 0` for the current batch.
+
+**Scope and exemptions**:
+
+- **Exempt — single-track tenants**: tenants that have NO Annex I installation
+  (i.e. `annex_i_flag = FALSE` in `ops.tenant_installation_registry` for all
+  installations of that tenant). For these tenants `dual_run_id IS NULL` is valid
+  and the check is **skipped entirely** (not evaluated).
+- **Exemption detection mechanism**: the check queries
+  `ops.tenant_installation_registry WHERE annex_i_flag = TRUE AND tenant_id = :tid`
+  before evaluating any rows. If that query returns zero rows the check exits
+  immediately with `block_level='OK'` and a note
+  `"skipped: no Annex I installation for tenant"`.
+  The registry is owned by DataEngineerAgent / ArchitectAgent and must be populated
+  as part of tenant onboarding (methodology §11). The DQ check MUST NOT infer IANO
+  status from the data rows themselves — doing so would allow a misconfigured tenant
+  to silently bypass the check.
+- **Scope 3 rows**: the check applies only to `ops.calc_runs` rows, not to individual
+  emission line items. Scope 3 sub-categories do not have a parallel ETS obligation
+  and are out of scope for this rule.
+
+**Test plan**:
+
+1. **Unit — IANO tenant, both tracks present and correctly paired (passes)**:
+   - Fixture: tenant `T1` with `annex_i_flag=TRUE`; two `calc_runs` rows for `anno=2024`:
+     row A (`regulatory_stream='CSRD_ESRS_E1'`, `dual_run_id=<B.id>`) and row B
+     (`regulatory_stream='EU_ETS_PHASE_IV'`, `dual_run_id=<A.id>`).
+   - Expected: check returns `(True, [])`, no DQ-CRIT finding emitted.
+
+2. **Unit — IANO tenant, CSRD row exists but no ETS run (fails)**:
+   - Fixture: tenant `T1` with `annex_i_flag=TRUE`; one `calc_runs` row
+     (`regulatory_stream='CSRD_ESRS_E1'`, `dual_run_id=NULL`).
+   - Expected: check returns `(False, [finding])` with
+     `rule_id='DQ-CRIT-06'`, `severity='CRIT'`, `blocks_pipeline=True`,
+     `affected_count=1`.
+
+3. **Unit — IANO tenant, dual_run_id set but target row has wrong regulatory_stream (fails)**:
+   - Fixture: tenant `T1` with `annex_i_flag=TRUE`; row A
+     (`regulatory_stream='CSRD_ESRS_E1'`, `dual_run_id=<B.id>`) and row B
+     (`regulatory_stream='CSRD_ESRS_E1'`  -- same stream, wrong pairing).
+   - Expected: check returns `(False, [finding])` with a note that the FK target
+     exists but `paired_stream != 'EU_ETS_PHASE_IV'`.
+
+4. **Unit — non-IANO tenant, single CSRD run (skipped/passes)**:
+   - Fixture: tenant `T2` with `annex_i_flag=FALSE`; one `calc_runs` row
+     (`regulatory_stream='CSRD_ESRS_E1'`, `dual_run_id=NULL`).
+   - Expected: check returns `(True, [])` with
+     `block_level='OK'` and skip note — no finding emitted.
+
+5. **Unit — transition-window tenant override (passes at reduced threshold)**:
+   - Fixture: tenant `T3` with `annex_i_flag=TRUE`; `dq_overrides` entry
+     `{rule='iano_dual_track_pairing_complete', min_coverage=0.95, expiry='2025-12-31'}`;
+     9 of 10 CSRD rows paired (coverage=0.90 < 0.95 < 1.00).
+   - Expected: check returns `(False, [finding])` — the override lowers the threshold
+     to 0.95 but 0.90 is still below it, so DQ-CRIT is still emitted.
+   - Verify separately that coverage=0.96 with the same override returns `(True, [])`.
