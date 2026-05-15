@@ -11,6 +11,7 @@ variables:
   - ``GHG_PRODUCT_NAME``  — product / software name (default "Carbontrace").
   - ``GHG_COMPANY_NAME``  — display name shown in titles, footers, PDF.
   - ``GHG_COMPANY_SHORT`` — short name for browser tab / page_title.
+  - ``GHG_DASHBOARD_ID``  — dashboard identifier (default "carbontrace").
   - ``GHG_TENANT_ID``     — tenant identifier used by the auth fallback.
   - ``GHG_SITES``         — comma-separated list of site codes (overrides
                             the built-in 7-site default).
@@ -29,7 +30,7 @@ from pathlib import Path
 from typing import Final
 
 DASHBOARD_VERSION: Final[str] = "1.0.0"
-DASHBOARD_ID: Final[str] = "esg-main-2026"
+DASHBOARD_ID: Final[str] = os.getenv("GHG_DASHBOARD_ID", "carbontrace")
 
 _DEFAULT_PRODUCT_NAME: Final[str] = "Carbontrace"
 _DEFAULT_COMPANY_NAME: Final[str] = "Gruppo Ceramiche Gresmalt S.p.A."
