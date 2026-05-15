@@ -23,7 +23,10 @@ from typing import Any, Literal
 import structlog
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from jose.exceptions import ExpiredSignatureError, JWTError  # type: ignore[import-untyped]
+
+# SEC-P1-004: jose -> PyJWT migration.
+from jwt import ExpiredSignatureError
+from jwt import PyJWTError as JWTError
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from ghg_tool.api.middleware.correlation_id import get_correlation_id

@@ -31,7 +31,8 @@ dependencies = [
     # Logging / observability
     "structlog>=24.1,<24.2",
     # Security / auth
-    "python-jose[cryptography]>=3.3,<3.4",
+    # SEC-P1-004: migrated from python-jose (CVE-2024-33664) to PyJWT 2.8+.
+    "pyjwt[crypto]>=2.8,<3.0",
     "passlib[bcrypt]>=1.7,<1.8",
     "python-multipart>=0.0.9,<0.0.10",
     # Rate limiting

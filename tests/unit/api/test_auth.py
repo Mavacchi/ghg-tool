@@ -67,14 +67,15 @@ class TestJWT:
 
     def test_expired_token_raises(self) -> None:
         """Expired tokens must raise ExpiredSignatureError."""
-        import jose.jwt as jose_jwt
-        from jose.exceptions import ExpiredSignatureError as JOSE_ESE
-        token = jose_jwt.encode(
+        # SEC-P1-004: migrated to PyJWT.
+        import jwt as pyjwt
+        from jwt import ExpiredSignatureError
+        token = pyjwt.encode(
             {"sub": "x", "exp": int(time.time()) - 10},
             "test-secret-key-for-unit-tests-only",
             algorithm="HS256",
         )
-        with pytest.raises(JOSE_ESE):
+        with pytest.raises(ExpiredSignatureError):
             decode_token(token)
 
     def test_unknown_role_rejected(self) -> None:
@@ -86,8 +87,9 @@ class TestJWT:
         With a real DB, the session row would not be found and the middleware
         returns 401 session_not_found.  Either way, the token is never accepted.
         """
-        import jose.jwt as jose_jwt
-        token = jose_jwt.encode(
+        # SEC-P1-004: migrated to PyJWT.
+        import jwt as pyjwt
+        token = pyjwt.encode(
             {
                 "sub": str(uuid.uuid4()),
                 "role": "superadmin",
