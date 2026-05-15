@@ -27,12 +27,15 @@ from ghg_tool.api.middleware.rbac import require_permission, require_role
 from ghg_tool.api.schemas.common import CursorPage
 from ghg_tool.api.schemas.emission_schemas import (
     EmissionCorrectionCreate,
+    EmissionCorrectionDetailResponse,
+    EmissionCorrectionRequest,
     EmissionCorrectionResponse,
     EmissionCreate,
     EmissionFilter,
     EmissionResponse,
 )
 from ghg_tool.api.schemas.kpi_schemas import EmissionCreateResponse
+from ghg_tool.infrastructure.db.models.audit_log import AuditLog
 from ghg_tool.infrastructure.db.models.emission import Emission
 from ghg_tool.infrastructure.db.repositories.emissions_repository import (
     EmissionsRepository,
@@ -401,6 +404,206 @@ async def get_corrections(
         )
     # For v1: return just this row; wave 3 implements full chain traversal
     return [EmissionResponse.model_validate(row)]
+
+
+# ---------------------------------------------------------------------------
+# Resource-scoped correction endpoint (FR-21)
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/{emission_id}/correct",
+    response_model=EmissionCorrectionDetailResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Correct an emission row (append-only via superseded_by, FR-21)",
+    description=(
+        "Inserts a new corrected emission row and closes the predecessor "
+        "via ``calc.fn_emit_correction`` (SECURITY DEFINER).  "
+        "The old row receives ``valid_to = now()``, "
+        "``superseded_by = <new row id>``, and ``reason_code``.  "
+        "The new row is active (``valid_to IS NULL``, ``superseded_by IS NULL``).  "
+        "Append-only invariant strictly preserved (FR-20, NFR-14, CG-03).  "
+        "Writes a mandatory audit_log row (ISAE 3000 trail).  "
+        "``data_steward`` role only (``emissions:write`` permission)."
+    ),
+    responses={
+        201: {"description": "Correction applied — new row ID returned"},
+        401: {"description": "Not authenticated"},
+        403: {"description": "Insufficient role — data_steward required"},
+        404: {"description": "Emission not found or cross-tenant access denied"},
+        422: {"description": "Validation error (negative tco2e, unknown reason_code, …)"},
+    },
+)
+async def correct_emission_by_id(
+    emission_id: uuid.UUID,
+    body: EmissionCorrectionRequest,
+    user: CurrentUser = Depends(require_permission("emissions", "write")),
+    session: AsyncSession = Depends(get_db),
+) -> EmissionCorrectionDetailResponse:
+    """Apply a single-shot correction to an emission row (FR-21, append-only).
+
+    Behaviour:
+      1. SELECT the original row by ``emission_id`` (404 if not found or
+         cross-tenant; 404 if already superseded).
+      2. Build a new ``Emission`` row inheriting identity keys from the
+         predecessor (scope, sub_scope, codice_sito, anno, tenant_id,
+         regulatory_stream) but using the corrected values from ``body``.
+         A fresh ``correlation_id`` and ``id`` (UUID4) are assigned.
+      3. INSERT the new row (append-only).
+      4. Call ``calc.fn_emit_correction(predecessor_id, new_id, reason_code)``
+         which sets ``app.correction_in_progress = 'true'`` (transaction-local)
+         and issues the only permitted UPDATE: ``valid_to``, ``superseded_by``,
+         ``reason_code`` on the predecessor row.
+      5. INSERT an audit_log row documenting the correction.
+
+    The ``superseded_by`` link is **old → new**: the predecessor row gets
+    ``superseded_by = <new_id>``; the new row has ``superseded_by IS NULL``
+    (it is the active record).  Direction confirmed in methodology §5 and
+    the ``calc.fn_emit_correction`` source in migration M1.
+
+    Args:
+        emission_id: UUID path parameter identifying the row to correct.
+        body: Validated ``EmissionCorrectionRequest`` payload.
+        user: Authenticated data_steward user.
+        session: Authenticated DB session with RLS GUCs.
+
+    Returns:
+        ``EmissionCorrectionDetailResponse`` with ``new_id``, ``superseded_id``,
+        ``reason_code``, and ``correlation_id``.
+
+    Raises:
+        HTTPException: 404 if the predecessor is not found, belongs to a
+            different tenant, or is already superseded (``valid_to IS NOT NULL``).
+        HTTPException: 422 on validation error (Pydantic, before reaching this handler).
+    """
+    correlation_id = get_correlation_id()
+    new_correlation_id = uuid.uuid4()
+    log = logger.bind(
+        correlation_id=correlation_id,
+        user=user.sub[:8],
+        emission_id=str(emission_id),
+    )
+    log.info("correct_emission_by_id", reason_code=body.reason_code)
+
+    now = datetime.now(tz=UTC)
+    repo = EmissionsRepository(session)
+
+    # --- 1. Fetch predecessor (tenant-scoped; cross-tenant returns 404) ---
+    predecessor = await repo.get_by_id(
+        emission_id, tenant_id=uuid.UUID(user.tenant_id)
+    )
+    if predecessor is None or predecessor.valid_to is not None:
+        log.warning(
+            "correct_emission_by_id: predecessor not found or already superseded",
+            emission_id=str(emission_id),
+        )
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={
+                "type": "about:blank",
+                "title": "Not Found",
+                "status": 404,
+                "detail": (
+                    f"Emission {emission_id} not found or already superseded"
+                ),
+                "correlation_id": correlation_id,
+            },
+        )
+
+    # --- 2. Build the new (corrected) emission row ---
+    new_id = uuid.uuid4()
+    new_row = Emission(
+        id=new_id,
+        tenant_id=predecessor.tenant_id,
+        # Fresh correlation_id for the new row (per FR-22 / CG-04)
+        correlation_id=new_correlation_id,
+        # Inherit raw provenance from predecessor (raw_row_id may be None for
+        # synthesised zero-lines; propagate as-is)
+        raw_row_id=predecessor.raw_row_id,
+        raw_scope=predecessor.raw_scope,
+        # Identity keys — unchanged per FR-21 (boundary changes use a new INSERT)
+        scope=predecessor.scope,
+        sub_scope=predecessor.sub_scope,
+        codice_sito=predecessor.codice_sito,
+        anno=predecessor.anno,
+        regulatory_stream=predecessor.regulatory_stream,
+        # Corrected values from request
+        tco2e=body.tco2e,
+        factor_id=body.factor_id,
+        factor_source=body.factor_source,
+        factor_version=body.factor_version,
+        gwp_set=body.gwp_set,
+        methodology=body.methodology,
+        # Propagate optional gas-level breakdowns as None (not supplied in
+        # the correction request; a future wave may expose these fields)
+        co2_tonne=None,
+        ch4_tco2e=None,
+        n2o_tco2e=None,
+        co2_biogenic_tonne=None,
+        co2_fossil_tonne=None,
+        # Metadata
+        calc_timestamp=now,
+        created_by=user.sub,
+        valid_from=now,
+        # reason_code on the new row documents *why* it was created
+        reason_code=body.reason_code,
+        disclosure_notes=body.notes,
+    )
+
+    # --- 3. INSERT new row (append-only) ---
+    await repo.insert(new_row)
+
+    # --- 4. Close predecessor via fn_emit_correction (the ONLY permitted UPDATE) ---
+    # Direction: OLD row → NEW row via superseded_by = new_id on the OLD row.
+    await repo.apply_correction(
+        predecessor_id=emission_id,
+        new_id=new_id,
+        reason_code=body.reason_code,
+    )
+
+    # --- 5. Write mandatory audit_log row (ISAE 3000 trail) ---
+    audit_row = AuditLog(
+        id=uuid.uuid4(),
+        tenant_id=predecessor.tenant_id,
+        correlation_id=new_correlation_id,
+        user_role=user.role,
+        action="EMISSION_CORRECTION",
+        resource="calc.emissions_consolidated",
+        resource_id=emission_id,
+        request_method="POST",
+        request_path=f"/api/v1/emissions/{emission_id}/correct",
+        status_code=201,
+        before_state={
+            "id": str(emission_id),
+            "tco2e": float(predecessor.tco2e) if predecessor.tco2e is not None else None,
+            "factor_id": str(predecessor.factor_id),
+            "factor_version": predecessor.factor_version,
+            "gwp_set": predecessor.gwp_set,
+        },
+        after_state={
+            "id": str(new_id),
+            "tco2e": float(body.tco2e),
+            "factor_id": str(body.factor_id),
+            "factor_version": body.factor_version,
+            "gwp_set": body.gwp_set,
+            "reason_code": body.reason_code,
+        },
+    )
+    session.add(audit_row)
+    await session.flush()
+
+    log.info(
+        "correct_emission_by_id: correction applied",
+        new_id=str(new_id),
+        superseded_id=str(emission_id),
+        reason_code=body.reason_code,
+    )
+    return EmissionCorrectionDetailResponse(
+        new_id=new_id,
+        superseded_id=emission_id,
+        reason_code=body.reason_code,
+        correlation_id=new_correlation_id,
+    )
 
 
 # ---------------------------------------------------------------------------
