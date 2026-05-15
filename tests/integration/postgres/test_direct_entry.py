@@ -86,49 +86,53 @@ async def _truncate_test_rows(
     engine: AsyncEngine,
     *,
     tenant_id: str,
+    correlation_id: str | None = None,
 ) -> None:
-    """Remove all rows belonging to the test tenant to avoid bleed-between tests.
+    """Remove rows created by this test for tenant_id.
+
+    Does NOT delete ref.tenants / ref.users / ref.sites: those rows belong to
+    the session-scoped ``seed_tenants`` fixture and are shared across the
+    whole test module. Deleting them broke parallel/downstream tests
+    (test_emissions_append_only, test_rls_tenant_isolation).
+
+    When ``correlation_id`` is provided, cleanup is scoped to that run
+    (precise). Otherwise cleanup is best-effort by ``tenant_id`` on the
+    audit + emission + raw tables only.
 
     Args:
         engine: AsyncEngine for the test container DB.
-        tenant_id: UUID string of the tenant to clean up.
+        tenant_id: UUID string of the tenant (kept alive).
+        correlation_id: Optional UUID to scope cleanup to this test's rows.
     """
     async with engine.begin() as conn:
-        # Disable FK-trigger enforcement for this transaction so we can DELETE
-        # in any order without worrying about transitive FK dependencies
-        # (emissions_consolidated -> raw.direct_entry, etc.). Postgres-native;
-        # the testcontainer DB user is superuser. Scope is LOCAL = current tx.
+        # Disable FK-trigger enforcement for this tx so the DELETE order
+        # doesn't matter for transitive FKs (e.g. emissions_consolidated
+        # references raw.direct_entry via raw_row_id).
         await conn.execute(text("SET LOCAL session_replication_role = 'replica'"))
 
-        # Discover every table with a FK -> ref.tenants and delete its rows for
-        # this tenant_id. Avoids hand-maintained lists that miss new tables
-        # (e.g. chart_annotations, users, audit_log, emissions_consolidated,
-        # raw.direct_entry, cache.idempotency_keys, sites, ...).
-        child_tables = await conn.execute(
-            text(
-                "SELECT n.nspname || '.' || c.relname AS qualified, "
-                "       a.attname AS col "
-                "FROM pg_constraint con "
-                "JOIN pg_class      c ON c.oid = con.conrelid "
-                "JOIN pg_namespace  n ON n.oid = c.relnamespace "
-                "JOIN pg_attribute  a ON a.attrelid = c.oid "
-                "                     AND a.attnum = ANY(con.conkey) "
-                "WHERE con.confrelid = 'ref.tenants'::regclass "
-                "  AND con.contype = 'f'"
-            )
+        tables_with_correlation_id = (
+            "calc.audit_log",
+            "calc.emissions_consolidated",
+            "raw.direct_entry",
         )
-        for qualified, col in child_tables.fetchall():
-            await conn.execute(
-                text(
-                    f'DELETE FROM {qualified} '
-                    f'WHERE "{col}" = CAST(:tid AS uuid)'
-                ),
-                {"tid": tenant_id},
-            )
-        await conn.execute(
-            text("DELETE FROM ref.tenants WHERE id = CAST(:tid AS uuid)"),
-            {"tid": tenant_id},
-        )
+        if correlation_id is not None:
+            for table in tables_with_correlation_id:
+                await conn.execute(
+                    text(
+                        f"DELETE FROM {table} "
+                        f"WHERE correlation_id = CAST(:cid AS uuid)"
+                    ),
+                    {"cid": correlation_id},
+                )
+        else:
+            for table in tables_with_correlation_id:
+                await conn.execute(
+                    text(
+                        f"DELETE FROM {table} "
+                        f"WHERE tenant_id = CAST(:tid AS uuid)"
+                    ),
+                    {"tid": tenant_id},
+                )
 
 
 def _build_mock_user(tenant_id: str) -> MagicMock:
@@ -291,7 +295,9 @@ async def test_compute_and_insert_writes_raw_direct_entry(
         )
 
     finally:
-        await _truncate_test_rows(async_engine, tenant_id=tenant_id)
+        await _truncate_test_rows(
+            async_engine, tenant_id=tenant_id, correlation_id=fixed_cid
+        )
 
 
 @pytest.mark.asyncio
