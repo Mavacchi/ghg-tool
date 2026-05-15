@@ -286,6 +286,10 @@ class TestSecP0004RefreshRoleFromDb:
         mock_row = MagicMock()
         mock_row.is_active = is_active
         mock_row.role_code = role
+        # S-006: refresh-rotation reuse-check reads .revoked_at on the prior
+        # session row; default MagicMock attribute is truthy and would trip
+        # the reuse-detection guard (401 refresh_token_reused).
+        mock_row.revoked_at = None
 
         mock_result = MagicMock()
         mock_result.fetchone = MagicMock(return_value=mock_row)
