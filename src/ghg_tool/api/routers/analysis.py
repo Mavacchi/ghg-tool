@@ -76,7 +76,7 @@ class HotspotItemSchema(BaseModel):
     )
 
     @classmethod
-    def from_domain(cls, item: HotspotItem) -> "HotspotItemSchema":
+    def from_domain(cls, item: HotspotItem) -> HotspotItemSchema:
         """Convert a domain dataclass to a serialisable schema.
 
         Args:
@@ -119,7 +119,7 @@ class HotspotReportSchema(BaseModel):
     )
 
     @classmethod
-    def from_domain(cls, report: HotspotReport) -> "HotspotReportSchema":
+    def from_domain(cls, report: HotspotReport) -> HotspotReportSchema:
         """Convert a domain dataclass to a serialisable schema.
 
         Args:
@@ -213,7 +213,7 @@ async def get_hotspots(
             anno=anno,
             top_n=top_n,
         )
-    except NoDataForAnnoError:
+    except NoDataForAnnoError as exc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail={
@@ -226,7 +226,7 @@ async def get_hotspots(
                 ),
                 "correlation_id": cid,
             },
-        )
+        ) from exc
 
     log.info(
         "hotspot_analysis_complete",

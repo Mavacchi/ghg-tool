@@ -150,7 +150,7 @@ class CalcInputRequest(BaseModel):
         return self
 
     @model_validator(mode="after")
-    def _validate_conditional_fields(self) -> "CalcInputRequest":  # noqa: C901 — fan-out validator
+    def _validate_conditional_fields(self) -> CalcInputRequest:  # noqa: C901 — fan-out validator
         """Enforce scope/sub_scope conditional requirements.
 
         Raises:
