@@ -128,9 +128,23 @@ def migrated_db_url(pg_container: PostgresContainer) -> str:
     if sync_url.startswith("postgresql://"):
         sync_url = "postgresql+psycopg://" + sync_url[len("postgresql://"):]
 
-    cfg = AlembicConfig(_ALEMBIC_INI)
-    cfg.set_main_option("sqlalchemy.url", sync_url)
-    alembic_command.upgrade(cfg, "head")
+    # alembic/env.py reads $SQLALCHEMY_URL and overrides any programmatic
+    # `cfg.set_main_option("sqlalchemy.url", ...)`. In the integration.yml CI
+    # job that env var points at the GHA service container (a DIFFERENT
+    # database than the testcontainer we just started), so migrations get
+    # applied there and our fixture queries hit an un-migrated DB.
+    # Override the env var for the duration of the alembic call.
+    original_env = os.environ.get("SQLALCHEMY_URL")
+    os.environ["SQLALCHEMY_URL"] = sync_url
+    try:
+        cfg = AlembicConfig(_ALEMBIC_INI)
+        cfg.set_main_option("sqlalchemy.url", sync_url)
+        alembic_command.upgrade(cfg, "head")
+    finally:
+        if original_env is None:
+            os.environ.pop("SQLALCHEMY_URL", None)
+        else:
+            os.environ["SQLALCHEMY_URL"] = original_env
 
     return sync_url
 
