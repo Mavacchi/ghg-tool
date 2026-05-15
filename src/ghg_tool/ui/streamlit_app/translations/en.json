@@ -298,5 +298,19 @@
   "toast_factor_saved": "Changes saved",
   "toast_factor_deleted": "Draft deleted",
   "toast_emission_corrected": "Correction recorded — new row created",
-  "empty_state_drafts": "No draft factors. Create the first one to get started."
+  "empty_state_drafts": "No draft factors. Create the first one to get started.",
+  "auto_calc_tab_title": "Auto-calc",
+  "auto_calc_scope": "Scope",
+  "auto_calc_subscope": "Sub-scope / Category",
+  "auto_calc_quantita": "Quantity",
+  "auto_calc_unita": "Unit of measure",
+  "auto_calc_preview_btn": "Calculate preview",
+  "auto_calc_insert_btn": "Confirm and record",
+  "auto_calc_clear_btn": "Clear fields",
+  "auto_calc_no_factor": "No factor available for the selected parameters. Check the catalog or contact the administrator.",
+  "auto_calc_inserted_ok": "Recorded — emission ID:",
+  "auto_calc_process_mode_direct": "Enter CO2 tonnes directly",
+  "auto_calc_process_mode_caco3": "Enter mass of calcined CaCO3 (kg/t)",
+  "auto_calc_formula_label": "Applied formula",
+  "auto_calc_factor_used_label": "Factor used"
 }

@@ -46,6 +46,9 @@ from ghg_tool.ui.streamlit_app.lib.brand import apply_brand_chrome, render_conte
 from ghg_tool.ui.streamlit_app.lib.help import _help  # noqa: E402
 from ghg_tool.ui.streamlit_app.lib.i18n import _  # noqa: E402
 from ghg_tool.ui.streamlit_app.lib.api_client import (  # noqa: E402
+    AutoCalcError,
+    calc_insert,
+    calc_preview,
     create_emission,
     create_factor,
     fetch_emissions,
@@ -212,12 +215,13 @@ def _submit_once(key: str) -> bool:
 # Tabs
 # ---------------------------------------------------------------------------
 
-tab_new, tab_correct, tab_factor, tab_excel = st.tabs(
+tab_new, tab_correct, tab_factor, tab_excel, tab_autocalc = st.tabs(
     [
         "➕ Nuova emissione",
         "✎ Correggi o revoca riga",
         "📑 Nuovo fattore",
         "📂 Importa Excel",
+        "⚡ " + _("auto_calc_tab_title", lang),
     ]
 )
 
@@ -801,6 +805,859 @@ with tab_excel:
                                 label=_("view_in_audit_trail", lang),
                                 icon="🔍",
                             )
+
+# ===========================================================================
+# Tab 5 - Auto-calc (feature-template-and-autocalc wave)
+#
+# Flow:
+#   1. User picks Scope + sub-scope → conditional fields appear.
+#   2. User fills quantity, unit, site, year, GWP, optional note.
+#   3. "Calcola anteprima" → POST /api/v1/calc/preview (no DB write).
+#   4. Preview card shows tCO2e metric + breakdown + formula + factor card.
+#   5. "Conferma e registra" (enabled only after successful preview) →
+#      POST /api/v1/calc/insert → success toast + reset + history entry.
+#
+# Scope 1 combustion : 3 fuels × 2+ modes = 6 paths
+# Scope 1 process    : 2 input modes (direct tCO2 default, CaCO3 mass)
+# Scope 2 LB        : 1 path
+# Scope 2 MB        : 1 path (with strumento_mb selector)
+# Scope 3 Cat 1,3,4,5,6,7,9,12 : 8 categories, generic quantity × factor
+# Total: 13 sub-scope paths covered.
+#
+# Anomaly check: if quantita > 10× the category's "typical max" we show
+# a confirmation dialog before insert to catch data-entry errors.
+# ===========================================================================
+
+# ---------------------------------------------------------------------------
+# Auto-calc constants (vocabulary mirrors §10 API contract)
+# ---------------------------------------------------------------------------
+
+_AC_SCOPE_OPTIONS: list[int] = [1, 2, 3]
+
+_AC_SUBSCOPE_LABELS: dict[str, str] = {
+    # Scope 1
+    "combustion_GAS_NAT":   "S1 Combustione — Gas Naturale",
+    "combustion_GASOLIO":   "S1 Combustione — Gasolio Auto",
+    "combustion_BENZINA":   "S1 Combustione — Benzina Auto",
+    "process_direct":       "S1 Processo — Inserimento diretto tCO2",
+    "process_caco3":        "S1 Processo — Massa CaCO3 (stoichiometrico)",
+    # Scope 2
+    "LB":                   "S2 Elettricita Location-Based",
+    "MB":                   "S2 Elettricita Market-Based",
+    # Scope 3
+    "Cat1":                 "S3 Cat 1 — Purchased goods/services",
+    "Cat3":                 "S3 Cat 3 — Fuel & Energy WTT/T&D",
+    "Cat4":                 "S3 Cat 4 — Upstream transport",
+    "Cat5":                 "S3 Cat 5 — Waste",
+    "Cat6":                 "S3 Cat 6 — Business travel",
+    "Cat7":                 "S3 Cat 7 — Commuting",
+    "Cat9":                 "S3 Cat 9 — Downstream transport",
+    "Cat12":                "S3 Cat 12 — End-of-life",
+}
+
+_AC_SUBSCOPE_BY_SCOPE: dict[int, list[str]] = {
+    1: ["combustion_GAS_NAT", "combustion_GASOLIO", "combustion_BENZINA",
+        "process_direct", "process_caco3"],
+    2: ["LB", "MB"],
+    3: ["Cat1", "Cat3", "Cat4", "Cat5", "Cat6", "Cat7", "Cat9", "Cat12"],
+}
+
+# Units per sub-scope key (shown in the unit selectbox)
+_AC_UNITS: dict[str, list[str]] = {
+    "combustion_GAS_NAT":   ["Sm3", "kWh", "MWh"],
+    "combustion_GASOLIO":   ["litri", "kg", "t"],
+    "combustion_BENZINA":   ["litri", "kg", "t"],
+    "process_direct":       ["tCO2"],   # read-only
+    "process_caco3":        ["kg", "t"],
+    "LB":                   ["kWh", "MWh", "MJ"],
+    "MB":                   ["kWh", "MWh", "MJ"],
+    "Cat1":                 ["t", "EUR", "kg"],
+    "Cat3":                 ["Sm3", "kWh", "MWh", "t"],
+    "Cat4":                 ["t·km", "km", "t"],
+    "Cat5":                 ["t", "kg"],
+    "Cat6":                 ["km", "EUR", "night"],
+    "Cat7":                 ["km", "person·km"],
+    "Cat9":                 ["t·km", "km"],
+    "Cat12":                ["t", "kg"],
+}
+
+# Typical "anomaly" ceiling per sub-scope (units as in _AC_UNITS first element).
+# If quantita > ceiling → show anomaly warning dialog before insert.
+_AC_ANOMALY_CEIL: dict[str, float] = {
+    "combustion_GAS_NAT": 100_000_000,   # 100 M Sm3
+    "combustion_GASOLIO": 1_000_000,     # 1 M litri
+    "combustion_BENZINA": 1_000_000,
+    "process_direct":      100_000,      # 100 k tCO2
+    "process_caco3":       500_000_000,  # 500 k t CaCO3 (kg)
+    "LB":                  1_000_000_000, # 1 TWh
+    "MB":                  1_000_000_000,
+    "Cat1":                500_000,
+    "Cat3":                100_000_000,
+    "Cat4":                100_000_000,
+    "Cat5":                1_000_000,
+    "Cat6":                10_000_000,
+    "Cat7":                10_000_000,
+    "Cat9":                100_000_000,
+    "Cat12":               1_000_000,
+}
+
+_AC_S2MB_STRUMENTI: list[str] = ["GO", "PPA", "RESIDUAL"]
+
+_AC_CAT1_METHODS: list[str] = ["mass-based", "spend-based"]
+_AC_CAT3_METHODS: list[str] = ["activity-based", "fuel-based"]
+_AC_CAT46_METHODS: list[str] = ["distance-based", "mass-based", "activity-based"]
+_AC_CAT5_METHODS: list[str] = ["mass-based", "activity-based"]
+_AC_CAT67_METHODS: list[str] = ["distance-based", "spend-based", "activity-based"]
+_AC_CAT12_METHODS: list[str] = ["mass-based", "activity-based"]
+
+_AC_METHODS_BY_SUBSCOPE: dict[str, list[str]] = {
+    "Cat1":  _AC_CAT1_METHODS,
+    "Cat3":  _AC_CAT3_METHODS,
+    "Cat4":  _AC_CAT46_METHODS,
+    "Cat5":  _AC_CAT5_METHODS,
+    "Cat6":  _AC_CAT67_METHODS,
+    "Cat7":  _AC_CAT67_METHODS,
+    "Cat9":  _AC_CAT46_METHODS,
+    "Cat12": _AC_CAT12_METHODS,
+}
+
+_AC_GWP_OPTIONS: list[str] = ["AR6", "AR5"]
+
+# Session-state key for the last 5 successful inserts (quick-repeat memo)
+_AC_HISTORY_KEY = "ac_recent_inserts"
+# Max recent entries shown
+_AC_HISTORY_MAX = 5
+
+# ---------------------------------------------------------------------------
+# Helper: build canonical API payload from the collected form values
+# ---------------------------------------------------------------------------
+
+
+def _ac_build_payload(
+    sub_scope_key: str,
+    codice_sito: str | None,
+    anno: int,
+    quantita_str: str,
+    unita: str,
+    gwp_set: str,
+    note: str,
+    *,
+    strumento_mb: str | None = None,
+    sottocategoria: str | None = None,
+    metodo: str | None = None,
+    regulatory_stream: str = "CSRD_ESRS_E1",
+) -> dict:
+    """Map UI form state to the CalcInputRequest body (§10)."""
+    # Derive API scope, sub_scope and optional combustibile / categoria_s3
+    if sub_scope_key.startswith("combustion_"):
+        combustibile_map = {
+            "combustion_GAS_NAT": "GAS_NAT",
+            "combustion_GASOLIO": "GASOLIO",
+            "combustion_BENZINA": "BENZINA",
+        }
+        return {
+            "scope": 1,
+            "sub_scope": "combustion",
+            "combustibile": combustibile_map[sub_scope_key],
+            "codice_sito": codice_sito,
+            "anno": anno,
+            "quantita": quantita_str,
+            "unita": unita,
+            "gwp_set": gwp_set,
+            "regulatory_stream": regulatory_stream,
+            "disclosure_notes": note or None,
+        }
+    if sub_scope_key in ("process_direct", "process_caco3"):
+        payload: dict = {
+            "scope": 1,
+            "sub_scope": "process",
+            "codice_sito": "IANO",   # only site with decarb process
+            "anno": anno,
+            "quantita": quantita_str,
+            "unita": unita,
+            "gwp_set": gwp_set,
+            "regulatory_stream": regulatory_stream,
+            "disclosure_notes": note or None,
+        }
+        if sub_scope_key == "process_direct":
+            payload["process_mode"] = "direct_tco2"
+        else:
+            payload["process_mode"] = "caco3_mass"
+        return payload
+    if sub_scope_key == "LB":
+        return {
+            "scope": 2,
+            "sub_scope": "LB",
+            "codice_sito": codice_sito,
+            "anno": anno,
+            "quantita": quantita_str,
+            "unita": unita,
+            "gwp_set": gwp_set,
+            "regulatory_stream": regulatory_stream,
+            "disclosure_notes": note or None,
+        }
+    if sub_scope_key == "MB":
+        return {
+            "scope": 2,
+            "sub_scope": "MB",
+            "codice_sito": codice_sito,
+            "anno": anno,
+            "strumento_mb": strumento_mb,
+            "quantita": quantita_str,
+            "unita": unita,
+            "gwp_set": gwp_set,
+            "regulatory_stream": regulatory_stream,
+            "disclosure_notes": note or None,
+        }
+    # Scope 3 categories
+    cat_num = int(sub_scope_key.replace("Cat", ""))
+    return {
+        "scope": 3,
+        "sub_scope": sub_scope_key,
+        "categoria_s3": cat_num,
+        "sottocategoria": sottocategoria or None,
+        "metodo": metodo,
+        "codice_sito": codice_sito or None,   # optional for Scope 3
+        "anno": anno,
+        "quantita": quantita_str,
+        "unita": unita,
+        "gwp_set": gwp_set,
+        "regulatory_stream": regulatory_stream,
+        "disclosure_notes": note or None,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Helper: render the preview result card
+# ---------------------------------------------------------------------------
+
+
+def _ac_render_preview(preview: dict, lang: str) -> None:
+    """Render the tCO2e preview result with breakdown, formula, and metadata."""
+    tco2e_str = preview.get("tco2e", "—")
+    gwp_set_used = preview.get("gwp_set", "AR6")
+    methodology = preview.get("methodology", "")
+    fm = preview.get("factor_metadata") or {}
+    breakdown = preview.get("breakdown") or {}
+    dq = preview.get("dq_findings") or []
+    disclosure = preview.get("disclosure_notes", "")
+
+    # --- Hero metric ---
+    st.markdown(
+        f"""
+<div class="ct-preview-card">
+  <div style="font-size:0.72rem;font-weight:600;letter-spacing:0.08em;
+              text-transform:uppercase;color:#9a9a9a;margin-bottom:0.4rem;">
+    Risultato anteprima
+  </div>
+  <span class="ct-preview-tco2e">{float(tco2e_str):,.6f}</span>
+  <span class="ct-preview-unit">tCO2e</span>
+  <span class="ct-gwp-chip">{gwp_set_used}</span>
+</div>
+""",
+        unsafe_allow_html=True,
+    )
+
+    # st.metric for screen-readers and alternative text
+    st.metric(
+        label=_("auto_calc_factor_used_label", lang) + " — tCO2e totale",
+        value=f"{float(tco2e_str):,.6f}",
+        help=(
+            "Valore calcolato dal backend. Non modificabile qui: deriva "
+            "dal fattore di emissione risolto e dalla quantita inserita."
+        ),
+    )
+
+    # --- Factor card ---
+    if fm:
+        vintage_offset = fm.get("vintage_offset_applied", False)
+        with st.expander(_("auto_calc_factor_used_label", lang), expanded=True):
+            fc1, fc2 = st.columns(2)
+            with fc1:
+                st.caption("Factor ID")
+                st.code(fm.get("primary_factor_id", "—"), language="text")
+                st.caption(f"Fonte: **{fm.get('factor_source', '—')}**")
+                st.caption(f"Versione: {fm.get('factor_version', '—')}")
+            with fc2:
+                st.caption(f"Vintage: {fm.get('vintage', '—')}")
+                st.caption(f"Unita fattore: `{fm.get('unit', '—')}`")
+                st.caption(f"Metodologia: {methodology}")
+            if vintage_offset:
+                st.markdown(
+                    '<div class="ct-vintage-warn">'
+                    '⚠ Vintage offset applicato — fattore piu recente disponibile '
+                    'usato in base alla regola closest-prior (GHG Protocol §6.3).'
+                    "</div>",
+                    unsafe_allow_html=True,
+                )
+
+    # --- Gas breakdown table ---
+    gas_components = breakdown.get("gas_components") or []
+    if gas_components:
+        with st.expander("Scomposizione per gas", expanded=False):
+            rows_html = "".join(
+                f"<tr>"
+                f"<td>{gc.get('gas','')}</td>"
+                f"<td class='ct-num'>{gc.get('factor_value','—')}</td>"
+                f"<td class='ct-num'>{gc.get('gwp','1')}</td>"
+                f"<td class='ct-num'>{float(gc.get('contribution_tco2e','0')):,.6f}</td>"
+                f"</tr>"
+                for gc in gas_components
+            )
+            st.markdown(
+                f"""
+<table class="ct-breakdown-table">
+  <thead><tr>
+    <th>Gas</th><th>Fattore</th><th>GWP</th><th>Contributo (tCO2e)</th>
+  </tr></thead>
+  <tbody>{rows_html}</tbody>
+</table>
+""",
+                unsafe_allow_html=True,
+            )
+
+    # --- Human-readable formula ---
+    # Build it from available data when the backend doesn't return one.
+    primary_factor_val = fm.get("primary_factor_val") or (
+        gas_components[0].get("factor_value") if gas_components else None
+    )
+    if primary_factor_val:
+        formula_str = (
+            f"{tco2e_str} tCO2e  =  quantita × {primary_factor_val} "
+            f"[{fm.get('unit','')}] × GWP × 0.001"
+        )
+    else:
+        formula_str = f"tCO2e = {tco2e_str}"
+
+    st.markdown(f"**{_('auto_calc_formula_label', lang)}**")
+    st.markdown(
+        f'<div class="ct-formula-block">{formula_str}</div>',
+        unsafe_allow_html=True,
+    )
+
+    # --- Biogenic memo ---
+    bio = breakdown.get("co2_biogenic_tonne")
+    if bio and float(bio) != 0.0:
+        st.info(
+            f"Memo biogenico (E1-7, non incluso nel totale): {float(bio):,.6f} t CO2 biogenico",
+            icon="🌿",
+        )
+
+    # --- DQ findings ---
+    if dq:
+        failing = [f for f in dq if f.get("severity") not in ("PASS", "INFO")]
+        if failing:
+            with st.expander("Avvisi DQ", expanded=True):
+                for f in failing:
+                    sev = f.get("severity", "WARN")
+                    icon = "🔴" if sev == "FAIL" else "🟡"
+                    st.warning(f"{icon} **{f.get('rule','')}** — {f.get('message', sev)}")
+        else:
+            st.success("Tutti i controlli DQ superati.", icon="✅")
+
+    # --- Disclosure notes footer ---
+    if disclosure:
+        st.caption(f"Note disclosure: {disclosure}")
+
+
+# ---------------------------------------------------------------------------
+# Auto-calc tab body
+# ---------------------------------------------------------------------------
+
+with tab_autocalc:
+    st.subheader(_("auto_calc_tab_title", lang))
+    st.caption(
+        "Inserisci un consumo, vedi il calcolo tCO2e in tempo reale, "
+        "conferma per registrare nel ledger. "
+        "Richiede ruolo **editor** o **admin**."
+    )
+
+    # Role gate
+    if role not in ("editor", "admin"):
+        st.warning(
+            "Il tuo ruolo (`viewer`) non puo registrare emissioni tramite il calcolo automatico. "
+            "Richiedi accesso editor o admin.",
+            icon="🔒",
+        )
+
+    # -----------------------------------------------------------------------
+    # Section 1 — Scope + sub-scope
+    # -----------------------------------------------------------------------
+    st.markdown('<div class="ct-autocalc-form">', unsafe_allow_html=True)
+
+    ac_col1, ac_col2 = st.columns([1, 2])
+    with ac_col1:
+        ac_scope = st.selectbox(
+            _("auto_calc_scope", lang),
+            options=_AC_SCOPE_OPTIONS,
+            format_func=lambda s: f"Scope {s}",
+            key="ac_scope",
+            help=(
+                "Scope 1: emissioni dirette. "
+                "Scope 2: elettricita acquistata. "
+                "Scope 3: catena del valore."
+            ),
+        )
+    with ac_col2:
+        ac_subscope_keys = _AC_SUBSCOPE_BY_SCOPE[ac_scope]
+        ac_subscope_key = st.selectbox(
+            _("auto_calc_subscope", lang),
+            options=ac_subscope_keys,
+            format_func=lambda k: _AC_SUBSCOPE_LABELS[k],
+            key="ac_subscope",
+            help="Seleziona la categoria specifica corrispondente alla fonte di emissione.",
+        )
+
+    st.divider()
+
+    # -----------------------------------------------------------------------
+    # Section 2 — Conditional fields by sub-scope
+    # -----------------------------------------------------------------------
+
+    is_s1_combustion = ac_subscope_key.startswith("combustion_")
+    is_s1_process    = ac_subscope_key.startswith("process_")
+    is_s2_lb         = ac_subscope_key == "LB"
+    is_s2_mb         = ac_subscope_key == "MB"
+    is_s3            = ac_scope == 3
+
+    ac_codice_sito: str | None = None
+    ac_strumento_mb: str | None = None
+    ac_sottocategoria: str | None = None
+    ac_metodo: str | None = None
+
+    f_col1, f_col2 = st.columns(2)
+
+    with f_col1:
+        # --- Site selector ---
+        if is_s1_process:
+            # Process is locked to IANO (only site with CaCO3 decarb)
+            st.text_input(
+                "Codice sito",
+                value="IANO",
+                disabled=True,
+                help="Il processo di decarbonatazione CaCO3 e attivo solo per il sito IANO.",
+            )
+            ac_codice_sito = "IANO"
+        elif is_s3:
+            # Optional for Scope 3 categories
+            s3_site_options = ["(nessuno)"] + list(KNOWN_SITES)
+            s3_site = st.selectbox(
+                "Codice sito (opzionale)",
+                options=s3_site_options,
+                key="ac_site_s3",
+                help="Per le categorie Scope 3 il sito e opzionale. Ometti per imputazione corporate.",
+            )
+            ac_codice_sito = None if s3_site == "(nessuno)" else s3_site
+        else:
+            ac_codice_sito = st.selectbox(
+                "Codice sito",
+                options=list(KNOWN_SITES),
+                key="ac_site",
+                help="Sito operativo a cui attribuire l'emissione (perimetro consolidamento).",
+            )
+
+        # --- Year ---
+        ac_anno = st.number_input(
+            "Anno fiscale",
+            min_value=2020,
+            max_value=dt.date.today().year + 1,
+            value=dt.date.today().year - 1,
+            step=1,
+            key="ac_anno",
+            help=(
+                "Anno di competenza del consumo. "
+                "Il resolver applica la regola closest-prior vintage (§3 design doc)."
+            ),
+        )
+
+    with f_col2:
+        # --- Quantity + unit ---
+        available_units = _AC_UNITS.get(ac_subscope_key, ["kWh"])
+        unit_is_readonly = ac_subscope_key == "process_direct"
+
+        ac_quantita = st.number_input(
+            _("auto_calc_quantita", lang),
+            min_value=0.0,
+            value=0.0,
+            step=0.001,
+            format="%.6f",
+            key="ac_quantita",
+            help=(
+                "Valore del consumo nell'unita selezionata. "
+                "Inviato come stringa al backend per preservare la precisione Decimal (§9)."
+            ),
+        )
+
+        if unit_is_readonly:
+            st.text_input(
+                _("auto_calc_unita", lang),
+                value="tCO2",
+                disabled=True,
+                help="Unita fissa per inserimento diretto tCO2 (modalita A processo).",
+            )
+            ac_unita = "tCO2"
+        else:
+            ac_unita = st.selectbox(
+                _("auto_calc_unita", lang),
+                options=available_units,
+                key="ac_unita",
+                help=(
+                    "Seleziona l'unita che corrisponde a come hai misurato il consumo. "
+                    "Il backend risolve il fattore nella stessa unita (no conversioni implicite NCV)."
+                ),
+            )
+
+    # --- GWP set (Advanced) ---
+    with st.expander("Impostazioni avanzate (GWP set, note)", expanded=False):
+        adv_col1, adv_col2 = st.columns(2)
+        with adv_col1:
+            ac_gwp_set = st.selectbox(
+                "Set GWP",
+                options=_AC_GWP_OPTIONS,
+                index=0,
+                key="ac_gwp",
+                help=(
+                    "AR6 (default CSRD ESRS E1). "
+                    "AR5 per report EU ETS Phase IV (regulatory_stream = EU_ETS_PHASE_IV)."
+                ),
+            )
+            if ac_gwp_set == "AR5":
+                ac_regulatory_stream = "EU_ETS_PHASE_IV"
+            else:
+                ac_regulatory_stream = "CSRD_ESRS_E1"
+        with adv_col2:
+            ac_note = st.text_area(
+                "Note (opzionali)",
+                max_chars=500,
+                key="ac_note",
+                placeholder="Es. Lettura contatore gas naturale Q1 2025, fattura n. 12345.",
+                help="Aggiunge un suffisso alle disclosure_notes della riga registrata.",
+            )
+
+    # --- Scope 2 MB: strumento ---
+    if is_s2_mb:
+        ac_strumento_mb = st.selectbox(
+            "Strumento MB",
+            options=_AC_S2MB_STRUMENTI,
+            key="ac_strumento_mb",
+            help=(
+                "GO (Garanzia d'Origine): richiede evidenza QC1-QC8 nel catalogo. "
+                "PPA: contratto di acquisto diretto. "
+                "RESIDUAL: fattore residuale AIB (default)."
+            ),
+        )
+
+    # --- Scope 3: sottocategoria + metodo ---
+    if is_s3:
+        sc3_col1, sc3_col2 = st.columns(2)
+        with sc3_col1:
+            ac_sottocategoria = st.text_input(
+                "Sottocategoria / materiale",
+                key="ac_sottocategoria",
+                placeholder=(
+                    "Es. Argille, ECOINV_CARDBOARD_V3_10, WTT_GAS_NAT"
+                    if ac_subscope_key in ("Cat1", "Cat3") else
+                    "Es. aereo short-haul, TIR, imballaggi primari"
+                ),
+                help=(
+                    "Codice del materiale / rotta / prodotto che il backend mappa al fattore. "
+                    "Per Cat 1: usa codici ECOINV_* (mass-based) o EXIO_* (spend-based). "
+                    "Lascia vuoto per usare il fattore default della categoria."
+                ),
+            )
+        with sc3_col2:
+            methods = _AC_METHODS_BY_SUBSCOPE.get(ac_subscope_key, ["activity-based"])
+            ac_metodo = st.selectbox(
+                "Metodo di calcolo",
+                options=methods,
+                key="ac_metodo",
+                help=(
+                    "Approccio metodologico che il backend usa per selezionare il fattore. "
+                    "Mass-based: quantita in t. Spend-based: quantita in EUR. "
+                    "Distance-based: quantita in km o t·km."
+                ),
+            )
+
+    st.divider()
+
+    # -----------------------------------------------------------------------
+    # Section 3 — Preview
+    # -----------------------------------------------------------------------
+
+    # Track preview state
+    if "ac_preview_result" not in st.session_state:
+        st.session_state["ac_preview_result"] = None
+    if "ac_preview_payload" not in st.session_state:
+        st.session_state["ac_preview_payload"] = None
+    if "ac_preview_error" not in st.session_state:
+        st.session_state["ac_preview_error"] = None
+
+    btn_col1, btn_col2, btn_col3 = st.columns([2, 2, 1])
+
+    with btn_col1:
+        preview_clicked = st.button(
+            _("auto_calc_preview_btn", lang),
+            key="ac_btn_preview",
+            help="Invia i dati al backend per il calcolo in anteprima (nessuna scrittura nel registro).",
+            disabled=(role not in ("editor", "admin")),
+        )
+
+    with btn_col3:
+        clear_clicked = st.button(
+            _("auto_calc_clear_btn", lang),
+            key="ac_btn_clear",
+            help="Azzera tutti i campi e il risultato dell'anteprima.",
+        )
+
+    if clear_clicked:
+        # Clear form-related state keys
+        for key in (
+            "ac_scope", "ac_subscope", "ac_site", "ac_site_s3", "ac_anno",
+            "ac_quantita", "ac_unita", "ac_gwp", "ac_note",
+            "ac_strumento_mb", "ac_sottocategoria", "ac_metodo",
+            "ac_preview_result", "ac_preview_payload", "ac_preview_error",
+            "_inflight_ac_insert",
+        ):
+            st.session_state.pop(key, None)
+        st.rerun()
+
+    if preview_clicked:
+        quantita_str = f"{ac_quantita:.6f}".rstrip("0").rstrip(".")
+        if not quantita_str or float(quantita_str) < 0:
+            st.error("La quantita deve essere un numero positivo.")
+        else:
+            payload = _ac_build_payload(
+                sub_scope_key=ac_subscope_key,
+                codice_sito=ac_codice_sito,
+                anno=int(ac_anno),
+                quantita_str=quantita_str,
+                unita=ac_unita,
+                gwp_set=ac_gwp_set,
+                note=ac_note if "ac_note" in st.session_state else "",
+                strumento_mb=ac_strumento_mb,
+                sottocategoria=ac_sottocategoria,
+                metodo=ac_metodo,
+                regulatory_stream=ac_regulatory_stream,
+            )
+            token = st.session_state.get("token", "")
+            with st.spinner("Calcolo in corso..."):
+                try:
+                    result = calc_preview(payload, token=token)
+                    st.session_state["ac_preview_result"] = result
+                    st.session_state["ac_preview_payload"] = payload
+                    st.session_state["ac_preview_error"] = None
+                except AutoCalcError as exc:
+                    st.session_state["ac_preview_result"] = None
+                    st.session_state["ac_preview_error"] = str(exc.detail)
+
+    # Render preview result or empty state
+    preview_result = st.session_state.get("ac_preview_result")
+    preview_error  = st.session_state.get("ac_preview_error")
+
+    if preview_error:
+        detail_msg = preview_error
+        # Surface 422 detail directly (design doc §6 requirement)
+        if "fattore" in detail_msg.lower() or "factor" in detail_msg.lower() or "missing" in detail_msg.lower():
+            st.error(
+                f"{_('auto_calc_no_factor', lang)}\n\nDettaglio: {detail_msg}",
+                icon="🔍",
+            )
+        else:
+            st.error(detail_msg)
+    elif preview_result is not None:
+        _ac_render_preview(preview_result, lang)
+    else:
+        # Empty state card
+        st.markdown(
+            """
+<div class="ct-preview-empty">
+  <div class="ct-pe-icon">🧮</div>
+  <div class="ct-pe-text">
+    Compila i campi sopra e clicca <strong>Calcola anteprima</strong>
+    per vedere il risultato in tCO2e.
+  </div>
+</div>
+""",
+            unsafe_allow_html=True,
+        )
+
+    # -----------------------------------------------------------------------
+    # Section 4 — Confirm and insert
+    # -----------------------------------------------------------------------
+    preview_done = preview_result is not None
+
+    with btn_col2:
+        insert_disabled = (
+            not preview_done
+            or role not in ("editor", "admin")
+            or st.session_state.get("_inflight_ac_insert", False)
+        )
+        insert_clicked = st.button(
+            _("auto_calc_insert_btn", lang),
+            key="ac_btn_insert",
+            type="primary",
+            disabled=insert_disabled,
+            help=(
+                "Registra la riga nel ledger. Disponibile solo dopo una anteprima valida. "
+                "Il registro e append-only: l'operazione non e reversibile."
+            ),
+        )
+
+    if insert_clicked and preview_done and _submit_once("ac_insert"):
+        stored_payload = st.session_state.get("ac_preview_payload", {})
+
+        # Anomaly check: if quantita > the category's typical ceiling → warn
+        try:
+            q_float = float(stored_payload.get("quantita", "0"))
+        except (ValueError, TypeError):
+            q_float = 0.0
+        ceil_val = _AC_ANOMALY_CEIL.get(ac_subscope_key, float("inf"))
+
+        # Store anomaly state so the confirmation expander is shown below
+        if q_float > ceil_val:
+            st.session_state["ac_anomaly_pending"] = True
+            st.session_state["ac_anomaly_payload"] = stored_payload
+            st.session_state["_inflight_ac_insert"] = False  # allow re-click
+        else:
+            st.session_state.pop("ac_anomaly_pending", None)
+            token_ins = st.session_state.get("token", "")
+            with st.spinner("Registrazione in corso..."):
+                try:
+                    result_ins = calc_insert(stored_payload, token=token_ins)
+                    emission_id = result_ins.get("emission_id", "—")
+                    st.success(
+                        f"{_('auto_calc_inserted_ok', lang)} `{emission_id}`",
+                        icon="✅",
+                    )
+                    if hasattr(st, "toast"):
+                        st.toast("Riga inserita nel registro", icon="✅")
+
+                    # Add to history
+                    history = st.session_state.get(_AC_HISTORY_KEY, [])
+                    tco2e_val = result_ins.get("tco2e", "—")
+                    label = (
+                        f"{_AC_SUBSCOPE_LABELS.get(ac_subscope_key, ac_subscope_key)} "
+                        f"· {ac_anno} · {q_float:,.3f} {ac_unita}"
+                    )
+                    history.insert(0, {
+                        "emission_id": emission_id,
+                        "tco2e": tco2e_val,
+                        "label": label,
+                        "payload": stored_payload,
+                    })
+                    st.session_state[_AC_HISTORY_KEY] = history[:_AC_HISTORY_MAX]
+
+                    # Invalidate read-side caches so the new row appears in Audit Trail.
+                    for fn in (fetch_emissions, fetch_factor_catalog):
+                        clear = getattr(fn, "clear", None)
+                        if callable(clear):
+                            try:
+                                clear()
+                            except (AttributeError, TypeError):
+                                pass
+
+                    # Audit trail CTA
+                    if hasattr(st, "page_link"):
+                        st.page_link(
+                            "pages/7_Audit_Trail.py",
+                            label=_("view_in_audit_trail", lang),
+                            icon="🔍",
+                        )
+
+                    # Reset form state for next entry
+                    for key in (
+                        "ac_preview_result", "ac_preview_payload",
+                        "ac_preview_error", "_inflight_ac_insert",
+                    ):
+                        st.session_state.pop(key, None)
+
+                except AutoCalcError as exc:
+                    st.error(str(exc.detail), icon="🚫")
+                    st.session_state["_inflight_ac_insert"] = False
+
+    # Anomaly confirmation: shown inline when quantity exceeds ceiling
+    if st.session_state.get("ac_anomaly_pending"):
+        anomaly_payload = st.session_state.get("ac_anomaly_payload", {})
+        try:
+            anomaly_q = float(anomaly_payload.get("quantita", "0"))
+        except (ValueError, TypeError):
+            anomaly_q = 0.0
+        with st.expander("Conferma quantita anomala", expanded=True):
+            st.warning(
+                f"La quantita inserita ({anomaly_q:,.2f}) "
+                f"supera la soglia tipica per questa categoria "
+                f"({_AC_ANOMALY_CEIL.get(ac_subscope_key, 0):,.0f}). "
+                "Verifica che il valore sia corretto prima di registrare.",
+                icon="⚠️",
+            )
+            anom_col1, anom_col2 = st.columns([1, 1])
+            with anom_col1:
+                if st.button(
+                    "Confermo — registra comunque",
+                    type="primary",
+                    key="ac_anomaly_confirm",
+                ):
+                    token_anom = st.session_state.get("token", "")
+                    with st.spinner("Registrazione in corso..."):
+                        try:
+                            result_anom = calc_insert(anomaly_payload, token=token_anom)
+                            emission_id_anom = result_anom.get("emission_id", "—")
+                            st.success(
+                                f"{_('auto_calc_inserted_ok', lang)} `{emission_id_anom}`",
+                                icon="✅",
+                            )
+                            if hasattr(st, "toast"):
+                                st.toast("Riga inserita nel registro", icon="✅")
+                            history = st.session_state.get(_AC_HISTORY_KEY, [])
+                            history.insert(0, {
+                                "emission_id": emission_id_anom,
+                                "tco2e": result_anom.get("tco2e", "—"),
+                                "label": f"{ac_subscope_key} · {ac_anno}",
+                                "payload": anomaly_payload,
+                            })
+                            st.session_state[_AC_HISTORY_KEY] = history[:_AC_HISTORY_MAX]
+                            for key in (
+                                "ac_anomaly_pending", "ac_anomaly_payload",
+                                "ac_preview_result", "ac_preview_payload",
+                                "ac_preview_error",
+                            ):
+                                st.session_state.pop(key, None)
+                        except AutoCalcError as exc:
+                            st.error(str(exc.detail), icon="🚫")
+            with anom_col2:
+                if st.button("Annulla — torna al form", key="ac_anomaly_cancel"):
+                    st.session_state.pop("ac_anomaly_pending", None)
+                    st.session_state.pop("ac_anomaly_payload", None)
+                    st.rerun()
+
+    st.markdown("</div>", unsafe_allow_html=True)
+
+    # -----------------------------------------------------------------------
+    # Recent insertions memo (last 5 quick-repeat)
+    # -----------------------------------------------------------------------
+    history = st.session_state.get(_AC_HISTORY_KEY, [])
+    if history:
+        st.divider()
+        st.markdown("**Ultimi inserimenti (sessione corrente)**")
+        st.caption(
+            "Clicca su un inserimento per visualizzarlo in Audit Trail. "
+            "I dati qui non ripopolano il form (ogni inserimento e intenzionale)."
+        )
+        for entry in history:
+            h_col1, h_col2 = st.columns([4, 1])
+            with h_col1:
+                st.markdown(
+                    f'<div class="ct-recent-entry">'
+                    f'<span class="ct-re-tco2e">{entry.get("tco2e","—")} tCO2e</span>'
+                    f'<span class="ct-re-label">{entry.get("label","—")}</span>'
+                    f"</div>",
+                    unsafe_allow_html=True,
+                )
+            with h_col2:
+                eid = entry.get("emission_id", "")
+                if eid and eid != "—":
+                    st.caption(f"`{eid[:8]}…`")
+
 
 # ---------------------------------------------------------------------------
 # Footer
