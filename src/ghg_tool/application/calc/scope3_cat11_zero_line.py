@@ -71,6 +71,11 @@ def calculate(
             methodology="declared-zero",
             regulatory_stream=regulatory_stream,
             created_by=created_by,
+            # M-24 / ESRS E1-7 §49: explicit Decimal('0') gas-component
+            # values keep downstream SUM aggregations NULL-safe.
+            co2_tonne=Decimal("0"),
+            co2_biogenic_tonne=Decimal("0"),
+            co2_fossil_tonne=Decimal("0"),
             disclosure_notes=_RATIONALE,
         )
     ]

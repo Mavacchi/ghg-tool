@@ -26,10 +26,13 @@ References:
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from decimal import Decimal
 
 from ghg_tool.application.services.yoy_stats import (
+    GroupKey,
+    YoYStatsBaseline,
     compute_yoy_baseline,
     threshold_pct,
 )
@@ -74,6 +77,13 @@ class HotspotEntry:
             half-width) used for the outlier flag on this row.  Equals
             ``YOY_FALLBACK_PCT`` when no reliable sigma was available,
             otherwise the per-key ``|mean| + 2 * sigma``.
+        gwp_set: R-17 traceability -- GWP set ('AR6'/'AR5') used by the
+            underlying emission records. Empty string when mixed sets are
+            present (which is itself an upstream defect).
+        calc_timestamp: R-17 traceability -- minimum calc_timestamp across
+            the contributing records (oldest computation in the slice).
+        factor_sources: R-17 traceability -- frozen set of factor_source
+            values observed across the contributing records.
     """
 
     rank: int
@@ -86,6 +96,14 @@ class HotspotEntry:
     flag_high_concentration: bool
     flag_yoy_outlier: bool
     outlier_threshold_pct: Decimal = YOY_FALLBACK_PCT
+    # R-17 traceability columns (data-quality / audit trail). These are
+    # populated from the input EmissionRecord set inside ``compute_hotspots``;
+    # they are NOT recomputed independently here.
+    gwp_set: str = ""
+    calc_timestamp: datetime = field(
+        default_factory=lambda: datetime.now(UTC)
+    )
+    factor_sources: frozenset[str] = field(default_factory=frozenset)
 
 
 def compute_hotspots(
@@ -132,12 +150,32 @@ def compute_hotspots(
         At most ``top_n`` ``HotspotEntry`` objects, ranked by tCO2e
         descending.  Empty list when no Scope 3 rows are present.
     """
-    current_totals = _aggregate_scope3(emissions_current)
+    # Materialise emissions_current once so we can both aggregate and walk
+    # them for the R-17 traceability columns (gwp_set, factor_sources,
+    # calc_timestamp). Without materialisation the iterable would be drained
+    # by the first pass.
+    current_records: list[EmissionRecord] = [
+        r for r in emissions_current if r.scope == 3
+    ]
+    current_totals = _aggregate_scope3(current_records)
     if not current_totals:
         return []
 
     prior_totals = (
         _aggregate_scope3(emissions_prior) if emissions_prior is not None else {}
+    )
+
+    # R-17: traceability columns sourced from the input records. The
+    # ``gwp_set`` is asserted to be uniform across the slice (mixed sets
+    # would already be an upstream defect surfaced by the calc pipeline).
+    distinct_gwp = {r.gwp_set for r in current_records}
+    trace_gwp_set: str = next(iter(distinct_gwp)) if len(distinct_gwp) == 1 else ""
+    trace_factor_sources: frozenset[str] = frozenset(
+        r.factor_source for r in current_records
+    )
+    trace_calc_timestamp: datetime = min(
+        (r.calc_timestamp for r in current_records),
+        default=datetime.now(UTC),
     )
 
     # Stable deterministic sort: primary key tco2e desc, secondary sub_scope asc.
@@ -171,17 +209,17 @@ def compute_hotspots(
     # When historical_by_year carries at least 3 derivable YoY deltas for
     # a sub_scope, the per-key historical |mean| + 2 sigma replaces the
     # fallback for that sub_scope only.
-    baseline_by_key: dict[tuple, object] = {}
+    baseline_by_key: dict[GroupKey, YoYStatsBaseline] = {}
     if historical_by_year:
         # Reshape sub_scope -> tco2e into (sub_scope,) -> tco2e for the
         # shared yoy_stats helper, which keys on tuples.
-        reshaped: dict[int, dict[tuple, Decimal]] = {}
+        reshaped: dict[int, dict[GroupKey, Decimal]] = {}
         for y, inner in historical_by_year.items():
             reshaped[int(y)] = {
                 (str(k),): (v if isinstance(v, Decimal) else Decimal(str(v)))
                 for k, v in inner.items()
             }
-        baseline_by_key = compute_yoy_baseline(reshaped)  # type: ignore[assignment]
+        baseline_by_key = compute_yoy_baseline(reshaped)
 
     # Build entries, accumulating cumulative_pct on the original ranking.
     entries: list[HotspotEntry] = []
@@ -190,9 +228,9 @@ def compute_hotspots(
         pct = (value / scope3_total) * Decimal("100")
         cumulative += pct
         yoy = yoy_deltas[sub_scope]
-        baseline = baseline_by_key.get((sub_scope,))  # type: ignore[arg-type]
+        baseline = baseline_by_key.get((sub_scope,))
         row_threshold = threshold_pct(
-            baseline,  # type: ignore[arg-type]
+            baseline,
             sigma_multiplier=YOY_SIGMA_MULTIPLIER,
             fallback_pct=YOY_FALLBACK_PCT,
         )
@@ -209,6 +247,9 @@ def compute_hotspots(
                 flag_high_concentration=flag_high_concentration,
                 flag_yoy_outlier=flag_outlier,
                 outlier_threshold_pct=row_threshold,
+                gwp_set=trace_gwp_set,
+                calc_timestamp=trace_calc_timestamp,
+                factor_sources=trace_factor_sources,
             )
         )
 

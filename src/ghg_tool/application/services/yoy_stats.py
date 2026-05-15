@@ -2,17 +2,33 @@
 
 When >= 3 historical YoY deltas (== >= 4 years of history) are available
 for a given grouping key, this module computes a per-key historical sigma
-of the YoY-delta percentage and exposes ``mean + k * sigma`` as the
-outlier threshold.  Otherwise the caller is expected to fall back to the
+of the YoY-delta percentage and exposes ``|mean| + k * sigma`` as the
+outlier threshold. Otherwise the caller is expected to fall back to the
 static +/- 20% threshold documented in ``hotspot_service`` and
 ``reconciliation_service``.
 
-Decimal end-to-end: floats are only used inside ``statistics.pstdev`` and
-the result is cast back to ``Decimal`` via ``str()`` before crossing any
-public boundary.  No float-binary contamination of stored or returned
-values.
+Sample stdev (M-17):
+    ``statistics.stdev`` (Bessel-corrected, divisor N-1) is used rather
+    than ``statistics.pstdev`` (population stdev, divisor N). The deltas
+    are treated as a finite SAMPLE from an unknown distribution; the
+    sample stdev is the standard inferential choice and the conservative
+    one against an external auditor. Using pstdev would have UNDER-stated
+    sigma by sqrt(N/(N-1)) and produced too many false-positive outlier
+    flags. When N < 2 sigma is set to Decimal('0'); the reliability gate
+    (sample_size >= min_sample, default 3) prevents the zero-sigma path
+    from contaminating downstream thresholds.
+
+Decimal end-to-end: floats are only used inside ``statistics.fmean`` and
+``statistics.stdev`` and the result is cast back to ``Decimal`` via
+``str()`` before crossing any public boundary. No float-binary
+contamination of stored or returned values.
 
 Pure-function module: no I/O, no DB, no FastAPI, no Streamlit.
+
+Methodology references:
+  * IAASB ISA 320 Section A3-A14 (materiality thresholds; statistical
+    sample treatment under audit standards)
+  * GHG Protocol Corporate Standard Chapter 5 (significance thresholds)
 """
 
 from __future__ import annotations
@@ -21,6 +37,14 @@ import statistics
 from collections.abc import Mapping
 from dataclasses import dataclass
 from decimal import Decimal
+from typing import TypeAlias
+
+#: Generic grouping key shared by hotspot ((sub_scope,)) and reconciliation
+#: ((scope, sub_scope, codice_sito)). R-19 / R-20: replaces the bare ``tuple``
+#: annotation which disabled mypy element-type checks. The union covers all
+#: known callers; tightening to a typed Literal would require pulling the
+#: scope3_categories closed-set into the yoy_stats module.
+GroupKey: TypeAlias = tuple[int | str | None, ...]
 
 _ZERO = Decimal("0")
 _HUNDRED = Decimal("100")
@@ -31,14 +55,18 @@ class YoYStatsBaseline:
     """Historical YoY-delta statistics for one grouping key.
 
     Attributes:
-        key: tuple identifying the grouping (e.g. (scope, sub_scope, site)).
+        key: tuple identifying the grouping (e.g. (scope, sub_scope, site)
+            for reconciliation, (sub_scope,) for hotspot). See ``GroupKey``.
         sample_size: number of historical YoY deltas observed.
         mean_pct: mean of historical YoY delta percentages.
-        sigma_pct: standard deviation of historical YoY delta percentages.
-        is_reliable: True only when sample_size >= 3.
+        sigma_pct: sample standard deviation of YoY delta percentages
+            (Bessel-corrected, divisor N-1; see module docstring on M-17).
+        is_reliable: True only when sample_size >= 3 (i.e. >= 4 years of
+            history). The reliability gate is unchanged by the pstdev->stdev
+            switch.
     """
 
-    key: tuple
+    key: GroupKey
     sample_size: int
     mean_pct: Decimal
     sigma_pct: Decimal
@@ -46,10 +74,10 @@ class YoYStatsBaseline:
 
 
 def compute_yoy_baseline(
-    historical_by_year: Mapping[int, Mapping[tuple, Decimal]],
+    historical_by_year: Mapping[int, Mapping[GroupKey, Decimal]],
     *,
     min_sample: int = 3,
-) -> dict[tuple, YoYStatsBaseline]:
+) -> dict[GroupKey, YoYStatsBaseline]:
     """Compute per-key historical YoY-delta sigma from multi-year history.
 
     Args:
@@ -65,13 +93,13 @@ def compute_yoy_baseline(
     if not historical_by_year:
         return {}
 
-    years_sorted = sorted(int(y) for y in historical_by_year.keys())
+    years_sorted = sorted(int(y) for y in historical_by_year)
 
     # Build deltas per key by walking consecutive years.
-    deltas_by_key: dict[tuple, list[Decimal]] = {}
-    all_keys: set[tuple] = set()
+    deltas_by_key: dict[GroupKey, list[Decimal]] = {}
+    all_keys: set[GroupKey] = set()
     for y in years_sorted:
-        for k in historical_by_year[y].keys():
+        for k in historical_by_year[y]:
             all_keys.add(tuple(k))
 
     for i in range(len(years_sorted) - 1):
@@ -91,21 +119,28 @@ def compute_yoy_baseline(
             pct = (next_d - prev_d) / prev_d * _HUNDRED
             deltas_by_key.setdefault(k, []).append(pct)
 
-    out: dict[tuple, YoYStatsBaseline] = {}
+    out: dict[GroupKey, YoYStatsBaseline] = {}
     for k in sorted(all_keys):
         deltas = deltas_by_key.get(k, [])
         n = len(deltas)
         if n == 0:
             mean_pct = _ZERO
             sigma_pct = _ZERO
-        elif n == 1:
+        elif n < 2:
+            # M-17: sample stdev is undefined for N=1; explicit zero rather
+            # than relying on statistics.stdev to raise. The is_reliable
+            # gate (n >= min_sample, default 3) blocks consumers from using
+            # this row as a usable baseline anyway.
             mean_pct = deltas[0]
             sigma_pct = _ZERO
         else:
             # Cast through float for statistics, then back to Decimal via str()
-            # so the public surface stays Decimal-clean.
-            mean_f = statistics.fmean(float(d) for d in deltas)
-            sigma_f = statistics.pstdev((float(d) for d in deltas), mu=mean_f)
+            # so the public surface stays Decimal-clean. M-17: use the
+            # Bessel-corrected sample stdev (divisor N-1) rather than the
+            # population stdev (divisor N).
+            float_deltas = [float(d) for d in deltas]
+            mean_f = statistics.fmean(float_deltas)
+            sigma_f = statistics.stdev(float_deltas)
             mean_pct = Decimal(str(mean_f))
             sigma_pct = Decimal(str(sigma_f))
         out[k] = YoYStatsBaseline(
@@ -137,4 +172,4 @@ def threshold_pct(
     return abs(baseline.mean_pct) + sigma_multiplier * baseline.sigma_pct
 
 
-__all__ = ["YoYStatsBaseline", "compute_yoy_baseline", "threshold_pct"]
+__all__ = ["GroupKey", "YoYStatsBaseline", "compute_yoy_baseline", "threshold_pct"]

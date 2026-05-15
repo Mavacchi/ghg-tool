@@ -1,13 +1,29 @@
-"""Scope 3 — Cat 1 Purchased Goods (FR-09, ADR-007).
+"""Scope 3 -- Cat 1 Purchased Goods (FR-09, ADR-007).
 
 Mass-based ecoinvent v3.10 for materials (argille, feldspati, sabbie
 silicee, fritte, smalti, pigmenti, additivi, packaging) and spend-based
 EXIOBASE for services.
 
-ADR-007: cardboard (``ECOINV_CARDBOARD_V3_10``) and pallet
-(``ECOINV_PALLET_V3_10``) must populate ``co2_biogenic_tonne`` AND
-``co2_fossil_tonne`` columns separately.  ``tco2e`` carries only the
-fossil + non-CO2 GWP-weighted total — biogenic CO2 is memo-only.
+ADR-007 / GHG Protocol Corporate Standard Section 4.5:
+Cardboard (``ECOINV_CARDBOARD_V3_10``) and pallet
+(``ECOINV_PALLET_V3_10``) carry an embedded biogenic CO2 component in
+the ecoinvent cradle-to-gate factor. Per the GHG Protocol Section 4.5
+and ESRS E1-7 Section 49, biogenic CO2 MUST be reported as a memo line,
+NEVER included in the headline ``tco2e``. This module splits the total
+emissions:
+
+    total_kg = factor.value * quantita
+    biogenic_kg = bio_share * total_kg
+    fossil_kg = total_kg - biogenic_kg
+
+and emits ``tco2e = fossil_kg / 1000`` together with the biogenic memo
+in ``co2_biogenic_tonne``. The invariant
+``tco2e + co2_biogenic_tonne == total_kg / 1000`` always holds.
+
+Methodology references:
+  * GHG Protocol Corporate Standard Section 4.5 (biogenic carbon)
+  * ESRS E1-7 Section 49 (biogenic flow disclosure)
+  * Project ADR-007 (biogenic CO2 split for packaging)
 """
 
 from __future__ import annotations
@@ -136,19 +152,26 @@ def _build_record(  # noqa: PLR0913 — internal builder dispatch
     factor = require_factor(factors, factor_id, gwp_set=gwp.code)
     quantita = to_decimal(row["quantita"])
     # factor.value already CO2e per unit; apply directly.
-    tco2e_total_kg = (factor.value or Decimal("0")) * quantita
-    tco2e_total = tco2e_total_kg * KG_TO_TONNE
+    total_kg = (factor.value or Decimal("0")) * quantita
 
     co2_biogenic_tonne: Decimal | None = None
     co2_fossil_tonne: Decimal | None = None
 
+    # ADR-007 / GHG Protocol Section 4.5: split biogenic from fossil so the
+    # headline ``tco2e`` is fossil-only and biogenic is memo. The invariant
+    # tco2e + co2_biogenic_tonne == total_kg * KG_TO_TONNE must hold.
     if factor_id in _BIOGENIC_FACTOR_IDS:
         bio_share = factors.get_biogenic_share(factor_id, gwp_set=gwp.code)
         if bio_share is not None:
-            biogenic_kg = bio_share * quantita
+            biogenic_kg = bio_share * total_kg
+            fossil_kg = total_kg - biogenic_kg
             co2_biogenic_tonne = biogenic_kg * KG_TO_TONNE
-            # tco2e remains the fossil + non-CO2 GWP-weighted total; biogenic is memo-only
-            co2_fossil_tonne = tco2e_total
+            co2_fossil_tonne = fossil_kg * KG_TO_TONNE
+            tco2e_total = co2_fossil_tonne
+        else:
+            tco2e_total = total_kg * KG_TO_TONNE
+    else:
+        tco2e_total = total_kg * KG_TO_TONNE
 
     return make_emission(
         correlation_id=correlation_id,

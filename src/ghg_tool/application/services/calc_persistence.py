@@ -178,11 +178,11 @@ _INSERT_CALC_RUN = text(
     INSERT INTO ops.calc_runs (
         id, tenant_id, correlation_id, anno,
         emissions_written, duration_ms, gwp_set, regulatory_stream,
-        started_at, finished_at, created_by
+        started_at, finished_at, created_by, dual_run_id
     ) VALUES (
         :id, :tenant_id, :correlation_id, :anno,
         :emissions_written, :duration_ms, :gwp_set, :regulatory_stream,
-        :started_at, :finished_at, :created_by
+        :started_at, :finished_at, :created_by, :dual_run_id
     )
     """
 )
@@ -225,16 +225,16 @@ def _emission_to_params(
         "sub_scope": record.sub_scope,
         "codice_sito": record.codice_sito,
         "anno": record.anno,
-        "tco2e": float(record.tco2e),
-        "co2_tonne": float(record.co2_tonne) if record.co2_tonne is not None else None,
-        "ch4_tco2e": float(record.ch4_tco2e) if record.ch4_tco2e is not None else None,
-        "n2o_tco2e": float(record.n2o_tco2e) if record.n2o_tco2e is not None else None,
-        "co2_biogenic_tonne": (
-            float(record.co2_biogenic_tonne) if record.co2_biogenic_tonne is not None else None
-        ),
-        "co2_fossil_tonne": (
-            float(record.co2_fossil_tonne) if record.co2_fossil_tonne is not None else None
-        ),
+        # BUG-03 / Python ID 04 -- Decimal end-to-end. asyncpg and psycopg both
+        # bind Python Decimal natively to PostgreSQL NUMERIC, preserving the
+        # full precision of the canonical CSRD ledger column. The previous
+        # float(...) cast introduced binary-fraction noise on NUMERIC(18,6).
+        "tco2e": record.tco2e,
+        "co2_tonne": record.co2_tonne,
+        "ch4_tco2e": record.ch4_tco2e,
+        "n2o_tco2e": record.n2o_tco2e,
+        "co2_biogenic_tonne": record.co2_biogenic_tonne,
+        "co2_fossil_tonne": record.co2_fossil_tonne,
         "factor_id": str(fk_uuid),
         "factor_version": record.factor_version,
         "factor_source": record.factor_source,
@@ -263,6 +263,7 @@ async def _persist_emissions(
     gwp_set: str,
     regulatory_stream: str,
     created_by: str,
+    dual_run_id: uuid.UUID | None = None,
 ) -> None:
     """Bulk-INSERT emissions and a single ops.calc_runs row in one transaction.
 
@@ -312,6 +313,10 @@ async def _persist_emissions(
                 "started_at": started_at,
                 "finished_at": finished_at,
                 "created_by": created_by,
+                # M-05 / FR-34: link CSRD and EU ETS tracks for verifier
+                # traceability per Reg. UE 2018/2067 Art. 6 (methodology.md
+                # §11.1). NULL for single-track runs.
+                "dual_run_id": str(dual_run_id) if dual_run_id is not None else None,
             },
         )
 
@@ -339,6 +344,7 @@ def run_calc_and_persist(
     gwp_set: str = "AR6",
     regulatory_stream: str = "CSRD_ESRS_E1",
     created_by: str = "calc_service",
+    dual_run_id: uuid.UUID | None = None,
 ) -> CalcPersistResult:
     """Run the calc pipeline end-to-end and persist the results.
 
