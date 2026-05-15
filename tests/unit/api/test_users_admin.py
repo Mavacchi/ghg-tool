@@ -189,7 +189,15 @@ def _db_for_password_reset(target_row: MagicMock | None) -> Any:
 
         update_result = MagicMock()
 
-        session.execute = AsyncMock(side_effect=[fetch_result, update_result])
+        # S-014: password reset also revokes active auth.sessions rows; the
+        # router does a third UPDATE, so the mock needs a third Result with
+        # rowcount=0 (no sessions to revoke in the unit fixture).
+        revoke_result = MagicMock()
+        revoke_result.rowcount = 0
+
+        session.execute = AsyncMock(
+            side_effect=[fetch_result, update_result, revoke_result]
+        )
         yield session
 
     return _gen
@@ -232,7 +240,11 @@ class TestPatchUserActive:
             fetch_result = MagicMock()
             fetch_result.fetchone = MagicMock(return_value=target)
             update_result = MagicMock()
-            session.execute = AsyncMock(side_effect=[fetch_result, update_result])
+            revoke_result = MagicMock()
+            revoke_result.rowcount = 0  # S-014 session-revoke step
+            session.execute = AsyncMock(
+                side_effect=[fetch_result, update_result, revoke_result]
+            )
             yield session
 
         app.dependency_overrides[get_db] = _gen
@@ -437,7 +449,11 @@ class TestPasswordReset:
             fetch_result = MagicMock()
             fetch_result.fetchone = MagicMock(return_value=target)
             update_result = MagicMock()
-            session.execute = AsyncMock(side_effect=[fetch_result, update_result])
+            revoke_result = MagicMock()
+            revoke_result.rowcount = 0  # S-014 session-revoke step
+            session.execute = AsyncMock(
+                side_effect=[fetch_result, update_result, revoke_result]
+            )
             yield session
 
         app.dependency_overrides[get_current_user] = _auth("esg_manager", _ESG1)
