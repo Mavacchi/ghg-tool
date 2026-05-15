@@ -1,6 +1,6 @@
 {
   "app_title": "GHG Tool: {company_name}",
-  "hero_tagline": "Climate accounting. Audit-ready.",
+  "hero_tagline": "Carbon ledger for CSRD-grade reporting.",
   "empty_kpi_title": "No emissions recorded.",
   "empty_kpi_body": "The ledger is empty for the selected filters. Go to *Data entry* to record the first emission, or change the fiscal year in the sidebar.",
   "empty_kpi_cta": "Go to Data entry",

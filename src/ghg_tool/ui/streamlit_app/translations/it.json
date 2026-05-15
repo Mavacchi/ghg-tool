@@ -1,6 +1,6 @@
 {
   "app_title": "Strumento GHG: {company_name}",
-  "hero_tagline": "Contabilità climatica. Pronta per l'audit.",
+  "hero_tagline": "Il registro carbonio per la rendicontazione CSRD.",
   "empty_kpi_title": "Nessuna emissione registrata.",
   "empty_kpi_body": "Il registro è vuoto per i filtri selezionati. Vai a *Inserimento dati* per registrare la prima emissione, oppure cambia l'anno fiscale nella barra laterale.",
   "empty_kpi_cta": "Vai a Inserimento dati",

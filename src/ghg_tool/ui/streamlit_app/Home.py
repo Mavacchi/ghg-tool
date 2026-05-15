@@ -25,7 +25,7 @@ from ghg_tool.ui.streamlit_app.lib.constants import (
 )
 
 st.set_page_config(
-    page_title=f"{PRODUCT_NAME} · {COMPANY_SHORT}",
+    page_title=PRODUCT_NAME,
     page_icon=page_icon(),
     layout="wide",
     initial_sidebar_state="expanded",
