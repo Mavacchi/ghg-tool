@@ -123,6 +123,11 @@ async def _truncate_test_rows(
             text("DELETE FROM ref.sites WHERE tenant_id = CAST(:tid AS uuid)"),
             {"tid": tenant_id},
         )
+        # users reference the tenant via FK; must be removed before DELETE tenants
+        await conn.execute(
+            text("DELETE FROM ref.users WHERE tenant_id = CAST(:tid AS uuid)"),
+            {"tid": tenant_id},
+        )
         await conn.execute(
             text("DELETE FROM ref.tenants WHERE id = CAST(:tid AS uuid)"),
             {"tid": tenant_id},

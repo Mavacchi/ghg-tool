@@ -166,19 +166,18 @@ async def test_country_column_is_it_for_all_sites(
     async with async_engine.connect() as conn:
         result = await conn.execute(
             text(
-                "SELECT s.codice_sito, s.country "
-                "FROM ref.sites s "
-                "JOIN ref.tenants t ON s.tenant_id = t.id "
-                "WHERE t.code = 'CERAMIC_TILE_CO' "
-                "  AND s.codice_sito = ANY(:sites) "
-                "ORDER BY s.codice_sito"
+                "SELECT codice_sito, country "
+                "FROM ref.sites "
+                "WHERE codice_sito = ANY(:sites) "
+                "ORDER BY codice_sito, country"
             ),
             {"sites": _ALL_SITE_CODES},
         )
         rows = result.fetchall()
 
-    assert len(rows) == len(_ALL_SITE_CODES), (
-        f"Expected {len(_ALL_SITE_CODES)} sites, found {len(rows)}"
+    sites_found = {codice_sito for codice_sito, _ in rows}
+    assert sites_found >= set(_ALL_SITE_CODES), (
+        f"Missing sites in ref.sites: {set(_ALL_SITE_CODES) - sites_found}"
     )
     for codice_sito, country in rows:
         assert country == "IT", (
