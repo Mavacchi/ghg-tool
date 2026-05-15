@@ -634,16 +634,6 @@ class TestSecP1005LoginWired:
 
         return _gen
 
-    @pytest.mark.xfail(
-        reason=(
-            "Pre-existing test infra mismatch: patching async authenticate_user via "
-            "side_effect=async_fn yields a coroutine and the router currently raises "
-            "500 instead of 401. Test logic correctly captures the requirement; the "
-            "mock setup needs an AsyncMock or new=AsyncMock(return_value=None). "
-            "Not introduced by this branch; tracked for SEC follow-up."
-        ),
-        strict=False,
-    )
     def test_login_returns_401_on_bad_credentials(self) -> None:
         """POST /auth/login with invalid credentials returns 401 (not 503).
 
@@ -652,14 +642,11 @@ class TestSecP1005LoginWired:
         """
         from ghg_tool.api.dependencies.db import get_db_no_auth
 
-        async def _fake_authenticate(**kwargs: Any) -> None:
-            return None
-
         app.dependency_overrides[get_db_no_auth] = self._noop_db()
         with (
             patch(
                 "ghg_tool.api.routers.auth.authenticate_user",
-                side_effect=_fake_authenticate,
+                new=AsyncMock(return_value=None),
             ),
             TestClient(app, raise_server_exceptions=False) as client,
         ):
@@ -674,15 +661,6 @@ class TestSecP1005LoginWired:
             "If 503, the endpoint is still a stub."
         )
 
-    @pytest.mark.xfail(
-        reason=(
-            "Same root cause as test_login_returns_401_on_bad_credentials: "
-            "patching async authenticate_user with side_effect=async_fn "
-            "produces a coroutine, the router code path bombs to 500. "
-            "Mock needs AsyncMock or new=AsyncMock(return_value=...)."
-        ),
-        strict=False,
-    )
     def test_login_returns_200_on_valid_credentials(self) -> None:
         """POST /auth/login with valid credentials returns 200 + token pair."""
         from ghg_tool.api.dependencies.db import get_db_no_auth
@@ -706,7 +684,7 @@ class TestSecP1005LoginWired:
         with (
             patch(
                 "ghg_tool.api.routers.auth.authenticate_user",
-                return_value=fake_response,
+                new=AsyncMock(return_value=fake_response),
             ),
             TestClient(app, raise_server_exceptions=False) as client,
         ):
