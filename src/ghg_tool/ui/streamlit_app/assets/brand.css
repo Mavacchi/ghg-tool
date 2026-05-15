@@ -780,3 +780,137 @@ html, body,
   margin-top: 0.1rem;
   margin-bottom: 0.5rem;
 }
+
+/* ====================================================================
+ * CRUD AFFORDANCES: destructive button, lock badge, empty state,
+ * inline edit panel, correction intro note.
+ *
+ * These classes are emitted by the Factor Catalog and Drill-down pages
+ * via st.markdown(unsafe_allow_html=True) only for static, non-user-
+ * supplied strings — never for raw user input.
+ * ================================================================ */
+
+/* Destructive / delete action — Okabe-Ito vermilion (#D55E00).
+ * Used on "Elimina bozza" / "Delete draft" buttons.
+ * Contrast against white: 4.55:1 — passes WCAG AA. */
+[data-testid="stButton"] > button.ct-btn-destructive,
+button.ct-btn-destructive {
+  background-color: transparent;
+  border-color: #D55E00;
+  color: #D55E00;
+}
+[data-testid="stButton"] > button.ct-btn-destructive:hover,
+button.ct-btn-destructive:hover {
+  background-color: rgba(213, 94, 0, 0.07);
+  border-color: #B84E00;
+  color: #B84E00;
+  box-shadow: 0 2px 6px rgba(213, 94, 0, 0.15);
+}
+
+/* Streamlit does not expose a class= attribute on st.button directly.
+ * We use a wrapping <div class="ct-destructive-wrap"> rendered via
+ * st.markdown immediately before the button, then select the next
+ * sibling button with the adjacent-sibling CSS combinator.
+ * This technique is used in brand.css already (context bar, hero). */
+.ct-destructive-wrap + div [data-testid="stButton"] > button {
+  background-color: transparent;
+  border-color: #D55E00;
+  color: #D55E00;
+  font-weight: 500;
+}
+.ct-destructive-wrap + div [data-testid="stButton"] > button:hover {
+  background-color: rgba(213, 94, 0, 0.07);
+  border-color: #B84E00;
+  color: #B84E00;
+  box-shadow: 0 2px 6px rgba(213, 94, 0, 0.15);
+}
+
+/* Lock badge shown on published (immutable) factor rows. */
+.ct-lock-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.18rem 0.55rem;
+  border-radius: 999px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  background: rgba(120, 139, 153, 0.1);
+  color: #788B99;
+  border: 1px solid rgba(120, 139, 153, 0.22);
+  cursor: default;
+  user-select: none;
+}
+
+/* Empty-state card: friendly card when draft list is empty. */
+.ct-empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  padding: 2.5rem 1.5rem;
+  border-radius: 10px;
+  border: 1.5px dashed #DDD3C5;
+  background: #FAFAFA;
+  text-align: center;
+  color: #707070;
+}
+.ct-empty-state .ct-empty-icon {
+  font-size: 2.4rem;
+  line-height: 1;
+  color: #C8BCA8;
+}
+.ct-empty-state .ct-empty-title {
+  font-weight: 600;
+  font-size: 1rem;
+  color: #1a1a1a;
+  margin: 0;
+}
+.ct-empty-state .ct-empty-body {
+  font-size: 0.88rem;
+  color: #707070;
+  margin: 0;
+  max-width: 380px;
+}
+
+/* Inline edit panel: styled container inside st.expander for CRUD forms. */
+.ct-edit-panel {
+  background: #F7F5F2;
+  border-radius: 8px;
+  padding: 1.1rem 1.25rem;
+  border: 1px solid #ECE5DC;
+  margin-top: 0.5rem;
+}
+
+/* Correction intro note: append-only audit explainer shown in the
+ * correction form. Bluish-green tint (Okabe-Ito #009E73). */
+.ct-correction-note {
+  display: flex;
+  gap: 0.65rem;
+  align-items: flex-start;
+  background: rgba(0, 158, 115, 0.07);
+  border-left: 3px solid #009E73;
+  border-radius: 0 6px 6px 0;
+  padding: 0.65rem 0.9rem;
+  font-size: 0.84rem;
+  color: #2a2a2a;
+  line-height: 1.5;
+  margin-bottom: 0.75rem;
+}
+.ct-correction-note .ct-note-icon {
+  font-size: 1rem;
+  line-height: 1.5;
+  flex-shrink: 0;
+  color: #009E73;
+}
+
+/* Success-tinted toast colour override is handled by st.toast natively;
+ * we define the CSS custom property here so the brand tokens are available
+ * should Streamlit expose a theming hook in future versions. */
+:root {
+  --ct-vermilion: #D55E00;
+  --ct-bluish-green: #009E73;
+  --ct-brand-steel: #788B99;
+}

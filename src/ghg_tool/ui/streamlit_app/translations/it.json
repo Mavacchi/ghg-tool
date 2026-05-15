@@ -282,5 +282,20 @@
   "sbti_create_success": "Obiettivo creato con successo.",
   "sbti_create_error": "Errore nella creazione dell obiettivo.",
   "sbti_section_methodology": "Nota metodologica",
-  "sbti_methodology_text": "Gli obiettivi SBTi seguono l approccio di contrazione assoluta (ACA) definito nello SBTi Corporate Net-Zero Standard v1.2 (2024). Per i dettagli sui threshold ON_TRACK / SLIGHTLY_OFF / OFF_TRACK consultare docs/methodology.md, sezione SBTi."
+  "sbti_methodology_text": "Gli obiettivi SBTi seguono l approccio di contrazione assoluta (ACA) definito nello SBTi Corporate Net-Zero Standard v1.2 (2024). Per i dettagli sui threshold ON_TRACK / SLIGHTLY_OFF / OFF_TRACK consultare docs/methodology.md, sezione SBTi.",
+  "factor_edit_btn": "Modifica bozza",
+  "factor_delete_btn": "Elimina bozza",
+  "factor_delete_confirm": "Sicuro? Questa bozza verra eliminata definitivamente.",
+  "factor_save_btn": "Salva modifiche",
+  "factor_locked_tooltip": "Pubblicato — immutabile per ADR-007 / ISAE 3000",
+  "emission_correct_btn": "Correggi questa riga",
+  "emission_correct_intro": "Le correzioni non sovrascrivono lo storico. Viene inserita una nuova riga e quella precedente rimane visibile con superseded_by valorizzato.",
+  "reason_factor_update": "Aggiornamento fattore",
+  "reason_data_quality": "Correzione qualita dato",
+  "reason_boundary_change": "Cambio perimetro",
+  "reason_manual_fix": "Correzione manuale",
+  "toast_factor_saved": "Modifiche salvate",
+  "toast_factor_deleted": "Bozza eliminata",
+  "toast_emission_corrected": "Correzione registrata — nuova riga creata",
+  "empty_state_drafts": "Nessun fattore in bozza. Crea il primo per iniziare."
 }
