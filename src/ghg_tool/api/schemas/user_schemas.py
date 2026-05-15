@@ -11,7 +11,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-RoleCode = Literal["data_steward", "esg_manager", "auditor"]
+RoleCode = Literal["editor", "admin", "viewer"]
 
 
 class UserActivePatchRequest(BaseModel):

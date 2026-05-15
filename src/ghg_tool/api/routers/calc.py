@@ -1,8 +1,8 @@
 """Calc pipeline trigger and status endpoints — FR-34, Task 3B/C/D.
 
 Endpoints:
-    POST /api/v1/calc/run        — trigger a single-track run (esg_manager).
-    POST /api/v1/calc/run-dual   — trigger CSRD + EU ETS dual-track run (esg_manager).
+    POST /api/v1/calc/run        — trigger a single-track run (admin).
+    POST /api/v1/calc/run-dual   — trigger CSRD + EU ETS dual-track run (admin).
     GET  /api/v1/calc/runs/{cid} — poll run status from ops.calc_runs (all roles).
 
 Design notes:
@@ -249,7 +249,7 @@ _SELECT_CALC_RUN = text(
     description=(
         "Spawns a background calc run for the given anno and regulatory stream. "
         "Returns 202 with a correlation_id; poll GET /api/v1/calc/runs/{correlation_id} "
-        "for completion status. Requires esg_manager role."
+        "for completion status. Requires admin role."
     ),
     responses={
         202: {"description": "Run accepted and queued"},
@@ -260,14 +260,14 @@ _SELECT_CALC_RUN = text(
 async def trigger_calc_run(
     body: CalcRunRequest,
     background_tasks: BackgroundTasks,
-    user: Annotated[CurrentUser, Depends(require_role("esg_manager"))],
+    user: Annotated[CurrentUser, Depends(require_role("admin"))],
 ) -> CalcRunTriggerResponse:
     """Trigger a single-track calc run in the background.
 
     Args:
         body: Request with anno and regulatory_stream.
         background_tasks: FastAPI background task runner.
-        user: Authenticated esg_manager.
+        user: Authenticated admin.
 
     Returns:
         202 response with the new correlation_id.
@@ -308,7 +308,7 @@ async def trigger_calc_run(
         "CSRD_ESRS_E1/AR6 and EU_ETS_PHASE_IV/AR5. "
         "Per Reg. UE 2018/2066 (MRR) + 2018/2067 (Verification), both runs "
         "MUST complete before any EU ETS filing. "
-        "Returns two correlation_ids. Requires esg_manager role."
+        "Returns two correlation_ids. Requires admin role."
     ),
     responses={
         202: {"description": "Both runs accepted and queued"},
@@ -319,7 +319,7 @@ async def trigger_calc_run(
 async def trigger_dual_calc_run(
     body: CalcRunRequest,
     background_tasks: BackgroundTasks,
-    user: Annotated[CurrentUser, Depends(require_role("esg_manager"))],
+    user: Annotated[CurrentUser, Depends(require_role("admin"))],
 ) -> CalcDualRunTriggerResponse:
     """Trigger both CSRD and EU ETS calc runs for the same anno.
 
@@ -329,7 +329,7 @@ async def trigger_dual_calc_run(
     Args:
         body: Request with anno (regulatory_stream is ignored; both are run).
         background_tasks: FastAPI background task runner.
-        user: Authenticated esg_manager.
+        user: Authenticated admin.
 
     Returns:
         202 response with two correlation_ids.
@@ -390,7 +390,7 @@ async def trigger_dual_calc_run(
 )
 async def get_calc_run_status(
     correlation_id: uuid.UUID,
-    user: Annotated[CurrentUser, Depends(require_role("data_steward", "esg_manager", "auditor"))],
+    user: Annotated[CurrentUser, Depends(require_role("editor", "admin", "viewer"))],
     session: Annotated[AsyncSession, Depends(get_db)],
 ) -> CalcRunStatus:
     """Return the ops.calc_runs status row for a correlation_id.

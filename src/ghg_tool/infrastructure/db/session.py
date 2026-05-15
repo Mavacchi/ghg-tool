@@ -60,7 +60,7 @@ async def set_session_gucs(
     Args:
         session: The active async SQLAlchemy session.
         tenant_id: UUID string of the authenticated tenant.
-        role_code: One of 'data_steward', 'esg_manager', 'auditor'.
+        role_code: One of 'editor', 'admin', 'viewer'.
         user_id: UUID string of the authenticated user (optional; used by audit log).
     """
     await session.execute(

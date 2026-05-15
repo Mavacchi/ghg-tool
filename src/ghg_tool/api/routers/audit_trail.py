@@ -1,6 +1,6 @@
 """Audit trail router — GET /api/v1/audit-trail (FR-22, FR-29).
 
-Accessible to esg_manager and auditor only.  Returns the full data lineage
+Accessible to admin and viewer only.  Returns the full data lineage
 from raw ingestion row → calculated emission → factor applied, filterable by
 correlation_id, year, and site.
 """
@@ -40,13 +40,13 @@ router = APIRouter(prefix="/api/v1/audit-trail", tags=["audit-trail"])
         "Returns a joined view of calc.emissions_consolidated ⟶ ref.factor_catalog "
         "with optional raw ingestion row metadata. "
         "Filterable by correlation_id, anno, codice_sito. "
-        "esg_manager and auditor roles only (FR-22, FR-31)."
+        "admin and viewer roles only (FR-22, FR-31)."
     ),
     response_model=AuditTrailResponse,
     responses={
         200: {"description": "Audit trail rows"},
         401: {"description": "Not authenticated"},
-        403: {"description": "Insufficient role — esg_manager or auditor required"},
+        403: {"description": "Insufficient role — admin or viewer required"},
         500: {"description": "Internal error retrieving audit trail"},
     },
 )

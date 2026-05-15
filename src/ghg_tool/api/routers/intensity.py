@@ -7,7 +7,7 @@ SEC-P0-002: direct MV access is REVOKEd from the application role.
 When the view is absent (wave-3 pipeline not yet run), a stub empty
 response is returned so the endpoint is testable without a live database.
 
-RBAC: all three roles may read (data_steward, esg_manager, auditor).
+RBAC: all three roles may read (editor, admin, viewer).
 Read-only: no POST / PUT / PATCH / DELETE on ``/api/v1/intensity*``.
 
 Denominator types (FR-26):

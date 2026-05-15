@@ -1,7 +1,7 @@
 """Factor catalog router - GET + POST for /api/v1/factor-catalog (FR-04).
 
 Includes two-eyes approval workflow for factor publication (FR-12,
-ISAE 3000 §A99): a draft factor requires a second esg_manager to approve
+ISAE 3000 §A99): a draft factor requires a second admin to approve
 before it can be published. The proposer and approver cannot be the same
 user.
 """
@@ -53,7 +53,7 @@ router = APIRouter(prefix="/api/v1/factor-catalog", tags=["factor-catalog"])
 class ApprovalRequestedResponse(BaseModel):
     """Response body when a publish request creates a new approval row.
 
-    Returned with HTTP 202 when the first esg_manager calls /publish.
+    Returned with HTTP 202 when the first admin calls /publish.
 
     Attributes:
         approval_id: UUID of the newly created approval row.
@@ -73,7 +73,7 @@ class PendingApprovalItem(BaseModel):
         approval_id: UUID of the approval row.
         factor_id: UUID of the factor awaiting approval.
         factor_string_id: String factor identifier (e.g. 'WTT_GAS_NAT_DEFRA_2025').
-        proposed_by: UUID of the esg_manager who proposed.
+        proposed_by: UUID of the admin who proposed.
         proposed_at: Timestamp of the proposal.
         reason_code: The publish reason code supplied at proposal time.
     """
@@ -228,14 +228,14 @@ async def _do_publish(
 ) -> FactorCatalogPublishResponse:
     """Execute the actual False->True publish transition and write audit rows.
 
-    Called only when a second esg_manager approves an existing PENDING row.
+    Called only when a second admin approves an existing PENDING row.
     Runs entirely within the caller's DB session (same transaction as the
     approval UPDATE).
 
     Args:
         session: Async DB session (shared transaction).
         factor: Draft FactorCatalog ORM row.
-        user: Authenticated approving esg_manager.
+        user: Authenticated approving admin.
         body: Publish request body (not used for reason_code here; recorded
             on the original proposal row).
         approval: The PENDING FactorPublishApproval row being approved.
@@ -487,15 +487,15 @@ async def list_factor_versions(
     "/",
     response_model=FactorCatalogResponse,
     status_code=status.HTTP_201_CREATED,
-    summary="Add a new factor version (data_steward only, pre-publish only)",
+    summary="Add a new factor version (editor only, pre-publish only)",
     description=(
         "Creates a new version of a factor entry. Once published (is_published=True), "
-        "the DB trigger makes the row immutable (MG-02). data_steward role only."
+        "the DB trigger makes the row immutable (MG-02). editor role only."
     ),
     responses={
         201: {"description": "Factor created"},
         401: {"description": "Not authenticated"},
-        403: {"description": "Insufficient role - data_steward required"},
+        403: {"description": "Insufficient role - editor required"},
         422: {"description": "Validation error"},
     },
 )
@@ -504,18 +504,18 @@ async def create_factor(
     user: CurrentUser = Depends(require_permission("factor_catalog", "write")),
     session: AsyncSession = Depends(get_db),
 ) -> FactorCatalogResponse:
-    """Create a new factor catalog entry (data_steward only).
+    """Create a new factor catalog entry (editor only).
 
     Args:
         body: Validated ``FactorCatalogCreate`` payload.
-        user: Authenticated data_steward user.
+        user: Authenticated editor user.
         session: Authenticated DB session.
 
     Returns:
         The created ``FactorCatalogResponse``.
 
     Raises:
-        HTTPException: 403 if role is not data_steward.
+        HTTPException: 403 if role is not editor.
     """
     correlation_id = get_correlation_id()
     log = logger.bind(correlation_id=correlation_id, user=user.sub[:8])
@@ -564,15 +564,15 @@ async def create_factor(
     "/pending-approvals",
     response_model=list[PendingApprovalItem],
     status_code=status.HTTP_200_OK,
-    summary="List pending factor publish approvals (esg_manager only)",
+    summary="List pending factor publish approvals (admin only)",
     description=(
         "Returns all factor approval requests in the PENDING state for the "
-        "caller's tenant. esg_manager only."
+        "caller's tenant. admin only."
     ),
     responses={
         200: {"description": "List of pending approvals"},
         401: {"description": "Not authenticated"},
-        403: {"description": "Insufficient role - esg_manager required"},
+        403: {"description": "Insufficient role - admin required"},
     },
 )
 async def list_pending_approvals(
@@ -585,7 +585,7 @@ async def list_pending_approvals(
     string alongside the UUID.
 
     Args:
-        user: Authenticated esg_manager from JWT.
+        user: Authenticated admin from JWT.
         session: Async DB session.
 
     Returns:
@@ -633,7 +633,7 @@ async def list_pending_approvals(
     "/approvals/{approval_uuid}/reject",
     response_model=ApprovalRejectResponse,
     status_code=status.HTTP_200_OK,
-    summary="Reject a pending factor publish approval (esg_manager only)",
+    summary="Reject a pending factor publish approval (admin only)",
     description=(
         "Marks the approval as REJECTED with mandatory decision_notes. "
         "The factor remains in DRAFT state. Writes an audit_log row and "
@@ -642,7 +642,7 @@ async def list_pending_approvals(
     responses={
         200: {"description": "Approval rejected, factor remains DRAFT"},
         401: {"description": "Not authenticated"},
-        403: {"description": "Insufficient role - esg_manager required"},
+        403: {"description": "Insufficient role - admin required"},
         404: {"description": "Approval not found or belongs to a different tenant"},
         422: {"description": "rejection_reason too short (min 10 chars)"},
     },
@@ -660,7 +660,7 @@ async def reject_approval(
         approval_uuid: UUID of the approval row from the URL path.
         request: HTTP request (for audit metadata).
         body: ``ApprovalRejectRequest`` with mandatory rejection_reason.
-        user: Authenticated esg_manager from JWT.
+        user: Authenticated admin from JWT.
         session: Async DB session.
 
     Returns:
@@ -767,13 +767,13 @@ async def reject_approval(
 @router.post(
     "/{factor_uuid}/publish",
     status_code=status.HTTP_200_OK,
-    summary="Publish a draft factor - two-eyes approval (esg_manager only)",
+    summary="Publish a draft factor - two-eyes approval (admin only)",
     description=(
         "Implements the ISAE 3000 §A99 two-eyes principle:\n\n"
-        "1. First esg_manager calls /publish -> 202: approval row created "
+        "1. First admin calls /publish -> 202: approval row created "
         "(PENDING), reason_code captured.\n"
-        "2. Same esg_manager calls /publish again -> 409 self_approval_forbidden.\n"
-        "3. Different esg_manager calls /publish -> 200: factor published, "
+        "2. Same admin calls /publish again -> 409 self_approval_forbidden.\n"
+        "3. Different admin calls /publish -> 200: factor published, "
         "approval marked APPROVED.\n"
         "4. If already APPROVED (published) -> 409 already_published.\n\n"
         "The body's ``reason_code`` is captured on the INITIAL call only; "
@@ -781,10 +781,10 @@ async def reject_approval(
         "**Rate limit**: 10 publish calls per user per minute."
     ),
     responses={
-        200: {"description": "Factor published (second esg_manager approved)"},
-        202: {"description": "Approval requested, awaiting second esg_manager"},
+        200: {"description": "Factor published (second admin approved)"},
+        202: {"description": "Approval requested, awaiting second admin"},
         401: {"description": "Not authenticated"},
-        403: {"description": "Insufficient role - esg_manager required"},
+        403: {"description": "Insufficient role - admin required"},
         404: {"description": "Factor not found or belongs to a different tenant"},
         409: {
             "description": (
@@ -807,14 +807,14 @@ async def publish_factor(
     State machine:
     - No approval row + draft factor -> create PENDING row -> 202.
     - PENDING row + same proposer -> 409 self_approval_forbidden.
-    - PENDING row + different esg_manager -> publish + APPROVED -> 200.
+    - PENDING row + different admin -> publish + APPROVED -> 200.
     - Factor already published (or APPROVED approval exists) -> 409.
 
     Args:
         factor_uuid: UUID primary key of the draft factor row.
         request: HTTP request (for audit metadata).
         body: Required publish payload with ``reason_code`` + optional notes.
-        user: Authenticated esg_manager from JWT.
+        user: Authenticated admin from JWT.
         session: Async DB session.
 
     Returns:
@@ -946,7 +946,7 @@ async def publish_factor(
             status_code=status.HTTP_202_ACCEPTED,
             content={
                 "approval_id": str(new_approval.id),
-                "message": "Approval requested, awaiting second esg_manager",
+                "message": "Approval requested, awaiting second admin",
             },
         )
 
@@ -957,14 +957,14 @@ async def publish_factor(
             status.HTTP_409_CONFLICT,
             "Conflict",
             (
-                "The same esg_manager who proposed the approval cannot also "
+                "The same admin who proposed the approval cannot also "
                 "approve it (ISAE 3000 two-eyes principle)."
             ),
             "self_approval_forbidden",
             correlation_id,
         )
 
-    # State 3: PENDING row + different esg_manager -> approve and publish.
+    # State 3: PENDING row + different admin -> approve and publish.
     return await _do_publish(
         session=session,
         factor=factor,
@@ -986,7 +986,7 @@ async def publish_factor(
     "/{factor_uuid}",
     response_model=FactorCatalogResponse,
     status_code=status.HTTP_200_OK,
-    summary="Update mutable fields on a DRAFT factor (data_steward only)",
+    summary="Update mutable fields on a DRAFT factor (editor only)",
     description=(
         "Allows partial updates to a factor catalog entry **before** it is "
         "published.  Send only the fields you want to change.\n\n"
@@ -1003,7 +1003,7 @@ async def publish_factor(
     responses={
         200: {"description": "Factor updated; returns the full updated row."},
         401: {"description": "Not authenticated"},
-        403: {"description": "Insufficient role - data_steward required"},
+        403: {"description": "Insufficient role - editor required"},
         404: {"description": "Factor not found or belongs to a different tenant"},
         422: {"description": "factor_already_published: row is immutable per ADR-007"},
     },
@@ -1021,7 +1021,7 @@ async def patch_factor(
         factor_uuid: UUID primary key of the target factor row.
         request: HTTP request (for audit metadata).
         body: ``FactorCatalogUpdate`` payload; all fields optional.
-        user: Authenticated data_steward user.
+        user: Authenticated editor user.
         session: Async DB session.
 
     Returns:
@@ -1152,7 +1152,7 @@ async def patch_factor(
     "/{factor_uuid}",
     status_code=status.HTTP_204_NO_CONTENT,
     response_model=None,
-    summary="Delete a DRAFT factor row (data_steward only)",
+    summary="Delete a DRAFT factor row (editor only)",
     description=(
         "Permanently removes a factor catalog entry that has **not yet been "
         "published** (``is_published=False``).\n\n"
@@ -1166,7 +1166,7 @@ async def patch_factor(
     responses={
         204: {"description": "Factor deleted successfully."},
         401: {"description": "Not authenticated"},
-        403: {"description": "Insufficient role - data_steward required"},
+        403: {"description": "Insufficient role - editor required"},
         404: {"description": "Factor not found or belongs to a different tenant"},
         422: {"description": "factor_already_published: row is immutable per ADR-007"},
     },
@@ -1177,12 +1177,12 @@ async def delete_factor(
     user: CurrentUser = Depends(require_permission("factor_catalog", "write")),
     session: AsyncSession = Depends(get_db),
 ) -> None:
-    """Delete a DRAFT factor row (data_steward only).
+    """Delete a DRAFT factor row (editor only).
 
     Args:
         factor_uuid: UUID primary key of the target factor row.
         request: HTTP request (for audit metadata).
-        user: Authenticated data_steward user.
+        user: Authenticated editor user.
         session: Async DB session.
 
     Returns:

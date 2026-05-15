@@ -1,8 +1,8 @@
 """Exports router — PDF and Excel generation job management (FR-27, FR-28).
 
 Endpoints:
-  POST /api/v1/exports/pdf     → start PDF job (esg_manager+)
-  POST /api/v1/exports/xlsx    → start XLSX job (esg_manager or data_steward)
+  POST /api/v1/exports/pdf     → start PDF job (admin+)
+  POST /api/v1/exports/xlsx    → start XLSX job (admin or editor)
   GET  /api/v1/exports/jobs/{job_id}          → job status
   GET  /api/v1/exports/jobs/{job_id}/download → binary stream (PDF/XLSX)
 """
@@ -41,16 +41,16 @@ router = APIRouter(prefix="/api/v1/exports", tags=["exports"])
     "/pdf",
     response_model=ReportJobStatus,
     status_code=status.HTTP_202_ACCEPTED,
-    summary="Trigger CSRD ESRS E1-6 PDF report generation (esg_manager+)",
+    summary="Trigger CSRD ESRS E1-6 PDF report generation (admin+)",
     description=(
         "Enqueues a PDF generation job (WeasyPrint). Returns a job_id for polling. "
-        "esg_manager role required (FR-28). "
+        "admin role required (FR-28). "
         "MVP: synchronous in-process; replace with Celery in production."
     ),
     responses={
         202: {"description": "Job accepted"},
         401: {"description": "Not authenticated"},
-        403: {"description": "Insufficient role — esg_manager required"},
+        403: {"description": "Insufficient role — admin required"},
         422: {"description": "Validation error"},
     },
 )
@@ -62,7 +62,7 @@ async def trigger_pdf(
 
     Args:
         body: PdfReportRequest with anno, gwp_set, language, stream.
-        user: Authenticated esg_manager user.
+        user: Authenticated admin user.
 
     Returns:
         ReportJobStatus with status='PENDING' and the new job_id.
@@ -88,10 +88,10 @@ async def trigger_pdf(
     "/xlsx",
     response_model=ReportJobStatus,
     status_code=status.HTTP_202_ACCEPTED,
-    summary="Trigger multi-sheet Excel export (esg_manager or data_steward)",
+    summary="Trigger multi-sheet Excel export (admin or editor)",
     description=(
         "Enqueues an Excel generation job (openpyxl, 11 sheets). Returns job_id. "
-        "esg_manager or data_steward role required (FR-27). "
+        "admin or editor role required (FR-27). "
         "MVP: synchronous in-process; replace with Celery in production."
     ),
     responses={

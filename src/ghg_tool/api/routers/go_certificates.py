@@ -99,16 +99,16 @@ async def list_go_certificates(
     "/",
     response_model=GoCertificateResponse,
     status_code=status.HTTP_201_CREATED,
-    summary="Create a GO certificate evidence record (data_steward only)",
+    summary="Create a GO certificate evidence record (editor only)",
     description=(
         "Creates a new GO certificate evidence row with QC1-QC8 boolean checks "
         "per GHG Protocol Scope 2 Quality Criteria (methodology_validation §2.4). "
-        "data_steward role only."
+        "editor role only."
     ),
     responses={
         201: {"description": "GO certificate created"},
         401: {"description": "Not authenticated"},
-        403: {"description": "Insufficient role — data_steward required"},
+        403: {"description": "Insufficient role — editor required"},
         422: {"description": "Validation error"},
     },
 )
@@ -121,7 +121,7 @@ async def create_go_certificate(
 
     Args:
         body: Validated ``GoCertificateCreate`` payload.
-        user: Authenticated data_steward user.
+        user: Authenticated editor user.
         session: Authenticated DB session.
 
     Returns:
@@ -169,12 +169,12 @@ async def create_go_certificate(
     description=(
         "Creates a new GO certificate evidence row with the same go_id, updated QC checks, "
         "and a new validated_at timestamp. Append-only — never overwrites the original. "
-        "data_steward role only."
+        "editor role only."
     ),
     responses={
         201: {"description": "Validation version created"},
         401: {"description": "Not authenticated"},
-        403: {"description": "Insufficient role — data_steward required"},
+        403: {"description": "Insufficient role — editor required"},
         404: {"description": "GO certificate not found"},
     },
 )
@@ -192,7 +192,7 @@ async def validate_go_certificate(
     Args:
         go_id: The GSE GO certificate identifier.
         body: ``GoValidationPatch`` with optional QC field overrides.
-        user: Authenticated data_steward user.
+        user: Authenticated editor user.
         session: Authenticated DB session.
 
     Returns:

@@ -2,8 +2,8 @@
 
 Endpoints:
   GET  /api/v1/sbti/targets                       List targets (all roles).
-  POST /api/v1/sbti/targets                       Create target (esg_manager).
-  PATCH /api/v1/sbti/targets/{uuid}/deactivate    Deactivate (esg_manager).
+  POST /api/v1/sbti/targets                       Create target (admin).
+  PATCH /api/v1/sbti/targets/{uuid}/deactivate    Deactivate (admin).
   GET  /api/v1/sbti/targets/{uuid}/trajectory     Trajectory + actuals (all roles).
 
 Immutability invariant: only ``is_active`` True->False is permitted on existing
@@ -245,13 +245,13 @@ async def _load_actuals(
     summary="List SBTi targets for the caller's tenant",
     description=(
         "Returns all active SBTi targets for the authenticated tenant. "
-        "Query ``?include_inactive=true`` is restricted to esg_manager. "
+        "Query ``?include_inactive=true`` is restricted to admin. "
         "All authenticated roles may read active targets."
     ),
     responses={
         200: {"description": "List of SBTi targets"},
         401: {"description": "Not authenticated"},
-        403: {"description": "include_inactive=true requires esg_manager role"},
+        403: {"description": "include_inactive=true requires admin role"},
     },
 )
 async def list_targets(
@@ -262,7 +262,7 @@ async def list_targets(
     """List SBTi targets.
 
     Args:
-        include_inactive: When True, include deactivated targets. esg_manager only.
+        include_inactive: When True, include deactivated targets. admin only.
         user: Authenticated user (any role).
         session: Async DB session.
 
@@ -270,16 +270,16 @@ async def list_targets(
         List of SbtiTargetResponse sorted by target_year descending.
 
     Raises:
-        HTTPException: 403 if non-esg_manager requests include_inactive=true.
+        HTTPException: 403 if non-admin requests include_inactive=true.
     """
     correlation_id = get_correlation_id()
     log = logger.bind(correlation_id=correlation_id, user=user.sub)
 
-    if include_inactive and user.role != "esg_manager":
+    if include_inactive and user.role != "admin":
         raise _problem(
             status.HTTP_403_FORBIDDEN,
             "Forbidden",
-            "include_inactive=true requires esg_manager role.",
+            "include_inactive=true requires admin role.",
             "insufficient_role",
             correlation_id,
         )
@@ -306,7 +306,7 @@ async def list_targets(
     "/targets",
     response_model=SbtiTargetResponse,
     status_code=status.HTTP_201_CREATED,
-    summary="Create a new SBTi target (esg_manager only)",
+    summary="Create a new SBTi target (admin only)",
     description=(
         "Creates a new append-only SBTi reduction target for the caller's tenant. "
         "All domain invariants (year order, tco2e bounds, enum checks) are enforced "
@@ -315,7 +315,7 @@ async def list_targets(
     responses={
         201: {"description": "Target created"},
         401: {"description": "Not authenticated"},
-        403: {"description": "Requires esg_manager role"},
+        403: {"description": "Requires admin role"},
         409: {"description": "Active target for this scope_coverage already exists"},
         422: {"description": "Payload failed domain invariant validation"},
     },
@@ -323,7 +323,7 @@ async def list_targets(
 async def create_target(
     body: SbtiTargetCreate,
     request: Request,
-    user: CurrentUser = Depends(require_role("esg_manager")),
+    user: CurrentUser = Depends(require_role("admin")),
     session: AsyncSession = Depends(get_db),
 ) -> SbtiTargetResponse:
     """Create a new SBTi reduction target.
@@ -331,7 +331,7 @@ async def create_target(
     Args:
         body: Validated target payload.
         request: Raw request for IP and user-agent extraction.
-        user: Authenticated esg_manager.
+        user: Authenticated admin.
         session: Async DB session.
 
     Returns:
@@ -463,7 +463,7 @@ async def create_target(
     "/targets/{target_id}/deactivate",
     response_model=SbtiTargetResponse,
     status_code=status.HTTP_200_OK,
-    summary="Deactivate an SBTi target (esg_manager only)",
+    summary="Deactivate an SBTi target (admin only)",
     description=(
         "Sets is_active=False on the specified target. This is the ONLY mutation "
         "permitted on a target row; the DB trigger enforces this. Writes to "
@@ -472,7 +472,7 @@ async def create_target(
     responses={
         200: {"description": "Target deactivated"},
         401: {"description": "Not authenticated"},
-        403: {"description": "Requires esg_manager role"},
+        403: {"description": "Requires admin role"},
         404: {"description": "Target not found in this tenant"},
         409: {"description": "Target is already inactive"},
     },
@@ -480,7 +480,7 @@ async def create_target(
 async def deactivate_target(
     target_id: uuid.UUID,
     request: Request,
-    user: CurrentUser = Depends(require_role("esg_manager")),
+    user: CurrentUser = Depends(require_role("admin")),
     session: AsyncSession = Depends(get_db),
 ) -> SbtiTargetResponse:
     """Deactivate an SBTi target (is_active True -> False).
@@ -488,7 +488,7 @@ async def deactivate_target(
     Args:
         target_id: UUID from the URL path.
         request: Raw request for IP and user-agent extraction.
-        user: Authenticated esg_manager.
+        user: Authenticated admin.
         session: Async DB session.
 
     Returns:

@@ -76,7 +76,7 @@ class FactorCatalogResponse(BaseModel):
 
 
 class FactorCatalogCreate(BaseModel):
-    """Payload for ``POST /api/v1/factor-catalog`` (data_steward only).
+    """Payload for ``POST /api/v1/factor-catalog`` (editor only).
 
     Creates a NEW version of a factor entry.  Pre-published factors may
     have ``value=None`` when licence restrictions apply.  Once published,
@@ -159,7 +159,7 @@ class FactorCatalogCreate(BaseModel):
 
 
 class FactorCatalogUpdate(BaseModel):
-    """Payload for ``PATCH /api/v1/factor-catalog/{factor_uuid}`` (data_steward only).
+    """Payload for ``PATCH /api/v1/factor-catalog/{factor_uuid}`` (editor only).
 
     All fields are optional — send only the fields to update.  Identity
     fields (``factor_id``, ``version``, ``gwp_set``, ``source``, ``substance``,

@@ -22,7 +22,7 @@ def require_role(*allowed_roles: str) -> Callable[..., Any]:
     Usage::
 
         @router.post("/")
-        async def create(..., _: CurrentUser = Depends(require_role("data_steward"))):
+        async def create(..., _: CurrentUser = Depends(require_role("editor"))):
             ...
 
     Args:

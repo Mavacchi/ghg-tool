@@ -1,4 +1,4 @@
-"""Users router - administrative endpoints (esg_manager only).
+"""Users router - administrative endpoints (admin only).
 
 Exposes the minimum set of operations the admin tier needs from the UI
 without having to drop to the ``scripts/create_user.py`` CLI:
@@ -9,7 +9,7 @@ without having to drop to the ``scripts/create_user.py`` CLI:
   - ``PATCH /api/v1/users/{user_uuid}/role``      - change role.
   - ``POST /api/v1/users/{user_uuid}/password-reset`` - admin password reset.
 
-All write endpoints require ``users.write`` (esg_manager only).
+All write endpoints require ``users.write`` (admin only).
 """
 
 from __future__ import annotations
@@ -42,7 +42,7 @@ logger = structlog.get_logger(__name__)
 
 router = APIRouter(prefix="/api/v1/users", tags=["users"])
 
-_VALID_ROLES = frozenset({"data_steward", "esg_manager", "auditor"})
+_VALID_ROLES = frozenset({"editor", "admin", "viewer"})
 
 # Alphabet for server-side password generation: all printable ASCII except
 # ambiguous characters (0, O, I, l) and shell-special characters.
@@ -127,11 +127,11 @@ async def _fetch_user_in_tenant(
     }
 
 
-async def _count_active_esg_managers(
+async def _count_active_admins(
     session: AsyncSession,
     tenant_id: str,
 ) -> int:
-    """Count active esg_manager rows in the tenant.
+    """Count active admin rows in the tenant.
 
     Used to enforce the 'last_admin' guard on deactivation and role demotion.
 
@@ -140,14 +140,14 @@ async def _count_active_esg_managers(
         tenant_id: Caller's tenant UUID string from the JWT.
 
     Returns:
-        Number of active esg_manager users in the tenant.
+        Number of active admin users in the tenant.
     """
     result = await session.execute(
         text(
             "SELECT COUNT(*) FROM ref.users u "
             "JOIN ref.roles r ON r.id = u.role_id "
             "WHERE u.tenant_id = CAST(:tenant AS uuid) "
-            "  AND r.role_code = 'esg_manager' "
+            "  AND r.role_code = 'admin' "
             "  AND u.is_active = TRUE"
         ),
         {"tenant": tenant_id},
@@ -199,7 +199,7 @@ def _problem(
     summary="List users in the caller's tenant (admin only)",
     description=(
         "Returns all users belonging to the caller's tenant. Password hashes "
-        "are never returned. ``esg_manager`` role required."
+        "are never returned. ``admin`` role required."
     ),
     responses={
         200: {"description": "Users list"},
@@ -255,7 +255,7 @@ async def list_users(
         "Inserts a new row in ``ref.users`` with a bcrypt-hashed password. "
         "The plaintext password is never logged or persisted. Returns 409 "
         "on UNIQUE (tenant_id, username) or (tenant_id, email) violation. "
-        "``esg_manager`` role required."
+        "``admin`` role required."
     ),
     responses={
         201: {"description": "User created"},
@@ -273,8 +273,8 @@ async def create_user(
 ) -> UserCreateResponse:
     """Create a new user in the caller's tenant.
 
-    The role_code must be one of the seeded values (data_steward,
-    esg_manager, auditor). Cross-tenant creation is impossible: the
+    The role_code must be one of the seeded values (editor,
+    admin, viewer). Cross-tenant creation is impossible: the
     new row's tenant_id is taken from the caller's JWT, never from
     the request body.
     """
@@ -414,12 +414,12 @@ async def create_user(
     "/{user_uuid}/active",
     response_model=UserListItem,
     status_code=status.HTTP_200_OK,
-    summary="Activate or deactivate a user (esg_manager only)",
+    summary="Activate or deactivate a user (admin only)",
     description=(
         "Updates the ``is_active`` flag for the target user within the "
         "caller's tenant. Cannot deactivate the caller's own account "
         "(422 ``self_deactivation_forbidden``) or the last active "
-        "esg_manager in the tenant (422 ``last_admin``). Writes an "
+        "admin in the tenant (422 ``last_admin``). Writes an "
         "audit_log row and emits a SIEM event in the same transaction."
     ),
     responses={
@@ -448,7 +448,7 @@ async def patch_user_active(
         user_uuid: Target user UUID from the URL path.
         request: HTTP request (for audit metadata).
         body: ``UserActivePatchRequest`` with the desired ``is_active`` flag.
-        caller: Authenticated esg_manager from JWT.
+        caller: Authenticated admin from JWT.
         session: Async DB session.
 
     Returns:
@@ -492,15 +492,15 @@ async def patch_user_active(
             correlation_id,
         )
 
-    # Guard: refuse to deactivate the last active esg_manager.
-    if not body.is_active and target["role_code"] == "esg_manager":
-        active_managers = await _count_active_esg_managers(session, caller.tenant_id)
+    # Guard: refuse to deactivate the last active admin.
+    if not body.is_active and target["role_code"] == "admin":
+        active_managers = await _count_active_admins(session, caller.tenant_id)
         if active_managers <= 1:
             log.warning("patch_user_active_last_admin_blocked")
             raise _problem(
                 status.HTTP_422_UNPROCESSABLE_ENTITY,
                 "Unprocessable Entity",
-                "Cannot deactivate the last active esg_manager in this tenant.",
+                "Cannot deactivate the last active admin in this tenant.",
                 "last_admin",
                 correlation_id,
             )
@@ -577,10 +577,10 @@ async def patch_user_active(
     "/{user_uuid}/role",
     response_model=UserListItem,
     status_code=status.HTTP_200_OK,
-    summary="Change a user's role (esg_manager only)",
+    summary="Change a user's role (admin only)",
     description=(
         "Assigns a new role to the target user within the caller's tenant. "
-        "Refuses to demote the last active esg_manager (422 ``last_admin``). "
+        "Refuses to demote the last active admin (422 ``last_admin``). "
         "Writes an audit_log row with before/after role_code and emits a "
         "SIEM event at severity WARN (privilege change)."
     ),
@@ -589,7 +589,7 @@ async def patch_user_active(
         401: {"description": "Not authenticated"},
         403: {"description": "Insufficient role"},
         404: {"description": "User not found or belongs to a different tenant"},
-        422: {"description": "last_admin - would remove the last esg_manager"},
+        422: {"description": "last_admin - would remove the last admin"},
     },
 )
 async def patch_user_role(
@@ -603,13 +603,13 @@ async def patch_user_role(
 
     The new role_code is validated by the Pydantic Literal before the handler
     runs.  The handler then resolves the role_id FK from ref.roles, guards
-    against removing the last esg_manager, and performs the UPDATE.
+    against removing the last admin, and performs the UPDATE.
 
     Args:
         user_uuid: Target user UUID from the URL path.
         request: HTTP request (for audit metadata).
         body: ``UserRolePatchRequest`` with the desired ``role_code``.
-        caller: Authenticated esg_manager from JWT.
+        caller: Authenticated admin from JWT.
         session: Async DB session.
 
     Returns:
@@ -617,7 +617,7 @@ async def patch_user_role(
 
     Raises:
         HTTPException: 404 if not found or wrong tenant.
-        HTTPException: 422 if demoting the last active esg_manager.
+        HTTPException: 422 if demoting the last active admin.
         HTTPException: 500 if ref.roles seed is missing.
     """
     correlation_id = get_correlation_id()
@@ -643,19 +643,19 @@ async def patch_user_role(
             correlation_id,
         )
 
-    # Guard: refuse to demote the last active esg_manager.
+    # Guard: refuse to demote the last active admin.
     if (
-        target["role_code"] == "esg_manager"
-        and body.role_code != "esg_manager"
+        target["role_code"] == "admin"
+        and body.role_code != "admin"
         and target["is_active"]
     ):
-        active_managers = await _count_active_esg_managers(session, caller.tenant_id)
+        active_managers = await _count_active_admins(session, caller.tenant_id)
         if active_managers <= 1:
             log.warning("patch_user_role_last_admin_blocked")
             raise _problem(
                 status.HTTP_422_UNPROCESSABLE_ENTITY,
                 "Unprocessable Entity",
-                "Cannot demote the last active esg_manager in this tenant.",
+                "Cannot demote the last active admin in this tenant.",
                 "last_admin",
                 correlation_id,
             )
@@ -767,7 +767,7 @@ def _generate_password(length: int = 16) -> str:
     "/{user_uuid}/password-reset",
     response_model=UserPasswordResetResponse,
     status_code=status.HTTP_200_OK,
-    summary="Admin password reset (esg_manager only)",
+    summary="Admin password reset (admin only)",
     description=(
         "Resets the target user's password within the caller's tenant. "
         "If ``new_password`` is null or omitted, a secure 16-character "
@@ -799,7 +799,7 @@ async def reset_user_password(
         user_uuid: Target user UUID from the URL path.
         request: HTTP request (for audit metadata).
         body: Optional ``UserPasswordResetRequest``; may be omitted entirely.
-        caller: Authenticated esg_manager from JWT.
+        caller: Authenticated admin from JWT.
         session: Async DB session.
 
     Returns:

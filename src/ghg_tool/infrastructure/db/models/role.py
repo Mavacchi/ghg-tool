@@ -10,13 +10,13 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from ghg_tool.infrastructure.db.base import Base
 
-VALID_ROLE_CODES = frozenset({"data_steward", "esg_manager", "auditor"})
+VALID_ROLE_CODES = frozenset({"editor", "admin", "viewer"})
 
 
 class Role(Base):
     """RBAC role definition (ref.roles).
 
-    Three roles are seeded in M0: data_steward, esg_manager, auditor.
+    Three roles are seeded in M0: editor, admin, viewer.
     """
 
     __tablename__ = "roles"
