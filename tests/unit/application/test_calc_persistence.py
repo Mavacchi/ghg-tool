@@ -9,14 +9,11 @@ Coverage:
 
 from __future__ import annotations
 
-import asyncio
 import uuid
 from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
-
-import pytest
 
 from ghg_tool.application.services.calc_persistence import (
     CalcPersistResult,
@@ -436,7 +433,7 @@ class TestDualRunIdBinding:
             mock_orch.run.return_value = [fake_emission]
             mock_orch_cls.return_value = mock_orch
 
-            result = run_calc_and_persist(
+            run_calc_and_persist(
                 tenant_id=_TENANT_ID,
                 anno=_ANNO,
                 correlation_id=_CORRELATION_ID,
@@ -496,7 +493,6 @@ class TestDualRunIdBinding:
         sync_engine = _make_sync_engine([], [], [], [])
         session_factory, _ = _make_async_session_factory()
 
-        uuid4_call_count_at_db_call: list[int] = []
         original_uuid4 = uuid.uuid4
 
         uuid4_calls: list[uuid.UUID] = []

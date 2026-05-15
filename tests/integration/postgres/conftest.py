@@ -46,7 +46,6 @@ from sqlalchemy.ext.asyncio import (
 from sqlalchemy.pool import NullPool
 from testcontainers.postgres import PostgresContainer  # type: ignore[import-untyped]
 
-
 # ---------------------------------------------------------------------------
 # Container and URL constants
 # ---------------------------------------------------------------------------

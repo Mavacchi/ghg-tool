@@ -21,7 +21,7 @@ from __future__ import annotations
 import os
 import uuid
 from collections.abc import AsyncGenerator
-from datetime import UTC, date, datetime
+from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -30,7 +30,6 @@ os.environ.setdefault("GHG_JWT_ALGORITHM", "HS256")
 os.environ.setdefault("GHG_JWT_SECRET", "test-secret-key-for-unit-tests-only")
 os.environ.setdefault("GHG_ENVIRONMENT", "development")
 
-import pytest
 from fastapi.testclient import TestClient
 
 from ghg_tool.api.dependencies.auth import CurrentUser, get_current_user
@@ -214,9 +213,11 @@ def test_create_target_201() -> None:
     app.dependency_overrides[get_current_user] = _auth("esg_manager", _ESG_USER)
     app.dependency_overrides[get_db] = _db
     try:
-        with patch("ghg_tool.api.routers.sbti.siem.emit"):
-            with TestClient(app, raise_server_exceptions=False) as client:
-                resp = client.post(_CREATE_URL, json=_VALID_BODY)
+        with (
+            patch("ghg_tool.api.routers.sbti.siem.emit"),
+            TestClient(app, raise_server_exceptions=False) as client,
+        ):
+            resp = client.post(_CREATE_URL, json=_VALID_BODY)
         assert resp.status_code == 201, resp.text
         data = resp.json()
         assert data["scope_coverage"] == "S1+S2_MB"
@@ -269,7 +270,7 @@ def test_create_target_422_year_order() -> None:
 def test_deactivate_target_200() -> None:
     """esg_manager can deactivate an active target."""
     active_row = _make_target_orm(is_active=True)
-    inactive_row = _make_target_orm(is_active=False)
+    _make_target_orm(is_active=False)
 
     mock_session = AsyncMock()
     fetch_result = MagicMock()
@@ -301,9 +302,11 @@ def test_deactivate_target_200() -> None:
     app.dependency_overrides[get_current_user] = _auth("esg_manager", _ESG_USER)
     app.dependency_overrides[get_db] = _db
     try:
-        with patch("ghg_tool.api.routers.sbti.siem.emit"):
-            with TestClient(app, raise_server_exceptions=False) as client:
-                resp = client.patch(_DEACTIVATE_URL)
+        with (
+            patch("ghg_tool.api.routers.sbti.siem.emit"),
+            TestClient(app, raise_server_exceptions=False) as client,
+        ):
+            resp = client.patch(_DEACTIVATE_URL)
         assert resp.status_code == 200, resp.text
         assert resp.json()["is_active"] is False
     finally:

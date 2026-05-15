@@ -71,7 +71,7 @@ def _render_annotations_panel(
         anchor_year: Year to filter annotations by (may be None for all years).
         role: The authenticated user's role code.
     """
-    _NOTE_SEVERITIES = {
+    _NOTE_SEVERITIES = {  # noqa: N806
         "INFO": st.info,
         "WARNING": st.warning,
         "CRITICAL": st.error,
@@ -139,7 +139,7 @@ def _render_annotations_panel(
                             st.rerun()
 
 
-def _render_hotspot_tab(
+def _render_hotspot_tab(  # noqa: C901
     *,
     lang: str,
     year: int,
@@ -157,7 +157,7 @@ def _render_hotspot_tab(
     """
     import uuid as _uuid
     from datetime import UTC as _UTC, datetime as _dt
-    from decimal import Decimal as _D
+    from decimal import Decimal as _D  # noqa: N814
 
     import pandas as _pd
     import plotly.graph_objects as _go

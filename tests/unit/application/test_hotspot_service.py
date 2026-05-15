@@ -117,7 +117,7 @@ def test_flag_high_concentration_off_when_top5_below_threshold() -> None:
     emissions = [_em(sub_scope=s, tco2e="100") for s in subs]
     out = compute_hotspots(emissions_current=emissions)
     # top5 = 500/700 ~= 71.4% which is below the 80% threshold.
-    assert CONCENTRATION_THRESHOLD == Decimal("80")
+    assert Decimal("80") == CONCENTRATION_THRESHOLD
     assert not any(e.flag_high_concentration for e in out)
 
 

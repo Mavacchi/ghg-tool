@@ -23,7 +23,6 @@ os.environ.setdefault("GHG_JWT_ALGORITHM", "HS256")
 os.environ.setdefault("GHG_JWT_SECRET", "test-secret-key-for-unit-tests-only")
 os.environ.setdefault("GHG_ENVIRONMENT", "development")
 
-import pytest
 from fastapi.testclient import TestClient
 
 from ghg_tool.api.dependencies.auth import CurrentUser, get_current_user
@@ -150,7 +149,7 @@ def test_propose_reject_propose_again_202() -> None:
         a new approval row.
     """
     factor = _make_factor_orm(is_published=False)
-    rejected_approval = _make_approval_orm(
+    _make_approval_orm(
         decision="REJECTED", approval_id=_APPROVAL_UUID_1, proposed_by=_ESG1
     )
 

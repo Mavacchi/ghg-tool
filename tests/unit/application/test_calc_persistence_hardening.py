@@ -16,7 +16,7 @@ import uuid
 from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, call, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -272,8 +272,8 @@ class TestSetSessionGucsCalledBeforeInsert:
 
     def test_set_session_gucs_called_before_insert_exec(self) -> None:
         """set_session_gucs must be the very first awaited call in the transaction."""
-        from ghg_tool.domain.entities.emission_record import EmissionRecord
         from ghg_tool.application.services.calc_persistence import _persist_emissions
+        from ghg_tool.domain.entities.emission_record import EmissionRecord
 
         now = datetime.now(UTC)
         record = EmissionRecord(
@@ -350,7 +350,9 @@ class TestSetSessionGucsCalledBeforeInsert:
 class TestSchedulerEnvGating:
     """start_scheduler() must not start a scheduler when the env var is unset."""
 
-    def test_scheduler_not_started_when_env_var_unset(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_scheduler_not_started_when_env_var_unset(  # noqa: E501
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """start_scheduler returns None when GHG_CALC_SCHEDULE_CRON is not set."""
         monkeypatch.delenv("GHG_CALC_SCHEDULE_CRON", raising=False)
 
@@ -359,11 +361,14 @@ class TestSchedulerEnvGating:
         result = start_scheduler(anno=2025)
         assert result is None
 
-    def test_scheduler_not_started_when_env_var_empty(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_scheduler_not_started_when_env_var_empty(  # noqa: E501
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """start_scheduler returns None when GHG_CALC_SCHEDULE_CRON is empty string."""
         monkeypatch.setenv("GHG_CALC_SCHEDULE_CRON", "")
 
         from importlib import reload
+
         import ghg_tool.infrastructure.scheduling.calc_scheduler as mod
         reload(mod)
 
@@ -384,12 +389,15 @@ class TestSchedulerEnvGating:
             {
                 "apscheduler": MagicMock(),
                 "apscheduler.schedulers": MagicMock(),
-                "apscheduler.schedulers.background": MagicMock(BackgroundScheduler=mock_scheduler_cls),
+                "apscheduler.schedulers.background": MagicMock(  # noqa: E501
+                    BackgroundScheduler=mock_scheduler_cls
+                ),
                 "apscheduler.triggers": MagicMock(),
                 "apscheduler.triggers.cron": MagicMock(CronTrigger=mock_trigger_cls),
             },
         ):
             from importlib import reload
+
             import ghg_tool.infrastructure.scheduling.calc_scheduler as mod
             reload(mod)
 
@@ -410,9 +418,9 @@ class TestCalcTriggerEndpoint:
     """POST /api/v1/calc/run returns 202 with a correlation_id."""
 
     def _make_app(self) -> Any:
-        from fastapi.testclient import TestClient
-        from ghg_tool.api.routers.calc import router as calc_router
         from fastapi import FastAPI
+
+        from ghg_tool.api.routers.calc import router as calc_router
 
         app = FastAPI()
         app.include_router(calc_router)
@@ -421,7 +429,6 @@ class TestCalcTriggerEndpoint:
     def test_trigger_returns_202_with_correlation_id(self) -> None:
         """POST /api/v1/calc/run returns 202 and a valid UUID correlation_id."""
         from fastapi.testclient import TestClient
-        from fastapi import FastAPI
 
         app = self._make_app()
 
@@ -430,8 +437,6 @@ class TestCalcTriggerEndpoint:
         fake_user.tenant_id = str(_TENANT_ID)
         fake_user.role = "esg_manager"
 
-        from ghg_tool.api.routers.calc import router as calc_router
-        from ghg_tool.api.middleware.rbac import require_role
 
         with patch(
             "ghg_tool.api.routers.calc.require_role",
@@ -449,13 +454,15 @@ class TestCalcTriggerEndpoint:
 
             app.dependency_overrides[get_current_user] = _fake_auth
 
-            with TestClient(app, raise_server_exceptions=True) as client:
-                with patch("ghg_tool.api.routers.calc._background_run"):
-                    resp = client.post(
-                        "/api/v1/calc/run",
-                        json={"anno": 2025, "regulatory_stream": "CSRD_ESRS_E1"},
-                        headers={"Authorization": "Bearer fake"},
-                    )
+            with (
+                TestClient(app, raise_server_exceptions=True) as client,
+                patch("ghg_tool.api.routers.calc._background_run"),
+            ):
+                resp = client.post(
+                    "/api/v1/calc/run",
+                    json={"anno": 2025, "regulatory_stream": "CSRD_ESRS_E1"},
+                    headers={"Authorization": "Bearer fake"},
+                )
 
         assert resp.status_code == 202
         body = resp.json()
@@ -466,7 +473,6 @@ class TestCalcTriggerEndpoint:
     def test_trigger_dual_returns_202_with_two_correlation_ids(self) -> None:
         """POST /api/v1/calc/run-dual returns 202 with two distinct correlation_ids."""
         from fastapi.testclient import TestClient
-        from fastapi import FastAPI
 
         app = self._make_app()
 
@@ -482,13 +488,15 @@ class TestCalcTriggerEndpoint:
 
         app.dependency_overrides[get_current_user] = _fake_auth
 
-        with TestClient(app, raise_server_exceptions=True) as client:
-            with patch("ghg_tool.api.routers.calc._background_run"):
-                resp = client.post(
-                    "/api/v1/calc/run-dual",
-                    json={"anno": 2025},
-                    headers={"Authorization": "Bearer fake"},
-                )
+        with (
+            TestClient(app, raise_server_exceptions=True) as client,
+            patch("ghg_tool.api.routers.calc._background_run"),
+        ):
+            resp = client.post(
+                "/api/v1/calc/run-dual",
+                json={"anno": 2025},
+                headers={"Authorization": "Bearer fake"},
+            )
 
         assert resp.status_code == 202
         body = resp.json()
@@ -509,10 +517,10 @@ class TestCalcStatusEndpoint:
 
     def _make_app_with_fake_session(self, db_row: dict | None) -> Any:
         from fastapi import FastAPI
-        from fastapi.testclient import TestClient
-        from ghg_tool.api.routers.calc import router as calc_router
+
         from ghg_tool.api.dependencies.auth import get_current_user
         from ghg_tool.api.dependencies.db import get_db
+        from ghg_tool.api.routers.calc import router as calc_router
 
         app = FastAPI()
         app.include_router(calc_router)
@@ -585,9 +593,8 @@ class TestDualTrackCli:
     def test_dual_flag_calls_run_twice_with_different_streams(self) -> None:
         """With --dual, run_calc_and_persist is called for CSRD and EU_ETS_PHASE_IV."""
         import importlib
-        import sys
-
-        from unittest.mock import patch as _patch, MagicMock as _MM
+        from unittest.mock import MagicMock as _MM
+        from unittest.mock import patch as _patch
 
         fake_result = _MM()
         fake_result.correlation_id = uuid.uuid4()

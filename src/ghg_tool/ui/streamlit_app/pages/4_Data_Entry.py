@@ -672,7 +672,7 @@ with tab_excel:
                 summary = summarise_parsed(parsed)
 
                 cols = st.columns(len(summary))
-                for col, (scope_key, stats) in zip(cols, summary.items()):
+                for col, (scope_key, stats) in zip(cols, summary.items(), strict=False):
                     with col:
                         st.metric(
                             label=scope_key.upper(),

@@ -34,7 +34,7 @@ _MAX_USER_AGENT_LEN = 500
 
 
 async def insert_auth_session(
-    session: "AsyncSession",
+    session: AsyncSession,
     *,
     user_id: str,
     tenant_id: str,
@@ -88,7 +88,7 @@ async def insert_auth_session(
 
 
 async def revoke_auth_session_by_jti(
-    session: "AsyncSession",
+    session: AsyncSession,
     *,
     jti: str,
     user_id: str,

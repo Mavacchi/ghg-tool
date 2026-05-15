@@ -231,7 +231,10 @@ class TestPublishHappyPath:
         with TestClient(app, raise_server_exceptions=False) as client:
             resp = client.post(
                 _BASE_URL,
-                json={"reason_code": "INITIAL_PUBLICATION", "publish_notes": "Reviewed against DEFRA 2024 spreadsheet"},
+                json={  # noqa: E501
+                    "reason_code": "INITIAL_PUBLICATION",
+                    "publish_notes": "Reviewed against DEFRA 2024 spreadsheet",
+                },
             )
 
         assert resp.status_code == 202
@@ -422,7 +425,7 @@ class TestPublishAuditLog:
             def __init__(self) -> None:
                 self._bindings: dict = {}
 
-            def bind(self, **kw: Any) -> "_CapturingLogger":
+            def bind(self, **kw: Any) -> _CapturingLogger:
                 new = _CapturingLogger()
                 new._bindings = {**self._bindings, **kw}
                 return new
@@ -436,12 +439,11 @@ class TestPublishAuditLog:
         with patch(
             "ghg_tool.api.routers.factor_catalog.logger",
             _CapturingLogger(),
-        ):
-            with TestClient(app, raise_server_exceptions=False) as client:
-                resp = client.post(
-                    _BASE_URL,
-                    json={"reason_code": "INITIAL_PUBLICATION", "publish_notes": "CSRD sign-off Q1"},
-                )
+        ), TestClient(app, raise_server_exceptions=False) as client:
+            resp = client.post(
+                _BASE_URL,
+                json={"reason_code": "INITIAL_PUBLICATION", "publish_notes": "CSRD sign-off Q1"},
+            )
 
         assert resp.status_code == 202
         approval_events = [

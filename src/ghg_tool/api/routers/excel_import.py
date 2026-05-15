@@ -44,7 +44,6 @@ from ghg_tool.etl.readers.excel_reader import (
     parse_workbook,
 )
 from ghg_tool.infrastructure.db.models.audit_log import AuditLog
-from ghg_tool.infrastructure.db.models.ingestion_batch import IngestionBatch
 from ghg_tool.infrastructure.security import siem
 
 logger = structlog.get_logger(__name__)
@@ -128,9 +127,7 @@ def _coerce_for_psycopg(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     for row in rows:
         clean: dict[str, Any] = {}
         for k, v in row.items():
-            if v is None:
-                clean[k] = None
-            elif isinstance(v, float) and v != v:  # NaN check
+            if v is None or isinstance(v, float) and v != v:
                 clean[k] = None
             elif isinstance(v, Decimal):
                 clean[k] = v
@@ -394,8 +391,9 @@ async def import_excel(
     # for the orchestrator to read them.  delete=True ensures cleanup
     # even on exception.
     # ------------------------------------------------------------------
-    import pandas as pd  # noqa: PLC0415
     from pathlib import Path  # noqa: PLC0415
+
+    import pandas as pd  # noqa: PLC0415
 
     batch_id = uuid.uuid4()
     tenant_id = uuid.UUID(user.tenant_id)
@@ -423,7 +421,7 @@ async def import_excel(
         All string cells are sanitised against formula injection before writing
         (BUG-07: temp CSV path was previously unsanitised).
         """
-        tf = tempfile.NamedTemporaryFile(
+        tf = tempfile.NamedTemporaryFile(  # noqa: SIM115
             mode="w",
             suffix=".csv",
             prefix="ghg_excel_",

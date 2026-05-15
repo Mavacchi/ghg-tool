@@ -29,7 +29,6 @@ from __future__ import annotations
 import uuid
 
 import pytest
-import pytest_asyncio
 from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError, IntegrityError, ProgrammingError
 from sqlalchemy.ext.asyncio import AsyncEngine

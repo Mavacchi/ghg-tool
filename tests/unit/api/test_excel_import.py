@@ -24,7 +24,6 @@ os.environ.setdefault("GHG_JWT_ALGORITHM", "HS256")
 os.environ.setdefault("GHG_JWT_SECRET", "test-secret-key-for-unit-tests-only")
 os.environ.setdefault("GHG_ENVIRONMENT", "development")
 
-import pytest
 from fastapi.testclient import TestClient
 
 from ghg_tool.api.dependencies.auth import CurrentUser, get_current_user
@@ -249,12 +248,11 @@ def test_import_excel_422_parse_failure() -> None:
     with patch(
         "ghg_tool.api.routers.excel_import.parse_workbook",
         side_effect=WorkbookParseError("Sheet 'Scope1' is missing required columns: ['Anno']"),
-    ):
-        with TestClient(app, raise_server_exceptions=False) as client:
-            resp = client.post(
-                "/api/v1/raw/excel/import",
-                files=_multipart_upload(),
-            )
+    ), TestClient(app, raise_server_exceptions=False) as client:
+        resp = client.post(
+            "/api/v1/raw/excel/import",
+            files=_multipart_upload(),
+        )
 
     app.dependency_overrides.clear()
 
@@ -288,13 +286,12 @@ def test_import_excel_422_dq_crit_blocked() -> None:
         patch(
             "ghg_tool.api.routers.excel_import.run_ingestion_pipeline",
             return_value=blocked_result,
-        ),
+        ),TestClient(app, raise_server_exceptions=False) as client
     ):
-        with TestClient(app, raise_server_exceptions=False) as client:
-            resp = client.post(
-                "/api/v1/raw/excel/import",
-                files=_multipart_upload(),
-            )
+        resp = client.post(
+            "/api/v1/raw/excel/import",
+            files=_multipart_upload(),
+        )
 
     app.dependency_overrides.clear()
 
@@ -341,12 +338,12 @@ def test_import_excel_200_happy_path() -> None:
         ),
         # siem.emit is best-effort; avoid real HTTP calls in tests
         patch("ghg_tool.api.routers.excel_import.siem.emit"),
+        TestClient(app, raise_server_exceptions=False) as client,
     ):
-        with TestClient(app, raise_server_exceptions=False) as client:
-            resp = client.post(
-                "/api/v1/raw/excel/import",
-                files=_multipart_upload(),
-            )
+        resp = client.post(
+            "/api/v1/raw/excel/import",
+            files=_multipart_upload(),
+        )
 
     app.dependency_overrides.clear()
 

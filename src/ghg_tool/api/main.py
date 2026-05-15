@@ -102,6 +102,7 @@ async def _seed_demo_data_if_empty() -> None:
         # Local imports keep these heavy deps off the import-time graph
         # of the API process when demo mode is disabled.
         import asyncio  # noqa: PLC0415
+
         from sqlalchemy import text  # noqa: PLC0415
 
         from ghg_tool.infrastructure.db.session import AsyncSessionFactory  # noqa: PLC0415
@@ -165,7 +166,7 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     )
     await _seed_demo_data_if_empty()
 
-    current_anno = _dt.datetime.now(_dt.timezone.utc).year
+    current_anno = _dt.datetime.now(_dt.UTC).year
     _scheduler = start_scheduler(anno=current_anno)
 
     try:

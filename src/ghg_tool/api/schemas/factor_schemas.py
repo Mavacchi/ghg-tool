@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime
-from typing import Literal, Optional
+from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -69,8 +69,8 @@ class FactorCatalogResponse(BaseModel):
     applicability_note: str | None = None
     pdf_source_uri: str | None = None
     created_at: datetime
-    published_at: Optional[datetime] = None
-    published_by: Optional[str] = None
+    published_at: datetime | None = None
+    published_by: str | None = None
     is_published: bool
     biogenic_co2_kg_per_unit: float | None = None
 

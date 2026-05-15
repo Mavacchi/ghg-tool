@@ -22,7 +22,6 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pyotp
-import pytest
 from fastapi.testclient import TestClient
 
 os.environ.setdefault("GHG_JWT_ALGORITHM", "HS256")

@@ -16,14 +16,12 @@ Covers:
 
 from __future__ import annotations
 
-import asyncio
 import os
 import uuid
 from collections.abc import AsyncGenerator
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import pytest
 from fastapi.testclient import TestClient
 
 os.environ.setdefault("GHG_JWT_ALGORITHM", "HS256")
@@ -300,7 +298,7 @@ class TestSessionCheckMiddleware:
         claims_from_token = None
         from ghg_tool.infrastructure.security.jwt import decode_token
         claims_from_token = decode_token(token)
-        token_jti = claims_from_token["jti"]
+        claims_from_token["jti"]
 
         revoked_row = MagicMock()
         revoked_row.id = uuid.uuid4()

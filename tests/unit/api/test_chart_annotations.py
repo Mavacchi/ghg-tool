@@ -31,13 +31,12 @@ import uuid
 from collections.abc import AsyncGenerator
 from datetime import UTC, datetime
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 os.environ.setdefault("GHG_JWT_ALGORITHM", "HS256")
 os.environ.setdefault("GHG_JWT_SECRET", "test-secret-key-for-unit-tests-only")
 os.environ.setdefault("GHG_ENVIRONMENT", "development")
 
-import pytest
 from fastapi.testclient import TestClient
 
 from ghg_tool.api.dependencies.auth import CurrentUser, get_current_user
@@ -234,7 +233,7 @@ def test_post_annotation_403_auditor() -> None:
 def test_get_annotations_filtered_by_chart_key() -> None:
     """GET returns only rows matching the requested chart_key."""
     matching = _make_annotation_orm(chart_key="drilldown_scope")
-    other = _make_annotation_orm(
+    _make_annotation_orm(
         annotation_id=uuid.uuid4(), chart_key="trend_scope_total"
     )
     # The query should filter server-side; simulate by returning only matching.
@@ -464,7 +463,7 @@ def test_patch_visibility_db_trigger_raises_409() -> None:
     row = _make_annotation_orm(is_visible=True)
 
     # Create a mock exception whose type name contains 'RaiseException'.
-    class RaiseException(Exception):
+    class RaiseException(Exception):  # noqa: N818
         pass
 
     mock_session = AsyncMock()

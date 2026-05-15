@@ -20,12 +20,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from decimal import Decimal
-from enum import Enum
+from enum import StrEnum
 
 from ghg_tool.domain.entities.sbti_target import SbtiTarget
 
 
-class TargetStatus(str, Enum):
+class TargetStatus(StrEnum):
     """How the actual emissions compare to the SBTi trajectory.
 
     Thresholds: project-defined for traffic-light UX, NOT SBTi-mandated.

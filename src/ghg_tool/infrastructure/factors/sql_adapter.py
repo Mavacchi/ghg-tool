@@ -19,7 +19,7 @@ import structlog
 from sqlalchemy import Engine, text
 
 from ghg_tool.domain.exceptions.calc_errors import MissingFactorError
-from ghg_tool.domain.ports.factor_catalog import FactorCatalogPort, FactorRecord
+from ghg_tool.domain.ports.factor_catalog import FactorRecord
 
 logger = structlog.get_logger(__name__)
 

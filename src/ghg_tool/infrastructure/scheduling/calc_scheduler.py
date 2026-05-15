@@ -79,8 +79,8 @@ def _run_scheduled_calc(
 
     from ghg_tool.application.services.calc_persistence import run_calc_and_persist  # noqa: PLC0415
 
-    _DEFAULT_TENANT_CODE = os.getenv("GHG_SCHEDULER_TENANT_CODE", "GRESMALT")
-    _RAW_DSN = os.getenv("DATABASE_URL") or os.getenv(
+    _DEFAULT_TENANT_CODE = os.getenv("GHG_SCHEDULER_TENANT_CODE", "GRESMALT")  # noqa: N806
+    _RAW_DSN = os.getenv("DATABASE_URL") or os.getenv(  # noqa: N806
         "SQLALCHEMY_URL",
         "postgresql+asyncpg://ghg_app:changeme@localhost:5432/ghg_tool",
     )
@@ -94,8 +94,12 @@ def _run_scheduled_calc(
         return no_driver.replace("postgresql://", "postgresql+asyncpg://", 1)
 
     from sqlalchemy import text as sa_text  # noqa: PLC0415
-    sync_engine = create_engine(_sync_dsn(_RAW_DSN), pool_pre_ping=True, pool_size=2, max_overflow=0)
-    async_engine = create_async_engine(_async_dsn(_RAW_DSN), pool_pre_ping=True, pool_size=2, max_overflow=0)
+    sync_engine = create_engine(
+        _sync_dsn(_RAW_DSN), pool_pre_ping=True, pool_size=2, max_overflow=0
+    )
+    async_engine = create_async_engine(
+        _async_dsn(_RAW_DSN), pool_pre_ping=True, pool_size=2, max_overflow=0
+    )
     session_factory = async_sessionmaker(
         bind=async_engine, expire_on_commit=False, autoflush=False, autocommit=False
     )

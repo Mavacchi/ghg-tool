@@ -11,9 +11,10 @@ Coverage:
 
 from __future__ import annotations
 
+import contextlib
 import uuid
 from decimal import Decimal
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -229,10 +230,8 @@ class TestCaching:
         # First call -- no vintage
         adapter.get("LB_IT_GRID_ISPRA_2024", gwp_set="AR6")
         # Second call -- same factor but with vintage_year -> different cache key
-        try:
+        with contextlib.suppress(MissingFactorError):
             adapter.get("LB_IT_GRID_ISPRA_2024", gwp_set="AR6", vintage_year=2025)
-        except MissingFactorError:
-            pass  # Not found is fine -- we just need to confirm a second DB hit.
 
         # Two separate DB queries (two distinct cache keys).
         assert engine.connect.call_count == 2

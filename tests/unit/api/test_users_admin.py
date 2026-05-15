@@ -13,7 +13,7 @@ from __future__ import annotations
 import os
 import uuid
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 os.environ.setdefault("GHG_JWT_ALGORITHM", "HS256")
 os.environ.setdefault("GHG_JWT_SECRET", "test-secret-key-for-unit-tests-only")

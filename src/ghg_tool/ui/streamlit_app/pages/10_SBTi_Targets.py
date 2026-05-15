@@ -246,7 +246,7 @@ if targets:
                     line={"color": "#0072B2", "dash": "dash"},
                 )
             )
-            actual_x = [y for y, v in zip(years, actual_vals) if v is not None]
+            actual_x = [y for y, v in zip(years, actual_vals, strict=False) if v is not None]
             actual_y = [v for v in actual_vals if v is not None]
             if actual_x:
                 fig.add_trace(
