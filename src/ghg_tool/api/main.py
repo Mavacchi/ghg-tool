@@ -57,6 +57,7 @@ from ghg_tool.api.routers import (
     reports,
     sbti,
     sessions,
+    sites,
     totp,
     users,
 )
@@ -198,6 +199,123 @@ async def _ensure_demo_user() -> None:
             "demo_user_seed_failed",
             error_type=type(exc).__name__,
         )
+
+
+async def _seed_admin_from_env_if_empty() -> None:
+    """Insert an admin user from env vars if ref.users is empty.
+
+    Reads ``GHG_BOOTSTRAP_ADMIN_USERNAME``, ``GHG_BOOTSTRAP_ADMIN_EMAIL``,
+    and ``GHG_BOOTSTRAP_ADMIN_PASSWORD_HASH`` (bcrypt hash — never plaintext).
+    All three must be set for the bootstrap to run.
+
+    Guards (idempotency + safety):
+      1. All three env vars must be non-empty.
+      2. Skip when ``GHG_ENVIRONMENT == 'test'`` — bootstrap must not pollute
+         the test database.
+      3. Skip when ``ref.users`` already has at least one row (idempotent:
+         re-running after a partial rebuild is safe).
+
+    This function is intentionally separate from ``_seed_demo_data_if_empty``
+    so that neither depends on the other and both can fail independently
+    without aborting startup.
+
+    Args:  None (reads from os.environ and the DB).
+
+    Returns:  None.  All failures are logged and swallowed so the API stays
+        reachable.
+    """
+    if _ENVIRONMENT == "test":
+        return
+
+    username = os.environ.get("GHG_BOOTSTRAP_ADMIN_USERNAME", "").strip()
+    email = os.environ.get("GHG_BOOTSTRAP_ADMIN_EMAIL", "").strip()
+    password_hash = os.environ.get("GHG_BOOTSTRAP_ADMIN_PASSWORD_HASH", "").strip()
+
+    if not (username and email and password_hash):
+        # Env vars not configured — normal non-bootstrap deployment; skip silently.
+        return
+
+    try:
+        from sqlalchemy import text  # noqa: PLC0415
+
+        from ghg_tool.infrastructure.db.session import AsyncSessionFactory  # noqa: PLC0415
+
+        async with AsyncSessionFactory() as session:
+            # Idempotency guard: skip if any user already exists.
+            count_result = await session.execute(
+                text("SELECT COUNT(*) FROM ref.users")
+            )
+            user_count = int(count_result.scalar_one())
+            if user_count > 0:
+                logger.info(
+                    "bootstrap_admin_skipped",
+                    reason="users_table_not_empty",
+                    user_count=user_count,
+                )
+                return
+
+            # Resolve tenant (GRESMALT preferred, CERAMIC_TILE_CO fallback).
+            tenant_result = await session.execute(
+                text(
+                    "SELECT id FROM ref.tenants "
+                    "WHERE code IN ('GRESMALT', 'CERAMIC_TILE_CO') "
+                    "ORDER BY CASE code WHEN 'GRESMALT' THEN 0 ELSE 1 END "
+                    "LIMIT 1"
+                )
+            )
+            tenant_row = tenant_result.fetchone()
+            if tenant_row is None:
+                logger.warning(
+                    "bootstrap_admin_skipped",
+                    reason="no_launch_tenant_found",
+                )
+                return
+            tenant_id = str(tenant_row[0])
+
+            # Resolve admin role.
+            role_result = await session.execute(
+                text("SELECT id FROM ref.roles WHERE role_code = 'admin'")
+            )
+            role_row = role_result.fetchone()
+            if role_row is None:
+                logger.warning(
+                    "bootstrap_admin_skipped",
+                    reason="admin_role_not_found",
+                )
+                return
+            role_id = str(role_row[0])
+
+            await session.execute(
+                text(
+                    "INSERT INTO ref.users "
+                    "  (tenant_id, username, email, password_hash, role_id, is_active) "
+                    "VALUES "
+                    "  (CAST(:tid AS uuid), :uname, :email, :phash, "
+                    "   CAST(:rid AS uuid), TRUE)"
+                ),
+                {
+                    "tid": tenant_id,
+                    "uname": username,
+                    "email": email,
+                    "phash": password_hash,
+                    "rid": role_id,
+                },
+            )
+            await session.commit()
+
+        # Log at WARNING so it surfaces in container logs.
+        # Do NOT log email or hash.
+        logger.warning(
+            "bootstrap_admin_seeded_from_env",
+            username=username,
+        )
+
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "bootstrap_admin_seed_failed",
+            error_type=type(exc).__name__,
+        )
+        # Do NOT re-raise — the API must remain reachable even if bootstrap fails.
 
 
 async def _seed_demo_data_if_empty() -> None:
@@ -360,6 +478,7 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         environment=_ENVIRONMENT,
         demo_mode=_demo_mode_enabled(),
     )
+    await _seed_admin_from_env_if_empty()
     await _seed_demo_data_if_empty()
 
     current_anno = _dt.datetime.now(_dt.UTC).year
@@ -517,6 +636,7 @@ def _create_app() -> FastAPI:
     app.include_router(reconciliation.router)
     app.include_router(sbti.router)
     app.include_router(chart_annotations.router)
+    app.include_router(sites.router)
 
     return app
 
