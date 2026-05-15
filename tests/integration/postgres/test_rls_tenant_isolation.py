@@ -49,7 +49,7 @@ pytestmark = pytest.mark.integration
 # ---------------------------------------------------------------------------
 
 
-async def _set_gucs(conn: object, *, tenant_id: str, role_code: str = "data_steward") -> None:
+async def _set_gucs(conn: object, *, tenant_id: str, role_code: str = "editor") -> None:
     """Set app.tenant_id and app.role_code GUCs and switch to the RLS test role.
 
     Uses set_config(..., true) so the GUCs reset automatically when the
@@ -177,7 +177,7 @@ async def test_tenant_a_can_read_own_emissions(
     inserted_id: str | None = None
 
     async with async_engine.begin() as conn:
-        await _set_gucs(conn, tenant_id=seed_tenants.tenant_a, role_code="data_steward")
+        await _set_gucs(conn, tenant_id=seed_tenants.tenant_a, role_code="editor")
         inserted_id = await _insert_emission_on_conn(
             conn,
             tenant_id=seed_tenants.tenant_a,
@@ -188,7 +188,7 @@ async def test_tenant_a_can_read_own_emissions(
     assert inserted_id is not None
 
     async with async_engine.begin() as conn:
-        await _set_gucs(conn, tenant_id=seed_tenants.tenant_a, role_code="data_steward")
+        await _set_gucs(conn, tenant_id=seed_tenants.tenant_a, role_code="editor")
         result = await conn.execute(
             text(
                 "SELECT id::text FROM calc.emissions_consolidated "
@@ -231,7 +231,7 @@ async def test_tenant_b_cannot_read_tenant_a_emissions(
 
     # Insert a row for tenant A
     async with async_engine.begin() as conn:
-        await _set_gucs(conn, tenant_id=seed_tenants.tenant_a, role_code="data_steward")
+        await _set_gucs(conn, tenant_id=seed_tenants.tenant_a, role_code="editor")
         row_a_id = await _insert_emission_on_conn(
             conn,
             tenant_id=seed_tenants.tenant_a,
@@ -242,7 +242,7 @@ async def test_tenant_b_cannot_read_tenant_a_emissions(
 
     # Now query as tenant B -- must return 0 rows
     async with async_engine.begin() as conn:
-        await _set_gucs(conn, tenant_id=seed_tenants.tenant_b, role_code="data_steward")
+        await _set_gucs(conn, tenant_id=seed_tenants.tenant_b, role_code="editor")
         result = await conn.execute(
             text(
                 "SELECT id::text FROM calc.emissions_consolidated "
@@ -281,7 +281,7 @@ async def test_switching_to_tenant_a_restores_visibility(
 
     # Insert a row for tenant A
     async with async_engine.begin() as conn:
-        await _set_gucs(conn, tenant_id=seed_tenants.tenant_a, role_code="data_steward")
+        await _set_gucs(conn, tenant_id=seed_tenants.tenant_a, role_code="editor")
         row_id = await _insert_emission_on_conn(
             conn,
             tenant_id=seed_tenants.tenant_a,
@@ -292,7 +292,7 @@ async def test_switching_to_tenant_a_restores_visibility(
 
     # Verify tenant B cannot see the row
     async with async_engine.begin() as conn:
-        await _set_gucs(conn, tenant_id=seed_tenants.tenant_b, role_code="data_steward")
+        await _set_gucs(conn, tenant_id=seed_tenants.tenant_b, role_code="editor")
         result_b = await conn.execute(
             text(
                 "SELECT count(*) FROM calc.emissions_consolidated "
@@ -308,7 +308,7 @@ async def test_switching_to_tenant_a_restores_visibility(
 
     # Switch the new connection back to tenant A: row must be visible again
     async with async_engine.begin() as conn:
-        await _set_gucs(conn, tenant_id=seed_tenants.tenant_a, role_code="data_steward")
+        await _set_gucs(conn, tenant_id=seed_tenants.tenant_a, role_code="editor")
         result_a = await conn.execute(
             text(
                 "SELECT id::text FROM calc.emissions_consolidated "
@@ -346,7 +346,7 @@ async def test_chart_annotation_rls_cross_tenant_blocked(
 
     # Insert annotation for tenant A
     async with async_engine.begin() as conn:
-        await _set_gucs(conn, tenant_id=seed_tenants.tenant_a, role_code="data_steward")
+        await _set_gucs(conn, tenant_id=seed_tenants.tenant_a, role_code="editor")
         await conn.execute(
             text(
                 "INSERT INTO ops.chart_annotations ("
@@ -367,7 +367,7 @@ async def test_chart_annotation_rls_cross_tenant_blocked(
 
     # Attempt to read as tenant B -- must return 0 rows
     async with async_engine.begin() as conn:
-        await _set_gucs(conn, tenant_id=seed_tenants.tenant_b, role_code="data_steward")
+        await _set_gucs(conn, tenant_id=seed_tenants.tenant_b, role_code="editor")
         result = await conn.execute(
             text(
                 "SELECT count(*) FROM ops.chart_annotations "
