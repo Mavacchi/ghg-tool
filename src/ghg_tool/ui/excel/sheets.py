@@ -8,6 +8,10 @@ the sheet with:
   - Auto-width columns (heuristic)
 
 Biogenic sheet explicitly excludes biogenic values from Scope totals (ADR-007).
+
+Task REV-WAVE3-010: factor source strings in the Summary sheet are now built
+dynamically from ``report_data["factors"]`` (the factor catalog snapshot for
+the run) instead of being hardcoded as "DEFRA 2024" etc.
 """
 
 from __future__ import annotations
@@ -81,10 +85,62 @@ def _auto_width(ws: Any) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Internal helper — REV-WAVE3-010: build dynamic factor-source label
+# ---------------------------------------------------------------------------
+
+def _build_factor_source_label(factors: list[dict[str, Any]]) -> str:
+    """Build a human-readable factor-source label from the catalog snapshot.
+
+    For each published factor in ``factors`` builds a string of the form::
+
+        "DEFRA 2024.1 (pubblicato 2024-01-15)"
+
+    If ``published_at`` is absent (draft or legacy row), falls back to::
+
+        "DEFRA 2024.1"
+
+    All distinct strings are joined with a semicolon separator so multiple
+    sources appear on one line.  When ``factors`` is empty the fallback
+    "Vedi catalogo fattori" is returned.
+
+    Args:
+        factors: List of factor catalog dicts from ``report_data["factors"]``.
+
+    Returns:
+        A non-empty string label describing the factor sources used.
+    """
+    if not factors:
+        return "Vedi catalogo fattori"
+
+    seen: set[str] = set()
+    parts: list[str] = []
+    for f in factors:
+        source = f.get("source") or ""
+        version = f.get("version") or ""
+        published_at = f.get("published_at") or f.get("valid_from") or ""
+        # Format published_at: keep only the date part (first 10 chars)
+        if published_at and len(str(published_at)) >= 10:
+            pub_str = str(published_at)[:10]
+            label = f"{source} {version} (pubblicato {pub_str})"
+        else:
+            label = f"{source} {version}".strip()
+        if label and label not in seen:
+            seen.add(label)
+            parts.append(label)
+
+    return "; ".join(parts) if parts else "Vedi catalogo fattori"
+
+
+# ---------------------------------------------------------------------------
 # Sheet 1 — Summary
 # ---------------------------------------------------------------------------
 def write_summary_sheet(wb: Workbook, report_data: dict[str, Any]) -> None:
     """Write the Summary sheet with scope totals and biogenic memo.
+
+    REV-WAVE3-010: the ``factor_source`` column now contains a dynamic string
+    built from ``report_data["factors"]`` (the factor catalog snapshot for
+    the run) instead of a hardcoded placeholder.  The caption row below the
+    data table points auditors to ``docs/methodology/factor_sources.md``.
 
     Args:
         wb: Target workbook.
@@ -94,7 +150,10 @@ def write_summary_sheet(wb: Workbook, report_data: dict[str, Any]) -> None:
     anno = report_data.get("anno", "?")
     gwp_set = report_data.get("gwp_set", "AR6")
     emissions = report_data.get("emissions", [])
-    factor_sources_label = report_data.get("factor_sources", "Vedi catalogo fattori")
+    factors_used: list[dict[str, Any]] = report_data.get("factors", [])
+
+    # REV-WAVE3-010: build dynamic label from factor catalog snapshot
+    factor_sources_label = _build_factor_source_label(factors_used)
 
     cols = ["Scope", "Sub-scope", "Totale tCO2e", "Anno",
             "factor_source", "factor_version", "gwp_set", "Note"]
@@ -143,6 +202,19 @@ def write_summary_sheet(wb: Workbook, report_data: dict[str, Any]) -> None:
         "N/A", "N/A", gwp_set,
         "ADR-007: CO2 biogenica esclusa da Scope 1/2/3 per GHG Protocol §4.5",
     ])
+
+    # REV-WAVE3-010: caption row pointing auditors to methodology docs
+    _last_row = ws.max_row + 2
+    caption_cell = ws.cell(row=_last_row, column=1)
+    caption_cell.value = (
+        "Fattori conformi ai dati DB. "
+        "Vedi docs/methodology/factor_sources.md per i SHA-256 dei PDF sorgente."
+    )
+    caption_cell.font = Font(italic=True, color="FF777777")
+    ws.merge_cells(
+        start_row=_last_row, start_column=1,
+        end_row=_last_row, end_column=len(cols),
+    )
 
     _auto_width(ws)
 
