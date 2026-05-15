@@ -437,7 +437,7 @@ async def get_corrections(
 async def correct_emission_by_id(
     emission_id: uuid.UUID,
     body: EmissionCorrectionRequest,
-    user: CurrentUser = Depends(require_permission("emissions", "write")),
+    user: CurrentUser = Depends(require_permission("emissions", "correct")),
     session: AsyncSession = Depends(get_db),
 ) -> EmissionCorrectionDetailResponse:
     """Apply a single-shot correction to an emission row (FR-21, append-only).

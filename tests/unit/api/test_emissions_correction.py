@@ -280,8 +280,8 @@ class TestCorrectEmissionById:
 
         assert resp.status_code == 422, resp.text
 
-    def test_correct_emission_403_auditor(self) -> None:
-        """viewer role does not have emissions:write permission → 403."""
+    def test_correct_emission_403_viewer(self) -> None:
+        """viewer role does not have emissions:correct permission → 403."""
         app.dependency_overrides[get_current_user] = _user_override("viewer")
         app.dependency_overrides[get_db] = _empty_session()
         with TestClient(app, raise_server_exceptions=False) as client:
@@ -290,20 +290,26 @@ class TestCorrectEmissionById:
 
         assert resp.status_code == 403, resp.text
 
-    def test_correct_emission_403_esg_manager(self) -> None:
-        """admin does not have emissions:write permission → 403.
+    def test_correct_emission_201_admin(self) -> None:
+        """admin has emissions:correct permission → 201 like editor.
 
-        The resource-scoped correction endpoint uses ``emissions:write``
-        (editor only), which is stricter than the bulk ``/correction``
-        endpoint that allows ``emissions:correct``.
+        The resource-scoped /correct endpoint uses ``emissions:correct``
+        (editor + admin), aligned with the bulk ``/correction`` endpoint
+        for consistency. This unifies the per-row UI workflow with the
+        existing API contract — admins who triage data quality findings
+        can correct rows themselves rather than handing off to an editor.
         """
-        app.dependency_overrides[get_current_user] = _user_override("admin")
-        app.dependency_overrides[get_db] = _empty_session()
-        with TestClient(app, raise_server_exceptions=False) as client:
-            resp = client.post(_CORRECTION_URL, json=_VALID_CORRECTION_BODY)
-        app.dependency_overrides.clear()
+        mock_repo = _repo_mock_found()
+        with patch("ghg_tool.api.routers.emissions.EmissionsRepository", return_value=mock_repo):
+            app.dependency_overrides[get_current_user] = _user_override("admin")
+            app.dependency_overrides[get_db] = _empty_session()
+            with TestClient(app, raise_server_exceptions=False) as client:
+                resp = client.post(_CORRECTION_URL, json=_VALID_CORRECTION_BODY)
+            app.dependency_overrides.clear()
 
-        assert resp.status_code == 403, resp.text
+        assert resp.status_code == 201, resp.text
+        body = resp.json()
+        assert "new_id" in body and "superseded_id" in body
 
     def test_correct_emission_audit_log_row_written(self) -> None:
         """An AuditLog row is added to the session with action='EMISSION_CORRECTION'."""
