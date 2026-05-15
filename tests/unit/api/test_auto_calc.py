@@ -745,10 +745,12 @@ def test_insert_writes_emission_row_and_audit_log(
             )
         )
 
-    # M6: 4 execute calls = site_lookup + raw.direct_entry + emissions_consolidated + audit_log
-    assert len(execute_calls) == 4, (
-        f"Expected 4 DB execute calls (site_lookup + raw_entry + emission + audit), "
-        f"got {len(execute_calls)}"
+    # M6 + factor FK fix: 5 execute calls =
+    #   site_lookup + factor_uuid_lookup + raw.direct_entry +
+    #   emissions_consolidated + audit_log
+    assert len(execute_calls) == 5, (
+        f"Expected 5 DB execute calls (site_lookup + factor_uuid_lookup + "
+        f"raw_entry + emission + audit), got {len(execute_calls)}"
     )
     assert result.emission_id is not None
     assert isinstance(result.emission_id, uuid.UUID)
