@@ -31,6 +31,7 @@ from fastapi.testclient import TestClient
 from ghg_tool.api.dependencies.auth import CurrentUser, get_current_user
 from ghg_tool.api.dependencies.db import get_db
 from ghg_tool.api.main import app
+from ghg_tool.infrastructure.db.models.factor_publish_approval import FactorPublishApproval
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -38,8 +39,10 @@ from ghg_tool.api.main import app
 
 _TENANT_A = str(uuid.uuid4())
 _USER_DS = str(uuid.uuid4())
-_USER_ESG = str(uuid.uuid4())
+_USER_ESG = str(uuid.uuid4())   # second esg_manager: the approver in the 200-flow
+_USER_ESG_PROPOSER = str(uuid.uuid4())  # first esg_manager: proposed the PENDING row
 _FACTOR_UUID = uuid.uuid4()
+_APPROVAL_UUID = uuid.uuid4()
 
 _CREATE_URL = "/api/v1/factor-catalog/"
 _PUBLISH_URL = f"/api/v1/factor-catalog/{_FACTOR_UUID}/publish"
@@ -140,35 +143,77 @@ def _db_for_create(persisted_factor: MagicMock) -> Any:
     return _gen
 
 
-def _db_for_publish(draft_factor: MagicMock, published_factor: MagicMock) -> Any:
-    """Mock a DB session for the publish endpoint.
+def _make_approval_orm(
+    *,
+    proposed_by: str = _USER_ESG_PROPOSER,
+    decision: str = "PENDING",
+    approval_id: uuid.UUID = _APPROVAL_UUID,
+    factor_id: uuid.UUID = _FACTOR_UUID,
+) -> MagicMock:
+    """Return an ORM-like MagicMock for a FactorPublishApproval row."""
+    approval = MagicMock(spec=FactorPublishApproval)
+    approval.id = approval_id
+    approval.tenant_id = uuid.UUID(_TENANT_A)
+    approval.factor_id = factor_id
+    approval.proposed_by = uuid.UUID(proposed_by)
+    approval.proposed_at = datetime(2025, 5, 14, 12, 30, 0, tzinfo=UTC)
+    approval.decision = decision
+    approval.approved_by = None
+    approval.approved_at = None
+    approval.decision_notes = None
+    approval.reason_code = "INITIAL_PUBLICATION"
+    approval.correlation_id = uuid.uuid4()
+    return approval
 
-    get_by_uuid returns the draft; after the conditional UPDATE the session
-    refresh call returns the published state.
+
+def _db_for_publish_second_call(
+    draft_factor: MagicMock,
+    pending_approval: MagicMock,
+    published_factor: MagicMock,
+) -> Any:
+    """Mock a DB session for the TWO-EYES publish 200-flow.
+
+    Models the case where a PENDING approval already exists (proposed by
+    _USER_ESG_PROPOSER) and a *different* esg_manager (_USER_ESG) calls
+    POST /publish to approve.
+
+    session.execute side_effect (in order):
+      1. repo.get_by_uuid SELECT -> scalar_one_or_none -> draft_factor
+      2. _get_pending_approval SELECT -> scalar_one_or_none -> pending_approval
+      3. _do_publish conditional UPDATE -> rowcount=1
+
+    After session.refresh(factor) the factor object is updated to reflect
+    the published state (simulating the DB returning post-UPDATE values).
     """
 
     async def _gen() -> Any:
         session = AsyncMock()
         session.flush = AsyncMock(return_value=None)
+        session.add = MagicMock(return_value=None)
 
-        # First execute: get_by_uuid SELECT
-        get_result = MagicMock()
-        get_result.scalar_one_or_none = MagicMock(return_value=draft_factor)
+        # Call 1: repo.get_by_uuid -> draft factor
+        select_factor = MagicMock()
+        select_factor.scalar_one_or_none = MagicMock(return_value=draft_factor)
 
-        # Second execute: conditional UPDATE (rowcount=1 means success)
+        # Call 2: _get_pending_approval -> PENDING approval row
+        select_approval = MagicMock()
+        select_approval.scalar_one_or_none = MagicMock(return_value=pending_approval)
+
+        # Call 3: conditional UPDATE on factor_catalog -> rowcount=1
         update_result = MagicMock()
         update_result.rowcount = 1
 
-        session.execute = AsyncMock(side_effect=[get_result, update_result])
+        session.execute = AsyncMock(
+            side_effect=[select_factor, select_approval, update_result]
+        )
 
         async def _refresh(obj: Any) -> None:
-            # Simulate the DB returning post-update state.
+            # Simulate DB returning post-UPDATE state for the factor row.
             obj.is_published = published_factor.is_published
             obj.published_at = published_factor.published_at
             obj.published_by = published_factor.published_by
 
         session.refresh = _refresh
-        session.add = MagicMock(return_value=None)
         yield session
 
     return _gen
@@ -259,30 +304,27 @@ class TestDraftCreateHasNullPublishFields:
         assert resp.json()["published_by"] is None
 
 
-@pytest.mark.xfail(
-    reason=(
-        "Pre-existing: the SEC wave migrated /factor-catalog/{uuid}/publish "
-        "from a single-shot UPDATE to a two-eyes ISAE-3000 §A99 workflow "
-        "(propose -> 202, second esg_manager -> 200). The mocks in this class "
-        "still emulate the legacy single-shot flow with side_effect=[SELECT, "
-        "UPDATE] only — but the new flow does additional queries (approval "
-        "row lookup + insert/update on factor_publish_approvals + audit log). "
-        "Tracked for factor-catalog-test-migration follow-up; outside the "
-        "calc/dual-track scope of this branch."
-    ),
-    strict=False,
-)
 class TestPublishSetsPublishFields:
-    """Publish endpoint must set published_at and published_by to non-None."""
+    """Publish endpoint must set published_at and published_by to non-None.
+
+    All tests drive the two-eyes ISAE-3000 §A99 200-flow:
+    - A PENDING approval was created by _USER_ESG_PROPOSER (first esg_manager).
+    - The test client calls POST /publish as _USER_ESG (second, different esg_manager).
+    - Expected outcome: HTTP 200, factor published.
+    """
 
     def test_publish_sets_published_at_non_null(self) -> None:
-        """After publish, published_at must be non-None."""
+        """After publish (second esg_manager approves), published_at must be non-None."""
         draft = _make_draft_orm()
+        pending = _make_approval_orm(proposed_by=_USER_ESG_PROPOSER)
         published = _make_published_orm()
+        # Caller is _USER_ESG — DIFFERENT from the proposer _USER_ESG_PROPOSER.
         app.dependency_overrides[get_current_user] = _auth_override(
             "esg_manager", user_id=_USER_ESG
         )
-        app.dependency_overrides[get_db] = _db_for_publish(draft, published)
+        app.dependency_overrides[get_db] = _db_for_publish_second_call(
+            draft, pending, published
+        )
 
         with TestClient(app, raise_server_exceptions=False) as client:
             resp = client.post(_PUBLISH_URL, json={"reason_code": "INITIAL_PUBLICATION"})
@@ -295,6 +337,60 @@ class TestPublishSetsPublishFields:
         )
         assert data["published_by"] is not None, (
             "MG-03: published_by must be non-None after publish"
+        )
+        assert data["created_at"] is not None, (
+            "MG-03: created_at must always be present"
+        )
+
+    def test_publish_sets_published_by_to_caller_uuid(self) -> None:
+        """published_by must equal the UUID of the approving esg_manager."""
+        draft = _make_draft_orm()
+        pending = _make_approval_orm(proposed_by=_USER_ESG_PROPOSER)
+        published = _make_published_orm()
+        # Caller is _USER_ESG; published_by on the refreshed ORM object must
+        # match _USER_ESG (set by _make_published_orm / _refresh in the mock).
+        app.dependency_overrides[get_current_user] = _auth_override(
+            "esg_manager", user_id=_USER_ESG
+        )
+        app.dependency_overrides[get_db] = _db_for_publish_second_call(
+            draft, pending, published
+        )
+
+        with TestClient(app, raise_server_exceptions=False) as client:
+            resp = client.post(_PUBLISH_URL, json={"reason_code": "INITIAL_PUBLICATION"})
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["is_published"] is True
+        assert data["published_by"] == _USER_ESG, (
+            "MG-03: published_by must be the UUID of the approving esg_manager"
+        )
+
+    def test_published_factor_response_has_all_mg03_fields(self) -> None:
+        """Response after publish must carry is_published, published_at,
+        published_by, and created_at — all non-None (MG-03 schema contract)."""
+        draft = _make_draft_orm()
+        pending = _make_approval_orm(proposed_by=_USER_ESG_PROPOSER)
+        published = _make_published_orm()
+        app.dependency_overrides[get_current_user] = _auth_override(
+            "esg_manager", user_id=_USER_ESG
+        )
+        app.dependency_overrides[get_db] = _db_for_publish_second_call(
+            draft, pending, published
+        )
+
+        with TestClient(app, raise_server_exceptions=False) as client:
+            resp = client.post(_PUBLISH_URL, json={"reason_code": "INITIAL_PUBLICATION"})
+
+        assert resp.status_code == 200
+        data = resp.json()
+        # MG-03 mandatory fields on a published factor:
+        assert data["is_published"] is True
+        assert data["published_at"] is not None, (
+            "MG-03: published_at must be set after publish"
+        )
+        assert data["published_by"] is not None, (
+            "MG-03: published_by must be set after publish"
         )
         assert data["created_at"] is not None, (
             "MG-03: created_at must always be present"
