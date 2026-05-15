@@ -218,13 +218,15 @@ async def test_compute_and_insert_writes_raw_direct_entry(
 
     try:
         async with session_factory() as session:
-            # Set GUCs that the service expects (tenant isolation)
+            # Set GUCs that the service expects (tenant isolation).
+            # Postgres `SET LOCAL <var> = <value>` does not accept parameter
+            # binding ($1); use set_config(name, value, is_local=true) instead.
             await session.execute(
-                text("SET LOCAL app.tenant_id = :tid"),
+                text("SELECT set_config('app.tenant_id', :tid, true)"),
                 {"tid": tenant_id},
             )
             await session.execute(
-                text("SET LOCAL app.role = 'editor'"),
+                text("SELECT set_config('app.role', 'editor', true)"),
             )
 
             req = CalcInputRequest(
