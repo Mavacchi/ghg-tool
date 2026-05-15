@@ -32,6 +32,13 @@ import streamlit as st
 from ghg_tool.ui.streamlit_app.lib.constants import (
     DASHBOARD_ID, DASHBOARD_VERSION, KNOWN_SITES, PRODUCT_NAME, page_icon,
 )
+from ghg_tool.ui.clients.sites_client import (  # noqa: E402
+    SITE_TYPE_LABELS,
+    Site,
+    get_site,
+    get_sites,
+    get_sites_by_type,
+)
 
 st.set_page_config(
     page_title=f"Inserimento dati · {PRODUCT_NAME}",
@@ -365,8 +372,9 @@ with tab_correct:
             )
         _all = _("all_label", lang)
         with s_col2:
+            _corr_site_codes = [s.codice_sito for s in get_sites()]
             f_site = st.selectbox(
-                "Sito", [_all] + list(KNOWN_SITES), key="corr_site",
+                "Sito", [_all] + _corr_site_codes, key="corr_site",
             )
         with s_col3:
             f_scope = st.selectbox(
@@ -1181,9 +1189,18 @@ with tab_autocalc:
         )
 
     # -----------------------------------------------------------------------
-    # Section 1 — Scope + sub-scope
+    # Section 1 — Scope + sito + sub-scope
+    #
+    # Decision #7 (auto_calc_design.md §12): "Processo (decarbonatazione)"
+    # is visible ONLY when the selected site is STABILIMENTO_PRODUTTIVO.
+    # The site selector is therefore rendered BEFORE the sub-scope selector
+    # for Scope 1 so the sub-scope list can be filtered accordingly.
     # -----------------------------------------------------------------------
     st.markdown('<div class="ct-autocalc-form">', unsafe_allow_html=True)
+
+    # Load site catalogue from API (cached, TTL 5 min).
+    _ac_all_sites: list[Site] = get_sites()
+    _ac_site_codes: list[str] = [s.codice_sito for s in _ac_all_sites]
 
     ac_col1, ac_col2 = st.columns([1, 2])
     with ac_col1:
@@ -1198,14 +1215,77 @@ with tab_autocalc:
                 "Scope 3: catena del valore."
             ),
         )
-    with ac_col2:
-        ac_subscope_keys = _AC_SUBSCOPE_BY_SCOPE[ac_scope]
+
+    # For Scope 1 we need the site BEFORE building the sub-scope list
+    # (decision #7): show the site picker in col2 first, then sub-scope below.
+    # For Scope 2/3 we keep the original ordering (scope → sub-scope → site).
+    _ac_early_site_selection: str | None = None
+    if ac_scope == 1:
+        with ac_col2:
+            _s1_site_opts = _ac_site_codes
+            _s1_site_labels = {
+                s.codice_sito: s.dropdown_label for s in _ac_all_sites
+            }
+            _s1_site_key = st.selectbox(
+                "Codice sito",
+                options=_s1_site_opts,
+                format_func=lambda c: _s1_site_labels.get(c, c),
+                key="ac_site",
+                help=(
+                    "Sito operativo a cui attribuire l'emissione. "
+                    "La voce 'Processo (decarbonatazione)' appare solo per stabilimenti produttivi."
+                ),
+            )
+            _ac_early_site_selection = _s1_site_key
+
+    # Build the sub-scope list, filtering out process keys when the site is
+    # not a STABILIMENTO_PRODUTTIVO (decision #7).
+    _ac_selected_site_obj: Site | None = (
+        get_site(_ac_early_site_selection) if _ac_early_site_selection else None
+    )
+    _is_stabilimento = (
+        _ac_selected_site_obj is not None
+        and _ac_selected_site_obj.site_type == "STABILIMENTO_PRODUTTIVO"
+    )
+
+    def _ac_filter_subscopes(scope: int, site_obj: Site | None) -> list[str]:
+        """Return allowed sub-scope keys, honouring decision #7 for Scope 1."""
+        keys = _AC_SUBSCOPE_BY_SCOPE[scope]
+        if scope != 1:
+            return keys
+        # For Scope 1: hide process_ keys unless the site is a stabilimento.
+        is_stab = site_obj is not None and site_obj.site_type == "STABILIMENTO_PRODUTTIVO"
+        if is_stab:
+            return keys
+        return [k for k in keys if not k.startswith("process_")]
+
+    ac_subscope_keys = _ac_filter_subscopes(ac_scope, _ac_selected_site_obj)
+
+    _ac_subscope_col = ac_col1 if ac_scope == 1 else ac_col2
+    with _ac_subscope_col if ac_scope != 1 else st.container():
+        # For Scope 1 place sub-scope below scope selector (full width).
+        # For Scope 2/3 use the right column as before.
+        if ac_scope == 1:
+            _ss_col, _ = st.columns([2, 1])
+            _ss_ctx = _ss_col
+        else:
+            _ss_ctx = ac_col2
+
+    with _ss_ctx:
         ac_subscope_key = st.selectbox(
             _("auto_calc_subscope", lang),
             options=ac_subscope_keys,
             format_func=lambda k: _AC_SUBSCOPE_LABELS[k],
             key="ac_subscope",
             help="Seleziona la categoria specifica corrispondente alla fonte di emissione.",
+        )
+
+    # Caption explaining why process options are hidden (decision #7, colorblind-safe).
+    if ac_scope == 1 and _ac_selected_site_obj is not None and not _is_stabilimento:
+        st.caption(
+            f"ℹ️ La voce 'Processo (decarbonatazione)' è disponibile solo per stabilimenti "
+            f"produttivi. Il sito {_ac_selected_site_obj.codice_sito} è di tipo "
+            f"{_ac_selected_site_obj.site_type_label}."
         )
 
     st.divider()
@@ -1225,33 +1305,51 @@ with tab_autocalc:
     ac_sottocategoria: str | None = None
     ac_metodo: str | None = None
 
+    # Site label helpers for dropdown
+    _all_site_labels = {s.codice_sito: s.dropdown_label for s in _ac_all_sites}
+
     f_col1, f_col2 = st.columns(2)
 
     with f_col1:
         # --- Site selector ---
-        if is_s1_process:
-            # Process is locked to IANO (only site with CaCO3 decarb)
-            st.text_input(
-                "Codice sito",
-                value="IANO",
-                disabled=True,
-                help="Il processo di decarbonatazione CaCO3 e attivo solo per il sito IANO.",
+        if ac_scope == 1:
+            # Scope 1: site was already shown above the sub-scope picker
+            # (decision #7 ordering). Reuse the value from session_state.
+            ac_codice_sito = _ac_early_site_selection or (
+                _ac_site_codes[0] if _ac_site_codes else None
             )
-            ac_codice_sito = "IANO"
+            # For process sub-scopes the backend enforces IANO; show a
+            # locked text input as a hint (not used for routing — the
+            # actual codice_sito comes from _ac_early_site_selection which
+            # for process paths the form already constrains to IANO only
+            # via the "Stabilimento produttivo" site-type filter above).
+            if is_s1_process and ac_codice_sito:
+                st.text_input(
+                    "Codice sito (confermato)",
+                    value=ac_codice_sito,
+                    disabled=True,
+                    help=(
+                        "Il processo di decarbonatazione CaCO3 è attivo solo per "
+                        "stabilimenti produttivi. Sito selezionato sopra."
+                    ),
+                )
         elif is_s3:
             # Optional for Scope 3 categories
-            s3_site_options = ["(nessuno)"] + list(KNOWN_SITES)
+            s3_site_options = ["(nessuno)"] + _ac_site_codes
             s3_site = st.selectbox(
                 "Codice sito (opzionale)",
                 options=s3_site_options,
+                format_func=lambda c: "(nessuno)" if c == "(nessuno)" else _all_site_labels.get(c, c),
                 key="ac_site_s3",
-                help="Per le categorie Scope 3 il sito e opzionale. Ometti per imputazione corporate.",
+                help="Per le categorie Scope 3 il sito è opzionale. Ometti per imputazione corporate.",
             )
             ac_codice_sito = None if s3_site == "(nessuno)" else s3_site
         else:
+            # Scope 2: live site list from API
             ac_codice_sito = st.selectbox(
                 "Codice sito",
-                options=list(KNOWN_SITES),
+                options=_ac_site_codes,
+                format_func=lambda c: _all_site_labels.get(c, c),
                 key="ac_site",
                 help="Sito operativo a cui attribuire l'emissione (perimetro consolidamento).",
             )
@@ -1456,8 +1554,25 @@ with tab_autocalc:
 
     if preview_error:
         detail_msg = preview_error
-        # Surface 422 detail directly (design doc §6 requirement)
-        if "fattore" in detail_msg.lower() or "factor" in detail_msg.lower() or "missing" in detail_msg.lower():
+        # 422 site_type_invalid: show a specific, actionable alert
+        # (task #4 — graceful fallback for stale-cache bypass).
+        # Detection: the backend embeds "site_type_invalid" in the detail.
+        if "site_type_invalid" in detail_msg.lower() or "site_type_invalid" in detail_msg:
+            # Try to extract structured fields from the detail string.
+            _err_sito = ac_codice_sito or "?"
+            _err_site_obj = get_site(_err_sito)
+            _err_type_label = (
+                _err_site_obj.site_type_label if _err_site_obj else _err_sito
+            )
+            st.error(
+                f"⚠️ **Tipo sito non valido per questa operazione.**\n\n"
+                f"Il sito **{_err_sito}** è di tipo **{_err_type_label}**: "
+                f"le emissioni di processo (decarbonatazione CaCO3) sono ammesse "
+                f"solo per siti di tipo Stabilimento produttivo.\n\n"
+                f"Dettaglio backend: {detail_msg}",
+            )
+        # Surface 422 missing-factor detail directly (design doc §6 requirement)
+        elif "fattore" in detail_msg.lower() or "factor" in detail_msg.lower() or "missing" in detail_msg.lower():
             st.error(
                 f"{_('auto_calc_no_factor', lang)}\n\nDettaglio: {detail_msg}",
                 icon="🔍",
