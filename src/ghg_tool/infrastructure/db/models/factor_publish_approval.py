@@ -54,7 +54,7 @@ class FactorPublishApproval(Base):
         UUID(as_uuid=True), ForeignKey("ref.tenants.id"), nullable=False
     )
     factor_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("calc.factor_catalog.id"), nullable=False
+        UUID(as_uuid=True), ForeignKey("ref.factor_catalog.id"), nullable=False
     )
     proposed_by: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("ref.users.id"), nullable=False

@@ -603,7 +603,7 @@ async def list_pending_approvals(
             "SELECT a.id, a.factor_id, f.factor_id AS factor_string_id, "
             "       a.proposed_by, a.proposed_at, a.reason_code "
             "FROM calc.factor_publish_approvals a "
-            "JOIN calc.factor_catalog f ON f.id = a.factor_id "
+            "JOIN ref.factor_catalog f ON f.id = a.factor_id "
             "WHERE a.tenant_id = CAST(:tenant AS uuid) "
             "  AND a.decision = 'PENDING' "
             "ORDER BY a.proposed_at ASC"

@@ -512,7 +512,7 @@ class TestSecP1002SecurityHeaders:
     """SEC-P1-002: security response headers are injected into every response."""
 
     _EXPECTED_HEADERS = {
-        "Strict-Transport-Security": "max-age=31536000; includeSubDomains",
+        "Strict-Transport-Security": "max-age=31536000; includeSubDomains; preload",
         "X-Content-Type-Options": "nosniff",
         "X-Frame-Options": "DENY",
         "Referrer-Policy": "no-referrer",
@@ -535,7 +535,7 @@ class TestSecP1002SecurityHeaders:
         with TestClient(app, raise_server_exceptions=False) as client:
             resp = client.get("/healthz")
         assert resp.headers.get("Strict-Transport-Security") == (
-            "max-age=31536000; includeSubDomains"
+            "max-age=31536000; includeSubDomains; preload"
         )
 
     def test_x_frame_options_deny(self) -> None:
