@@ -117,11 +117,14 @@ async def db_session(db_engine: AsyncEngine) -> AsyncIterator[AsyncSession]:
 
 @pytest_asyncio.fixture(scope="session")
 async def tenant_id(db_engine: AsyncEngine) -> str:
-    """Return the UUID of the seeded 'CERAMIC_TILE_CO' tenant.
+    """Return the UUID of the seeded launch tenant.
 
-    Reads from the live database (seeded in M0) rather than generating a new
-    UUID, so that REFERENCES ref.tenants(id) constraints are satisfied without
-    needing a test-only INSERT.
+    M0 seeds the tenant as 'CERAMIC_TILE_CO'; migration 0009_M8_rebrand_tenant
+    then renames it to 'GRESMALT' (env-overridable). After a full
+    `alembic upgrade head` the tenant_code is 'GRESMALT', not 'CERAMIC_TILE_CO'.
+
+    Look up both codes so this fixture is robust against the M0->M8 rebrand
+    sequence regardless of where in the chain the test runs.
     """
     SessionLocal = async_sessionmaker(
         db_engine,
@@ -130,12 +133,19 @@ async def tenant_id(db_engine: AsyncEngine) -> str:
     )
     async with SessionLocal() as session:
         result = await session.execute(
-            text("SELECT id::text FROM ref.tenants WHERE code = 'CERAMIC_TILE_CO' LIMIT 1")
+            text(
+                "SELECT id::text FROM ref.tenants "
+                "WHERE code IN ('GRESMALT', 'CERAMIC_TILE_CO') "
+                "ORDER BY CASE code "
+                "  WHEN 'GRESMALT' THEN 0 "
+                "  WHEN 'CERAMIC_TILE_CO' THEN 1 "
+                "END LIMIT 1"
+            )
         )
         row = result.fetchone()
         if row is None:
             raise RuntimeError(
-                "Seeded tenant 'CERAMIC_TILE_CO' not found — "
+                "Seeded launch tenant (GRESMALT or CERAMIC_TILE_CO) not found — "
                 "ensure alembic upgrade head has been run before the integration suite."
             )
         return str(row[0])
