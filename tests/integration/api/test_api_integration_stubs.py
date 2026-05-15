@@ -58,8 +58,8 @@ from ghg_tool.infrastructure.security.jwt import create_access_token  # noqa: E4
 # ---------------------------------------------------------------------------
 
 
-def _data_steward_token(tenant_id: str, user_id: str | None = None) -> str:
-    """Mint a data_steward JWT for the given tenant.
+def _editor_token(tenant_id: str, user_id: str | None = None) -> str:
+    """Mint a editor JWT for the given tenant.
 
     Args:
         tenant_id: UUID string of the tenant.
@@ -70,13 +70,13 @@ def _data_steward_token(tenant_id: str, user_id: str | None = None) -> str:
     """
     return create_access_token(
         sub=user_id or str(uuid.uuid4()),
-        role="data_steward",
+        role="editor",
         tenant_id=tenant_id,
     )
 
 
 def _auditor_token(tenant_id: str) -> str:
-    """Mint an auditor JWT for the given tenant.
+    """Mint an viewer JWT for the given tenant.
 
     Args:
         tenant_id: UUID string of the tenant.
@@ -86,13 +86,13 @@ def _auditor_token(tenant_id: str) -> str:
     """
     return create_access_token(
         sub=str(uuid.uuid4()),
-        role="auditor",
+        role="viewer",
         tenant_id=tenant_id,
     )
 
 
-def _esg_manager_token(tenant_id: str) -> str:
-    """Mint an esg_manager JWT for the given tenant.
+def _admin_token(tenant_id: str) -> str:
+    """Mint an admin JWT for the given tenant.
 
     Args:
         tenant_id: UUID string of the tenant.
@@ -102,7 +102,7 @@ def _esg_manager_token(tenant_id: str) -> str:
     """
     return create_access_token(
         sub=str(uuid.uuid4()),
-        role="esg_manager",
+        role="admin",
         tenant_id=tenant_id,
     )
 
@@ -190,7 +190,7 @@ class TestEmissionsIntegration:
     ) -> None:
         """POST /emissions creates a row that GET /emissions returns.
 
-        A data_steward posts a valid EmissionCreate payload.  The API must
+        A editor posts a valid EmissionCreate payload.  The API must
         return 201 with an ``id`` field.  A subsequent GET /emissions must
         include that id in its response (row is readable).
 
@@ -199,7 +199,7 @@ class TestEmissionsIntegration:
         We verify via the rls_session that the row is readable within the
         transaction.
         """
-        token = await seeded_auth_session.mint("data_steward")
+        token = await seeded_auth_session.mint("editor")
 
         # sub_scope must be one of the enum values enforced by the
         # EmissionCreate Pydantic validator at the API boundary. The CI
@@ -271,7 +271,7 @@ class TestEmissionsIntegration:
         rows (append-only invariant enforced at the API layer).  FastAPI
         returns 405 Method Not Allowed when no handler matches.
         """
-        token = await seeded_auth_session.mint("data_steward")
+        token = await seeded_auth_session.mint("editor")
         fake_id = str(uuid.uuid4())
 
         async with AsyncClient(app=fastapi_app, base_url="http://testserver") as client:
@@ -315,7 +315,7 @@ class TestEmissionsIntegration:
         )
         await rls_session.commit()
 
-        token = await seeded_auth_session.mint("data_steward")
+        token = await seeded_auth_session.mint("editor")
 
         # POST /api/v1/emissions/correction expects EmissionCorrectionCreate:
         # supersedes_id (UUID of the row to close), new_record (nested
@@ -405,7 +405,7 @@ class TestEmissionsIntegration:
         # returns 0 rows or an auth error — proving cross-tenant isolation.
         other_tenant_id = str(uuid.uuid4())
         token = await seeded_auth_session.mint(
-            "data_steward", jwt_tenant_id_override=other_tenant_id
+            "editor", jwt_tenant_id_override=other_tenant_id
         )
 
         async with AsyncClient(app=fastapi_app, base_url="http://testserver") as client:
@@ -470,8 +470,8 @@ class TestAuditTrailIntegration:
             tco2e=7.77,
         )
 
-        # esg_manager and auditor roles are required for the audit trail endpoint
-        token = await seeded_auth_session.mint("esg_manager")
+        # admin and viewer roles are required for the audit trail endpoint
+        token = await seeded_auth_session.mint("admin")
 
         async with AsyncClient(app=fastapi_app, base_url="http://testserver") as client:
             resp = await client.get(
@@ -536,7 +536,7 @@ class TestGoCertificateIntegration:
         site_id = str(site_row[0])
         go_id = f"GO-TEST-{uuid.uuid4().hex[:12].upper()}"
 
-        token = await seeded_auth_session.mint("data_steward")
+        token = await seeded_auth_session.mint("editor")
 
         go_payload = {
             "go_id": go_id,

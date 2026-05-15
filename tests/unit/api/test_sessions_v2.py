@@ -42,7 +42,7 @@ OTHER_SESSION_ID = uuid.uuid4()
 
 
 def _make_user(
-    role: str = "esg_manager",
+    role: str = "admin",
     user_id: str | None = None,
     jti: str | None = None,
 ) -> CurrentUser:
@@ -54,7 +54,7 @@ def _make_user(
     )
 
 
-def _auth_override(role: str = "esg_manager", user_id: str | None = None, jti: str | None = None):
+def _auth_override(role: str = "admin", user_id: str | None = None, jti: str | None = None):
     user = _make_user(role, user_id, jti)
 
     async def _dep() -> CurrentUser:
@@ -229,7 +229,7 @@ class TestSessionCheckMiddleware:
         from ghg_tool.infrastructure.security.jwt import decode_token
 
         token = create_access_token(
-            sub=TEST_USER, role="esg_manager", tenant_id=TEST_TENANT
+            sub=TEST_USER, role="admin", tenant_id=TEST_TENANT
         )
         claims = decode_token(token)
         jti = claims.get("jti", "")
@@ -273,7 +273,7 @@ class TestSessionCheckMiddleware:
         table must be rejected fail-closed (503), never allowed through.
         """
         token = create_access_token(
-            sub=TEST_USER, role="esg_manager", tenant_id=TEST_TENANT
+            sub=TEST_USER, role="admin", tenant_id=TEST_TENANT
         )
         # No DB mocking -- the AsyncSessionFactory will fail to connect.
         app.dependency_overrides.clear()
@@ -293,7 +293,7 @@ class TestSessionCheckMiddleware:
         We patch AsyncSessionFactory to return a revoked row.
         """
         token = create_access_token(
-            sub=TEST_USER, role="esg_manager", tenant_id=TEST_TENANT
+            sub=TEST_USER, role="admin", tenant_id=TEST_TENANT
         )
         claims_from_token = None
         from ghg_tool.infrastructure.security.jwt import decode_token
@@ -335,7 +335,7 @@ class TestSessionCheckMiddleware:
         rejected fail-closed.
         """
         token = create_access_token(
-            sub=TEST_USER, role="esg_manager", tenant_id=TEST_TENANT
+            sub=TEST_USER, role="admin", tenant_id=TEST_TENANT
         )
 
         mock_result = MagicMock()

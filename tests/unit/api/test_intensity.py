@@ -7,7 +7,7 @@ Covers:
   - 401 when no JWT is provided
   - 403 when caller role lacks intensity:read permission (no role currently
     lacks it per the matrix, so this path is tested by monkeypatching the
-    permission matrix to restrict to esg_manager only, then calling as auditor)
+    permission matrix to restrict to admin only, then calling as viewer)
   - Query params anno_from / anno_to / codice_sito / gwp_set are forwarded
   - Missing required params (tenant_id / denominator_type) → 422
 """
@@ -135,7 +135,7 @@ class TestGetIntensity:
 
     def test_200_ok_with_valid_params_and_mocked_rows(self) -> None:
         """200 OK returned when DB yields intensity rows; response shape correct."""
-        app.dependency_overrides[get_current_user] = _auth_override("data_steward")
+        app.dependency_overrides[get_current_user] = _auth_override("editor")
         app.dependency_overrides[get_db] = _mock_db_with_rows([_SAMPLE_ROW])
 
         with TestClient(app, raise_server_exceptions=False) as client:
@@ -161,7 +161,7 @@ class TestGetIntensity:
 
     def test_200_ok_stub_when_mv_absent_programming_error(self) -> None:
         """ProgrammingError (MV not yet created) → 200 with empty rows and note."""
-        app.dependency_overrides[get_current_user] = _auth_override("auditor")
+        app.dependency_overrides[get_current_user] = _auth_override("viewer")
         app.dependency_overrides[get_db] = _mock_db_error(ProgrammingError)
 
         with TestClient(app, raise_server_exceptions=False) as client:
@@ -177,7 +177,7 @@ class TestGetIntensity:
 
     def test_200_ok_stub_when_mv_absent_operational_error(self) -> None:
         """OperationalError (DB down / table missing) → 200 stub response."""
-        app.dependency_overrides[get_current_user] = _auth_override("esg_manager")
+        app.dependency_overrides[get_current_user] = _auth_override("admin")
         app.dependency_overrides[get_db] = _mock_db_error(OperationalError)
 
         with TestClient(app, raise_server_exceptions=False) as client:
@@ -191,7 +191,7 @@ class TestGetIntensity:
 
     def test_422_invalid_denominator_type(self) -> None:
         """denominator_type='kWh' is not in the allowed Literal → 422."""
-        app.dependency_overrides[get_current_user] = _auth_override("data_steward")
+        app.dependency_overrides[get_current_user] = _auth_override("editor")
         app.dependency_overrides[get_db] = _mock_db_empty()
 
         bad_params = {**_VALID_PARAMS, "denominator_type": "kWh"}
@@ -204,7 +204,7 @@ class TestGetIntensity:
 
     def test_422_invalid_gwp_set(self) -> None:
         """gwp_set='AR4' is not in the allowed Literal → 422 from FastAPI validation."""
-        app.dependency_overrides[get_current_user] = _auth_override("data_steward")
+        app.dependency_overrides[get_current_user] = _auth_override("editor")
         app.dependency_overrides[get_db] = _mock_db_empty()
 
         bad_params = {**_VALID_PARAMS, "gwp_set": "AR4"}
@@ -229,13 +229,13 @@ class TestGetIntensity:
         assert resp.status_code == 401, resp.text
 
     def test_403_role_too_low_when_matrix_restricted(self) -> None:
-        """When permission matrix restricts intensity:read to esg_manager only,
-        an auditor caller receives 403.
+        """When permission matrix restricts intensity:read to admin only,
+        an viewer caller receives 403.
 
         This test patches the RBAC matrix to simulate a stricter policy, verifying
         that the require_permission dependency correctly enforces the matrix.
         """
-        app.dependency_overrides[get_current_user] = _auth_override("auditor")
+        app.dependency_overrides[get_current_user] = _auth_override("viewer")
         app.dependency_overrides[get_db] = _mock_db_empty()
 
         with (
@@ -243,7 +243,7 @@ class TestGetIntensity:
                 "ghg_tool.infrastructure.security.rbac.PERMISSION_MATRIX",
                 {
                     "intensity": {
-                        "read": frozenset({"esg_manager"}),  # auditor excluded
+                        "read": frozenset({"admin"}),  # viewer excluded
                     },
                 },
             ),
@@ -263,7 +263,7 @@ class TestGetIntensity:
         Omitting tenant_id from params should return 200 (no 422) because the
         tenant is taken from the JWT user fixture (_TENANT_ID).
         """
-        app.dependency_overrides[get_current_user] = _auth_override("data_steward")
+        app.dependency_overrides[get_current_user] = _auth_override("editor")
         app.dependency_overrides[get_db] = _mock_db_empty()
 
         params_no_tenant = {
@@ -279,7 +279,7 @@ class TestGetIntensity:
 
     def test_422_missing_denominator_type(self) -> None:
         """Missing required denominator_type → 422."""
-        app.dependency_overrides[get_current_user] = _auth_override("data_steward")
+        app.dependency_overrides[get_current_user] = _auth_override("editor")
         app.dependency_overrides[get_db] = _mock_db_empty()
 
         params_no_denom = {
@@ -293,8 +293,8 @@ class TestGetIntensity:
         assert resp.status_code == 422, resp.text
 
     def test_all_roles_can_read_by_default(self) -> None:
-        """All three roles (data_steward, esg_manager, auditor) receive 200."""
-        for role in ("data_steward", "esg_manager", "auditor"):
+        """All three roles (editor, admin, viewer) receive 200."""
+        for role in ("editor", "admin", "viewer"):
             app.dependency_overrides[get_current_user] = _auth_override(role)
             app.dependency_overrides[get_db] = _mock_db_empty()
 
@@ -306,7 +306,7 @@ class TestGetIntensity:
 
     def test_codice_sito_filter_accepted(self) -> None:
         """codice_sito query param is accepted and does not cause errors."""
-        app.dependency_overrides[get_current_user] = _auth_override("data_steward")
+        app.dependency_overrides[get_current_user] = _auth_override("editor")
         app.dependency_overrides[get_db] = _mock_db_empty()
 
         params_with_site = {**_VALID_PARAMS, "codice_sito": "IANO"}
@@ -319,7 +319,7 @@ class TestGetIntensity:
     def test_fte_denominator_accepted(self) -> None:
         """FTE denominator type is accepted (REV-017 hr_confirmation_date traceability)."""
         fte_row = {**_SAMPLE_ROW, "denominator_unit": "FTE", "hr_confirmation_date": "2024-03-01"}
-        app.dependency_overrides[get_current_user] = _auth_override("esg_manager")
+        app.dependency_overrides[get_current_user] = _auth_override("admin")
         app.dependency_overrides[get_db] = _mock_db_with_rows([fte_row])
 
         params_fte = {**_VALID_PARAMS, "denominator_type": "FTE"}
@@ -334,7 +334,7 @@ class TestGetIntensity:
 
     def test_no_delete_endpoint_on_intensity(self) -> None:
         """DELETE /api/v1/intensity/ is not registered → 405 or 404 (append-only)."""
-        app.dependency_overrides[get_current_user] = _auth_override("esg_manager")
+        app.dependency_overrides[get_current_user] = _auth_override("admin")
         app.dependency_overrides[get_db] = _mock_db_empty()
 
         with TestClient(app, raise_server_exceptions=False) as client:
@@ -345,7 +345,7 @@ class TestGetIntensity:
 
     def test_response_envelope_fields_present(self) -> None:
         """IntensityResponse envelope must include all mandatory fields."""
-        app.dependency_overrides[get_current_user] = _auth_override("auditor")
+        app.dependency_overrides[get_current_user] = _auth_override("viewer")
         app.dependency_overrides[get_db] = _mock_db_empty()
 
         with TestClient(app, raise_server_exceptions=False) as client:

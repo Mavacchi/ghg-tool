@@ -177,7 +177,7 @@ def test_propose_reject_propose_again_202() -> None:
 
         return _gen
 
-    app.dependency_overrides[get_current_user] = _auth("esg_manager", _ESG1)
+    app.dependency_overrides[get_current_user] = _auth("admin", _ESG1)
     app.dependency_overrides[get_db] = _db_propose_round1()
     with TestClient(app, raise_server_exceptions=False) as client:
         resp1 = client.post(_PUBLISH_URL, json=_PUBLISH_BODY)
@@ -223,7 +223,7 @@ def test_propose_reject_propose_again_202() -> None:
 
         return _gen
 
-    app.dependency_overrides[get_current_user] = _auth("esg_manager", _ESG1)
+    app.dependency_overrides[get_current_user] = _auth("admin", _ESG1)
     app.dependency_overrides[get_db] = _db_propose_round3()
     with TestClient(app, raise_server_exceptions=False) as client:
         resp3 = client.post(_PUBLISH_URL, json=_PUBLISH_BODY)

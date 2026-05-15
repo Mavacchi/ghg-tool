@@ -30,9 +30,9 @@ from ghg_tool.infrastructure.security.jwt import create_access_token
 # Canonical tenant and user UUIDs for tests (no real PII)
 # ---------------------------------------------------------------------------
 TEST_TENANT_ID = str(uuid.uuid4())
-TEST_USER_ID_DS = str(uuid.uuid4())   # data_steward
-TEST_USER_ID_ESG = str(uuid.uuid4())  # esg_manager
-TEST_USER_ID_AU = str(uuid.uuid4())   # auditor
+TEST_USER_ID_DS = str(uuid.uuid4())   # editor
+TEST_USER_ID_ESG = str(uuid.uuid4())  # admin
+TEST_USER_ID_AU = str(uuid.uuid4())   # viewer
 
 
 def make_token(role: str, user_id: str | None = None) -> str:
@@ -102,8 +102,8 @@ def override_db_noop() -> Any:
 
 @pytest.fixture
 def client_ds() -> TestClient:
-    """Synchronous TestClient with data_steward auth and no DB."""
-    app.dependency_overrides[get_current_user] = override_auth("data_steward", TEST_USER_ID_DS)
+    """Synchronous TestClient with editor auth and no DB."""
+    app.dependency_overrides[get_current_user] = override_auth("editor", TEST_USER_ID_DS)
     app.dependency_overrides[get_db] = override_db_noop()
     with TestClient(app, raise_server_exceptions=False) as c:
         yield c
@@ -112,8 +112,8 @@ def client_ds() -> TestClient:
 
 @pytest.fixture
 def client_esg() -> TestClient:
-    """Synchronous TestClient with esg_manager auth and no DB."""
-    app.dependency_overrides[get_current_user] = override_auth("esg_manager", TEST_USER_ID_ESG)
+    """Synchronous TestClient with admin auth and no DB."""
+    app.dependency_overrides[get_current_user] = override_auth("admin", TEST_USER_ID_ESG)
     app.dependency_overrides[get_db] = override_db_noop()
     with TestClient(app, raise_server_exceptions=False) as c:
         yield c
@@ -122,8 +122,8 @@ def client_esg() -> TestClient:
 
 @pytest.fixture
 def client_auditor() -> TestClient:
-    """Synchronous TestClient with auditor auth and no DB."""
-    app.dependency_overrides[get_current_user] = override_auth("auditor", TEST_USER_ID_AU)
+    """Synchronous TestClient with viewer auth and no DB."""
+    app.dependency_overrides[get_current_user] = override_auth("viewer", TEST_USER_ID_AU)
     app.dependency_overrides[get_db] = override_db_noop()
     with TestClient(app, raise_server_exceptions=False) as c:
         yield c

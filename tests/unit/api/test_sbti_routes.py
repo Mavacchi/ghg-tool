@@ -5,7 +5,7 @@ No live PostgreSQL instance is required.
 
 Covers (10 cases):
   1. list_targets 200 -- active targets returned
-  2. list_targets with include_inactive=true as auditor -> 403
+  2. list_targets with include_inactive=true as viewer -> 403
   3. create_target happy path -> 201
   4. create_target 422 invalid scope_coverage
   5. create_target 422 target_year <= baseline_year
@@ -13,7 +13,7 @@ Covers (10 cases):
   7. deactivate_target 404 wrong tenant (row not found)
   8. get_trajectory happy path with actuals -> 200
   9. 401 unauthenticated on list endpoint
-  10. 403 data_steward on create (write-protected)
+  10. 403 editor on create (write-protected)
 """
 
 from __future__ import annotations
@@ -44,7 +44,7 @@ from ghg_tool.infrastructure.db.models.sbti_target import SbtiTarget
 _TENANT = str(uuid.uuid4())
 _ESG_USER = str(uuid.uuid4())
 _DS_USER = str(uuid.uuid4())
-_AUDITOR_USER = str(uuid.uuid4())
+_VIEWER_USER = str(uuid.uuid4())
 _TARGET_UUID = uuid.uuid4()
 
 _LIST_URL = "/api/v1/sbti/targets"
@@ -137,7 +137,7 @@ def test_list_targets_200() -> None:
     async def _db() -> AsyncGenerator[Any, None]:
         yield mock_session
 
-    app.dependency_overrides[get_current_user] = _auth("auditor", _AUDITOR_USER)
+    app.dependency_overrides[get_current_user] = _auth("viewer", _VIEWER_USER)
     app.dependency_overrides[get_db] = _db
     try:
         with TestClient(app, raise_server_exceptions=False) as client:
@@ -152,13 +152,13 @@ def test_list_targets_200() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Test 2: include_inactive=true as auditor -> 403
+# Test 2: include_inactive=true as viewer -> 403
 # ---------------------------------------------------------------------------
 
 
 def test_list_targets_include_inactive_auditor_403() -> None:
-    """Non-esg_manager cannot request include_inactive=true."""
-    app.dependency_overrides[get_current_user] = _auth("auditor", _AUDITOR_USER)
+    """Non-admin cannot request include_inactive=true."""
+    app.dependency_overrides[get_current_user] = _auth("viewer", _VIEWER_USER)
     app.dependency_overrides[get_db] = _noop_db()
     try:
         with TestClient(app, raise_server_exceptions=False) as client:
@@ -174,7 +174,7 @@ def test_list_targets_include_inactive_auditor_403() -> None:
 
 
 def test_create_target_201() -> None:
-    """esg_manager can create a valid target; response is 201."""
+    """admin can create a valid target; response is 201."""
     created_row = _make_target_orm()
 
     mock_session = AsyncMock()
@@ -210,7 +210,7 @@ def test_create_target_201() -> None:
     async def _db() -> AsyncGenerator[Any, None]:
         yield mock_session
 
-    app.dependency_overrides[get_current_user] = _auth("esg_manager", _ESG_USER)
+    app.dependency_overrides[get_current_user] = _auth("admin", _ESG_USER)
     app.dependency_overrides[get_db] = _db
     try:
         with (
@@ -234,7 +234,7 @@ def test_create_target_201() -> None:
 def test_create_target_422_invalid_scope() -> None:
     """Invalid scope_coverage fails Pydantic model_validator -> 422."""
     bad_body = {**_VALID_BODY, "scope_coverage": "INVALID_SCOPE"}
-    app.dependency_overrides[get_current_user] = _auth("esg_manager", _ESG_USER)
+    app.dependency_overrides[get_current_user] = _auth("admin", _ESG_USER)
     app.dependency_overrides[get_db] = _noop_db()
     try:
         with TestClient(app, raise_server_exceptions=False) as client:
@@ -252,7 +252,7 @@ def test_create_target_422_invalid_scope() -> None:
 def test_create_target_422_year_order() -> None:
     """target_year == baseline_year fails model_validator -> 422."""
     bad_body = {**_VALID_BODY, "target_year": 2021}  # == baseline_year
-    app.dependency_overrides[get_current_user] = _auth("esg_manager", _ESG_USER)
+    app.dependency_overrides[get_current_user] = _auth("admin", _ESG_USER)
     app.dependency_overrides[get_db] = _noop_db()
     try:
         with TestClient(app, raise_server_exceptions=False) as client:
@@ -268,7 +268,7 @@ def test_create_target_422_year_order() -> None:
 
 
 def test_deactivate_target_200() -> None:
-    """esg_manager can deactivate an active target."""
+    """admin can deactivate an active target."""
     active_row = _make_target_orm(is_active=True)
     _make_target_orm(is_active=False)
 
@@ -299,7 +299,7 @@ def test_deactivate_target_200() -> None:
     async def _db() -> AsyncGenerator[Any, None]:
         yield mock_session
 
-    app.dependency_overrides[get_current_user] = _auth("esg_manager", _ESG_USER)
+    app.dependency_overrides[get_current_user] = _auth("admin", _ESG_USER)
     app.dependency_overrides[get_db] = _db
     try:
         with (
@@ -328,7 +328,7 @@ def test_deactivate_target_404_wrong_tenant() -> None:
     async def _db() -> AsyncGenerator[Any, None]:
         yield mock_session
 
-    app.dependency_overrides[get_current_user] = _auth("esg_manager", _ESG_USER)
+    app.dependency_overrides[get_current_user] = _auth("admin", _ESG_USER)
     app.dependency_overrides[get_db] = _db
     try:
         with TestClient(app, raise_server_exceptions=False) as client:
@@ -371,7 +371,7 @@ def test_get_trajectory_200_with_actuals() -> None:
     async def _db() -> AsyncGenerator[Any, None]:
         yield mock_session
 
-    app.dependency_overrides[get_current_user] = _auth("auditor", _AUDITOR_USER)
+    app.dependency_overrides[get_current_user] = _auth("viewer", _VIEWER_USER)
     app.dependency_overrides[get_db] = _db
     try:
         with TestClient(app, raise_server_exceptions=False) as client:
@@ -403,13 +403,13 @@ def test_list_targets_401_unauthenticated() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Test 10: 403 data_steward on write
+# Test 10: 403 editor on write
 # ---------------------------------------------------------------------------
 
 
 def test_create_target_403_data_steward() -> None:
-    """data_steward cannot create SBTi targets (esg_manager only)."""
-    app.dependency_overrides[get_current_user] = _auth("data_steward", _DS_USER)
+    """editor cannot create SBTi targets (admin only)."""
+    app.dependency_overrides[get_current_user] = _auth("editor", _DS_USER)
     app.dependency_overrides[get_db] = _noop_db()
     try:
         with TestClient(app, raise_server_exceptions=False) as client:

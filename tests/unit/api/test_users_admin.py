@@ -31,11 +31,11 @@ from ghg_tool.api.main import app
 # ---------------------------------------------------------------------------
 
 _TENANT = str(uuid.uuid4())
-_ESG1 = str(uuid.uuid4())   # primary esg_manager (caller)
-_ESG2 = str(uuid.uuid4())   # second esg_manager (target for demotion/deactivation)
-_DS = str(uuid.uuid4())     # data_steward
-_AU = str(uuid.uuid4())     # auditor
-_USER_TARGET = str(uuid.uuid4())  # generic target user (auditor role in DB)
+_ESG1 = str(uuid.uuid4())   # primary admin (caller)
+_ESG2 = str(uuid.uuid4())   # second admin (target for demotion/deactivation)
+_DS = str(uuid.uuid4())     # editor
+_AU = str(uuid.uuid4())     # viewer
+_USER_TARGET = str(uuid.uuid4())  # generic target user (viewer role in DB)
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -66,7 +66,7 @@ def _make_row(**kwargs: Any) -> MagicMock:
     row.id = uuid.UUID(kwargs.get("id", _USER_TARGET))
     row.username = kwargs.get("username", "testuser")
     row.email = kwargs.get("email", "test@example.com")
-    row.role_code = kwargs.get("role_code", "auditor")
+    row.role_code = kwargs.get("role_code", "viewer")
     row.role_id = uuid.uuid4()
     row.is_active = kwargs.get("is_active", True)
     return row
@@ -87,7 +87,7 @@ def _db_for_active_patch(
 
     execute() is called in this order:
       1. _fetch_user_in_tenant SELECT
-      2. _count_active_esg_managers SELECT (only when needed for guard)
+      2. _count_active_admins SELECT (only when needed for guard)
       3. UPDATE
     """
     async def _gen() -> Any:
@@ -99,7 +99,7 @@ def _db_for_active_patch(
         fetch_result = MagicMock()
         fetch_result.fetchone = MagicMock(return_value=target_row)
 
-        # Result 2: SELECT count for _count_active_esg_managers
+        # Result 2: SELECT count for _count_active_admins
         count_result = MagicMock()
         count_result.fetchone = MagicMock(return_value=(active_manager_count,))
 
@@ -122,7 +122,7 @@ def _db_for_role_patch(
 
     execute() calls:
       1. _fetch_user_in_tenant SELECT
-      2. _count_active_esg_managers SELECT (guard; only for esg_manager demotion)
+      2. _count_active_admins SELECT (guard; only for admin demotion)
       3. SELECT ref.roles for new role_id
       4. UPDATE
     """
@@ -153,7 +153,7 @@ def _db_for_role_patch(
 def _db_for_role_patch_no_count(target_row: MagicMock | None) -> Any:
     """DB override for role change that does NOT trigger the last-admin count.
 
-    Used when the target is NOT an esg_manager (so count check is skipped).
+    Used when the target is NOT an admin (so count check is skipped).
     execute() calls: fetch + role_select + update.
     """
     async def _gen() -> Any:
@@ -229,9 +229,9 @@ class TestPatchUserActive:
     def test_happy_path_deactivate_returns_200_is_active_false(self) -> None:
         """Deactivating a non-admin, non-self user -> 200 + is_active False."""
         target = _make_row(
-            id=_USER_TARGET, role_code="auditor", is_active=True
+            id=_USER_TARGET, role_code="viewer", is_active=True
         )
-        app.dependency_overrides[get_current_user] = _auth("esg_manager", _ESG1)
+        app.dependency_overrides[get_current_user] = _auth("admin", _ESG1)
         # Only two execute calls needed: fetch + update (no count needed for non-esg)
         async def _gen() -> Any:
             session = AsyncMock()
@@ -255,12 +255,12 @@ class TestPatchUserActive:
         assert resp.status_code == 200
         data = resp.json()
         assert data["is_active"] is False
-        assert data["role_code"] == "auditor"
+        assert data["role_code"] == "viewer"
 
     def test_422_self_deactivation_forbidden(self) -> None:
         """Caller deactivating themselves -> 422 self_deactivation_forbidden."""
-        target = _make_row(id=_ESG1, role_code="esg_manager", is_active=True)
-        app.dependency_overrides[get_current_user] = _auth("esg_manager", _ESG1)
+        target = _make_row(id=_ESG1, role_code="admin", is_active=True)
+        app.dependency_overrides[get_current_user] = _auth("admin", _ESG1)
         async def _gen() -> Any:
             session = AsyncMock()
             session.flush = AsyncMock(return_value=None)
@@ -279,9 +279,9 @@ class TestPatchUserActive:
         assert resp.json()["detail"]["error_code"] == "self_deactivation_forbidden"
 
     def test_422_last_admin_deactivation_blocked(self) -> None:
-        """Cannot deactivate the last active esg_manager -> 422 last_admin."""
-        target = _make_row(id=_ESG2, role_code="esg_manager", is_active=True)
-        app.dependency_overrides[get_current_user] = _auth("esg_manager", _ESG1)
+        """Cannot deactivate the last active admin -> 422 last_admin."""
+        target = _make_row(id=_ESG2, role_code="admin", is_active=True)
+        app.dependency_overrides[get_current_user] = _auth("admin", _ESG1)
         # active_manager_count = 1 -> triggers the guard
         app.dependency_overrides[get_db] = _db_for_active_patch(
             target, active_manager_count=1
@@ -295,7 +295,7 @@ class TestPatchUserActive:
 
     def test_404_user_not_found(self) -> None:
         """Unknown user UUID -> 404."""
-        app.dependency_overrides[get_current_user] = _auth("esg_manager", _ESG1)
+        app.dependency_overrides[get_current_user] = _auth("admin", _ESG1)
         async def _gen() -> Any:
             session = AsyncMock()
             fetch_result = MagicMock()
@@ -319,8 +319,8 @@ class TestPatchUserActive:
         assert resp.status_code == 401
 
     def test_403_data_steward_forbidden(self) -> None:
-        """data_steward cannot change active state -> 403."""
-        app.dependency_overrides[get_current_user] = _auth("data_steward", _DS)
+        """editor cannot change active state -> 403."""
+        app.dependency_overrides[get_current_user] = _auth("editor", _DS)
         app.dependency_overrides[get_db] = _db_for_active_patch(None)
 
         with TestClient(app, raise_server_exceptions=False) as client:
@@ -328,8 +328,8 @@ class TestPatchUserActive:
         assert resp.status_code == 403
 
     def test_403_auditor_forbidden(self) -> None:
-        """auditor cannot change active state -> 403."""
-        app.dependency_overrides[get_current_user] = _auth("auditor", _AU)
+        """viewer cannot change active state -> 403."""
+        app.dependency_overrides[get_current_user] = _auth("viewer", _AU)
         app.dependency_overrides[get_db] = _db_for_active_patch(None)
 
         with TestClient(app, raise_server_exceptions=False) as client:
@@ -349,28 +349,28 @@ class TestPatchUserRole:
         return f"/api/v1/users/{user_id}/role"
 
     def test_happy_path_role_change_auditor_to_data_steward_200(self) -> None:
-        """Change auditor -> data_steward -> 200 with updated role_code."""
-        target = _make_row(id=_USER_TARGET, role_code="auditor", is_active=True)
-        app.dependency_overrides[get_current_user] = _auth("esg_manager", _ESG1)
+        """Change viewer -> editor -> 200 with updated role_code."""
+        target = _make_row(id=_USER_TARGET, role_code="viewer", is_active=True)
+        app.dependency_overrides[get_current_user] = _auth("admin", _ESG1)
         app.dependency_overrides[get_db] = _db_for_role_patch_no_count(target)
 
         with TestClient(app, raise_server_exceptions=False) as client:
-            resp = client.patch(self._url(), json={"role_code": "data_steward"})
+            resp = client.patch(self._url(), json={"role_code": "editor"})
 
         assert resp.status_code == 200
-        assert resp.json()["role_code"] == "data_steward"
+        assert resp.json()["role_code"] == "editor"
 
     def test_422_last_admin_demotion_blocked(self) -> None:
-        """Cannot demote the last active esg_manager -> 422 last_admin."""
-        target = _make_row(id=_ESG2, role_code="esg_manager", is_active=True)
-        app.dependency_overrides[get_current_user] = _auth("esg_manager", _ESG1)
-        # Only 1 active esg_manager remaining
+        """Cannot demote the last active admin -> 422 last_admin."""
+        target = _make_row(id=_ESG2, role_code="admin", is_active=True)
+        app.dependency_overrides[get_current_user] = _auth("admin", _ESG1)
+        # Only 1 active admin remaining
         app.dependency_overrides[get_db] = _db_for_role_patch(
             target, active_manager_count=1
         )
 
         with TestClient(app, raise_server_exceptions=False) as client:
-            resp = client.patch(self._url(_ESG2), json={"role_code": "data_steward"})
+            resp = client.patch(self._url(_ESG2), json={"role_code": "editor"})
 
         assert resp.status_code == 422
         assert resp.json()["detail"]["error_code"] == "last_admin"
@@ -378,30 +378,30 @@ class TestPatchUserRole:
     def test_401_unauthenticated(self) -> None:
         """No token -> 401."""
         with TestClient(app, raise_server_exceptions=False) as client:
-            resp = client.patch(self._url(), json={"role_code": "data_steward"})
+            resp = client.patch(self._url(), json={"role_code": "editor"})
         assert resp.status_code == 401
 
     def test_403_data_steward_forbidden(self) -> None:
-        """data_steward cannot change roles -> 403."""
-        app.dependency_overrides[get_current_user] = _auth("data_steward", _DS)
+        """editor cannot change roles -> 403."""
+        app.dependency_overrides[get_current_user] = _auth("editor", _DS)
         app.dependency_overrides[get_db] = _db_for_role_patch(None)
 
         with TestClient(app, raise_server_exceptions=False) as client:
-            resp = client.patch(self._url(), json={"role_code": "auditor"})
+            resp = client.patch(self._url(), json={"role_code": "viewer"})
         assert resp.status_code == 403
 
     def test_403_auditor_forbidden(self) -> None:
-        """auditor cannot change roles -> 403."""
-        app.dependency_overrides[get_current_user] = _auth("auditor", _AU)
+        """viewer cannot change roles -> 403."""
+        app.dependency_overrides[get_current_user] = _auth("viewer", _AU)
         app.dependency_overrides[get_db] = _db_for_role_patch(None)
 
         with TestClient(app, raise_server_exceptions=False) as client:
-            resp = client.patch(self._url(), json={"role_code": "auditor"})
+            resp = client.patch(self._url(), json={"role_code": "viewer"})
         assert resp.status_code == 403
 
     def test_422_invalid_role_code_rejected_by_pydantic(self) -> None:
         """Unknown role_code -> 422 from Pydantic before handler runs."""
-        app.dependency_overrides[get_current_user] = _auth("esg_manager", _ESG1)
+        app.dependency_overrides[get_current_user] = _auth("admin", _ESG1)
         app.dependency_overrides[get_db] = _db_for_role_patch_no_count(None)
 
         with TestClient(app, raise_server_exceptions=False) as client:
@@ -422,8 +422,8 @@ class TestPasswordReset:
 
     def test_happy_path_explicit_password_returned_in_response(self) -> None:
         """Explicit new_password -> 200, returned verbatim in response."""
-        target = _make_row(id=_USER_TARGET, role_code="auditor", is_active=True)
-        app.dependency_overrides[get_current_user] = _auth("esg_manager", _ESG1)
+        target = _make_row(id=_USER_TARGET, role_code="viewer", is_active=True)
+        app.dependency_overrides[get_current_user] = _auth("admin", _ESG1)
         app.dependency_overrides[get_db] = _db_for_password_reset(target)
 
         with TestClient(app, raise_server_exceptions=False) as client:
@@ -434,7 +434,7 @@ class TestPasswordReset:
 
     def test_happy_path_explicit_password_audit_row_excludes_plaintext(self) -> None:
         """Audit row after_state must NOT contain new_password or password_hash."""
-        target = _make_row(id=_USER_TARGET, role_code="auditor", is_active=True)
+        target = _make_row(id=_USER_TARGET, role_code="viewer", is_active=True)
         captured_adds: list[Any] = []
 
         async def _gen() -> Any:
@@ -456,7 +456,7 @@ class TestPasswordReset:
             )
             yield session
 
-        app.dependency_overrides[get_current_user] = _auth("esg_manager", _ESG1)
+        app.dependency_overrides[get_current_user] = _auth("admin", _ESG1)
         app.dependency_overrides[get_db] = _gen
 
         with TestClient(app, raise_server_exceptions=False) as client:
@@ -472,8 +472,8 @@ class TestPasswordReset:
 
     def test_happy_path_no_body_generates_random_password(self) -> None:
         """No body -> server generates 16-char password; returned in response."""
-        target = _make_row(id=_USER_TARGET, role_code="auditor", is_active=True)
-        app.dependency_overrides[get_current_user] = _auth("esg_manager", _ESG1)
+        target = _make_row(id=_USER_TARGET, role_code="viewer", is_active=True)
+        app.dependency_overrides[get_current_user] = _auth("admin", _ESG1)
         app.dependency_overrides[get_db] = _db_for_password_reset(target)
 
         with TestClient(app, raise_server_exceptions=False) as client:
@@ -486,8 +486,8 @@ class TestPasswordReset:
 
     def test_happy_path_null_new_password_generates_random(self) -> None:
         """Explicit null new_password -> server generates 16-char password."""
-        target = _make_row(id=_USER_TARGET, role_code="auditor", is_active=True)
-        app.dependency_overrides[get_current_user] = _auth("esg_manager", _ESG1)
+        target = _make_row(id=_USER_TARGET, role_code="viewer", is_active=True)
+        app.dependency_overrides[get_current_user] = _auth("admin", _ESG1)
         app.dependency_overrides[get_db] = _db_for_password_reset(target)
 
         with TestClient(app, raise_server_exceptions=False) as client:
@@ -503,8 +503,8 @@ class TestPasswordReset:
         assert resp.status_code == 401
 
     def test_403_data_steward_forbidden(self) -> None:
-        """data_steward cannot reset passwords -> 403."""
-        app.dependency_overrides[get_current_user] = _auth("data_steward", _DS)
+        """editor cannot reset passwords -> 403."""
+        app.dependency_overrides[get_current_user] = _auth("editor", _DS)
         app.dependency_overrides[get_db] = _db_for_password_reset(None)
 
         with TestClient(app, raise_server_exceptions=False) as client:
@@ -512,8 +512,8 @@ class TestPasswordReset:
         assert resp.status_code == 403
 
     def test_403_auditor_forbidden(self) -> None:
-        """auditor cannot reset passwords -> 403."""
-        app.dependency_overrides[get_current_user] = _auth("auditor", _AU)
+        """viewer cannot reset passwords -> 403."""
+        app.dependency_overrides[get_current_user] = _auth("viewer", _AU)
         app.dependency_overrides[get_db] = _db_for_password_reset(None)
 
         with TestClient(app, raise_server_exceptions=False) as client:
@@ -522,7 +522,7 @@ class TestPasswordReset:
 
     def test_422_password_too_short(self) -> None:
         """new_password shorter than 8 chars -> 422 from Pydantic."""
-        app.dependency_overrides[get_current_user] = _auth("esg_manager", _ESG1)
+        app.dependency_overrides[get_current_user] = _auth("admin", _ESG1)
         app.dependency_overrides[get_db] = _db_for_password_reset(None)
 
         with TestClient(app, raise_server_exceptions=False) as client:

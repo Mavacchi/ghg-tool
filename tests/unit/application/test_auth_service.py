@@ -59,7 +59,7 @@ _TEST_USER_ID = str(uuid.uuid4())
 def _make_user_record(
     *,
     is_active: bool = True,
-    role_code: str = "data_steward",
+    role_code: str = "editor",
     password_hash: str = "hashed_pw",
 ) -> MagicMock:
     """Build a mock UserRecord satisfying the auth_service Protocol.
@@ -131,7 +131,7 @@ class TestAuthenticateUserHappyPath:
     @pytest.mark.asyncio
     async def test_access_token_contains_correct_claims(self) -> None:
         """Access token sub, role, and tenant_id match the user record."""
-        user = _make_user_record(role_code="esg_manager")
+        user = _make_user_record(role_code="admin")
 
         with patch(
             "ghg_tool.application.services.auth_service.verify_password",
@@ -146,7 +146,7 @@ class TestAuthenticateUserHappyPath:
         assert result is not None
         claims = decode_token(result.access_token)
         assert claims["sub"] == _TEST_USER_ID
-        assert claims["role"] == "esg_manager"
+        assert claims["role"] == "admin"
         assert claims["tenant_id"] == _TEST_TENANT_ID
         assert claims["token_type"] == "access"
 
@@ -379,7 +379,7 @@ class TestRefreshAccessTokenHappyPath:
 
         result = refresh_access_token(
             refresh_tok,
-            role="data_steward",
+            role="editor",
             correlation_id="test-corr",
         )
 
@@ -395,11 +395,11 @@ class TestRefreshAccessTokenHappyPath:
         tenant_id = str(uuid.uuid4())
         refresh_tok = create_refresh_token(sub=sub, tenant_id=tenant_id)
 
-        result = refresh_access_token(refresh_tok, role="esg_manager")
+        result = refresh_access_token(refresh_tok, role="admin")
 
         assert result is not None
         claims = decode_token(result.access_token)
-        assert claims["role"] == "esg_manager"
+        assert claims["role"] == "admin"
         assert claims["sub"] == sub
         assert claims["token_type"] == "access"
 
@@ -409,7 +409,7 @@ class TestRefreshAccessTokenHappyPath:
         tenant_id = str(uuid.uuid4())
         refresh_tok = create_refresh_token(sub=sub, tenant_id=tenant_id)
 
-        result = refresh_access_token(refresh_tok, role="auditor")
+        result = refresh_access_token(refresh_tok, role="viewer")
 
         assert result is not None
         claims = decode_token(result.access_token)
@@ -421,7 +421,7 @@ class TestRefreshAccessTokenHappyPath:
         tenant_id = str(uuid.uuid4())
         refresh_tok = create_refresh_token(sub=sub, tenant_id=tenant_id)
 
-        result = refresh_access_token(refresh_tok, role="data_steward")
+        result = refresh_access_token(refresh_tok, role="editor")
 
         assert result is not None
         assert result.refresh_token == refresh_tok
@@ -437,12 +437,12 @@ class TestRefreshAccessTokenFailurePaths:
 
     def test_malformed_token_returns_none(self) -> None:
         """A completely malformed token string → returns None (no raise)."""
-        result = refresh_access_token("not.a.valid.jwt", role="data_steward")
+        result = refresh_access_token("not.a.valid.jwt", role="editor")
         assert result is None
 
     def test_garbage_string_returns_none(self) -> None:
         """Arbitrary garbage → returns None."""
-        result = refresh_access_token("garbage_input_xyz_123", role="data_steward")
+        result = refresh_access_token("garbage_input_xyz_123", role="editor")
         assert result is None
 
     def test_expired_refresh_token_returns_none(self) -> None:
@@ -459,7 +459,7 @@ class TestRefreshAccessTokenFailurePaths:
             _TEST_SECRET,
             algorithm="HS256",
         )
-        result = refresh_access_token(expired_token, role="data_steward")
+        result = refresh_access_token(expired_token, role="editor")
         assert result is None
 
     def test_access_token_passed_as_refresh_returns_none(self) -> None:
@@ -471,7 +471,7 @@ class TestRefreshAccessTokenFailurePaths:
         access_tok = jose_jwt.encode(
             {
                 "sub": str(uuid.uuid4()),
-                "role": "data_steward",
+                "role": "editor",
                 "tenant_id": str(uuid.uuid4()),
                 "jti": str(uuid.uuid4()),
                 "iat": int(time.time()),
@@ -481,7 +481,7 @@ class TestRefreshAccessTokenFailurePaths:
             _TEST_SECRET,
             algorithm="HS256",
         )
-        result = refresh_access_token(access_tok, role="data_steward")
+        result = refresh_access_token(access_tok, role="editor")
         assert result is None
 
     def test_wrong_signing_key_returns_none(self) -> None:
@@ -498,7 +498,7 @@ class TestRefreshAccessTokenFailurePaths:
             "completely-different-secret-key-xyz",
             algorithm="HS256",
         )
-        result = refresh_access_token(token_wrong_key, role="data_steward")
+        result = refresh_access_token(token_wrong_key, role="editor")
         assert result is None
 
     def test_token_with_no_token_type_claim_returns_none(self) -> None:
@@ -515,10 +515,10 @@ class TestRefreshAccessTokenFailurePaths:
             _TEST_SECRET,
             algorithm="HS256",
         )
-        result = refresh_access_token(token_no_type, role="data_steward")
+        result = refresh_access_token(token_no_type, role="editor")
         assert result is None
 
     def test_empty_string_returns_none(self) -> None:
         """Empty string → returns None without raising."""
-        result = refresh_access_token("", role="data_steward")
+        result = refresh_access_token("", role="editor")
         assert result is None

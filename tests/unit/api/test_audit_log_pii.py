@@ -44,7 +44,7 @@ _ROLE_ID = uuid.uuid4()
 def _make_esg_user() -> CurrentUser:
     return CurrentUser(
         sub=_ESG_USER,
-        role="esg_manager",  # type: ignore[arg-type]
+        role="admin",  # type: ignore[arg-type]
         tenant_id=_TENANT,
         jti=str(uuid.uuid4()),
     )
@@ -114,7 +114,7 @@ class TestAuditLogAfterStatePII:
                     "username": "alice.smith",
                     "email": "alice.smith@gresmalt.it",
                     "password": "S3curePass!",
-                    "role_code": "data_steward",
+                    "role_code": "editor",
                 },
             )
 
@@ -164,7 +164,7 @@ class TestAuditLogAfterStatePII:
                     "username": "bob.jones",
                     "email": "bob@gresmalt.it",
                     "password": "P@ssword123",
-                    "role_code": "auditor",
+                    "role_code": "viewer",
                 },
             )
 
@@ -188,7 +188,7 @@ class TestAuditLogAfterStatePII:
                     "username": "charlie.d",
                     "email": "charlie@gresmalt.it",
                     "password": "AnotherPass1!",
-                    "role_code": "esg_manager",
+                    "role_code": "admin",
                 },
             )
 

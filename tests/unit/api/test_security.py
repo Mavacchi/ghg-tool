@@ -10,9 +10,9 @@ os.environ.setdefault("GHG_JWT_SECRET", "test-secret-key-for-unit-tests-only")
 from ghg_tool.infrastructure.security.password import hash_password, verify_password
 from ghg_tool.infrastructure.security.rbac import (
     PERMISSION_MATRIX,
-    ROLE_AUDITOR,
-    ROLE_DATA_STEWARD,
-    ROLE_ESG_MANAGER,
+    ROLE_ADMIN,
+    ROLE_EDITOR,
+    ROLE_VIEWER,
     is_permitted,
 )
 
@@ -53,39 +53,39 @@ class TestPasswordHashing:
 class TestRBAC:
     """Tests for the RBAC permission matrix (SG-02, FR-31)."""
 
-    def test_data_steward_can_write_emissions(self) -> None:
-        """data_steward has emissions:write permission."""
-        assert is_permitted(ROLE_DATA_STEWARD, "emissions", "write") is True
+    def test_editor_can_write_emissions(self) -> None:
+        """editor has emissions:write permission."""
+        assert is_permitted(ROLE_EDITOR, "emissions", "write") is True
 
-    def test_auditor_cannot_write_emissions(self) -> None:
-        """auditor does not have emissions:write permission."""
-        assert is_permitted(ROLE_AUDITOR, "emissions", "write") is False
+    def test_viewer_cannot_write_emissions(self) -> None:
+        """viewer does not have emissions:write permission."""
+        assert is_permitted(ROLE_VIEWER, "emissions", "write") is False
 
-    def test_esg_manager_cannot_write_emissions(self) -> None:
-        """esg_manager does not have emissions:write permission."""
-        assert is_permitted(ROLE_ESG_MANAGER, "emissions", "write") is False
+    def test_admin_cannot_write_emissions(self) -> None:
+        """admin does not have emissions:write permission."""
+        assert is_permitted(ROLE_ADMIN, "emissions", "write") is False
 
     def test_all_roles_can_read_emissions(self) -> None:
         """All three roles can read emissions."""
-        for role in [ROLE_DATA_STEWARD, ROLE_ESG_MANAGER, ROLE_AUDITOR]:
+        for role in [ROLE_EDITOR, ROLE_ADMIN, ROLE_VIEWER]:
             assert is_permitted(role, "emissions", "read") is True
 
-    def test_only_esg_manager_can_waive(self) -> None:
-        """Only esg_manager can waive DQ findings."""
-        assert is_permitted(ROLE_ESG_MANAGER, "dq_findings", "waiver") is True
-        assert is_permitted(ROLE_DATA_STEWARD, "dq_findings", "waiver") is False
-        assert is_permitted(ROLE_AUDITOR, "dq_findings", "waiver") is False
+    def test_only_admin_can_waive(self) -> None:
+        """Only admin can waive DQ findings."""
+        assert is_permitted(ROLE_ADMIN, "dq_findings", "waiver") is True
+        assert is_permitted(ROLE_EDITOR, "dq_findings", "waiver") is False
+        assert is_permitted(ROLE_VIEWER, "dq_findings", "waiver") is False
 
-    def test_only_esg_manager_can_trigger_pdf(self) -> None:
-        """Only esg_manager can trigger PDF reports."""
-        assert is_permitted(ROLE_ESG_MANAGER, "reports", "pdf") is True
-        assert is_permitted(ROLE_DATA_STEWARD, "reports", "pdf") is False
-        assert is_permitted(ROLE_AUDITOR, "reports", "pdf") is False
+    def test_only_admin_can_trigger_pdf(self) -> None:
+        """Only admin can trigger PDF reports."""
+        assert is_permitted(ROLE_ADMIN, "reports", "pdf") is True
+        assert is_permitted(ROLE_EDITOR, "reports", "pdf") is False
+        assert is_permitted(ROLE_VIEWER, "reports", "pdf") is False
 
-    def test_auditor_cannot_read_go_write(self) -> None:
-        """auditor cannot write GO certificates."""
-        assert is_permitted(ROLE_AUDITOR, "go_certificates", "write") is False
-        assert is_permitted(ROLE_AUDITOR, "go_certificates", "read") is True
+    def test_viewer_cannot_write_go_certificates(self) -> None:
+        """viewer cannot write GO certificates."""
+        assert is_permitted(ROLE_VIEWER, "go_certificates", "write") is False
+        assert is_permitted(ROLE_VIEWER, "go_certificates", "read") is True
 
     def test_unknown_role_returns_false(self) -> None:
         """An unknown role always returns False."""
@@ -93,13 +93,13 @@ class TestRBAC:
 
     def test_unknown_resource_returns_false(self) -> None:
         """An unknown resource always returns False."""
-        assert is_permitted(ROLE_DATA_STEWARD, "nonexistent_resource", "read") is False
+        assert is_permitted(ROLE_EDITOR, "nonexistent_resource", "read") is False
 
-    def test_audit_trail_restricted_to_manager_and_auditor(self) -> None:
-        """audit_trail:read is only for esg_manager and auditor."""
-        assert is_permitted(ROLE_ESG_MANAGER, "audit_trail", "read") is True
-        assert is_permitted(ROLE_AUDITOR, "audit_trail", "read") is True
-        assert is_permitted(ROLE_DATA_STEWARD, "audit_trail", "read") is False
+    def test_audit_trail_restricted_to_admin_and_viewer(self) -> None:
+        """audit_trail:read is only for admin and viewer."""
+        assert is_permitted(ROLE_ADMIN, "audit_trail", "read") is True
+        assert is_permitted(ROLE_VIEWER, "audit_trail", "read") is True
+        assert is_permitted(ROLE_EDITOR, "audit_trail", "read") is False
 
     def test_permission_matrix_is_complete(self) -> None:
         """PERMISSION_MATRIX covers all expected resources."""

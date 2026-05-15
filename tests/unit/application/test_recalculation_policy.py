@@ -38,7 +38,7 @@ def test_above_threshold_triggers() -> None:
                  reason_code="STRUCTURAL_CHANGE")
     assert d.triggered is True
     assert d.reason_code == "STRUCTURAL_CHANGE"
-    assert d.notify_roles == ("esg_manager", "data_steward")
+    assert d.notify_roles == ("admin", "editor")
 
 
 def test_decrease_above_threshold_triggers() -> None:

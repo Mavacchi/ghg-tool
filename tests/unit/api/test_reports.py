@@ -33,8 +33,8 @@ class TestReportsRouter:
     """Tests for /api/v1/reports endpoints."""
 
     def test_esg_manager_can_trigger_pdf(self) -> None:
-        """esg_manager can POST /reports/pdf and receives 202."""
-        app.dependency_overrides[get_current_user] = _user_override("esg_manager")
+        """admin can POST /reports/pdf and receives 202."""
+        app.dependency_overrides[get_current_user] = _user_override("admin")
         with TestClient(app, raise_server_exceptions=False) as client:
             resp = client.post(
                 "/api/v1/reports/pdf",
@@ -47,8 +47,8 @@ class TestReportsRouter:
         assert data["status"] == "PENDING"
 
     def test_auditor_cannot_trigger_pdf(self) -> None:
-        """auditor cannot trigger PDF generation — 403."""
-        app.dependency_overrides[get_current_user] = _user_override("auditor")
+        """viewer cannot trigger PDF generation — 403."""
+        app.dependency_overrides[get_current_user] = _user_override("viewer")
         with TestClient(app, raise_server_exceptions=False) as client:
             resp = client.post(
                 "/api/v1/reports/pdf",
@@ -58,8 +58,8 @@ class TestReportsRouter:
         assert resp.status_code == 403
 
     def test_data_steward_cannot_trigger_pdf(self) -> None:
-        """data_steward cannot trigger PDF (esg_manager only) — 403."""
-        app.dependency_overrides[get_current_user] = _user_override("data_steward")
+        """editor cannot trigger PDF (admin only) — 403."""
+        app.dependency_overrides[get_current_user] = _user_override("editor")
         with TestClient(app, raise_server_exceptions=False) as client:
             resp = client.post(
                 "/api/v1/reports/pdf",
@@ -69,8 +69,8 @@ class TestReportsRouter:
         assert resp.status_code == 403
 
     def test_data_steward_can_trigger_excel(self) -> None:
-        """data_steward can POST /reports/excel and receives 202."""
-        app.dependency_overrides[get_current_user] = _user_override("data_steward")
+        """editor can POST /reports/excel and receives 202."""
+        app.dependency_overrides[get_current_user] = _user_override("editor")
         with TestClient(app, raise_server_exceptions=False) as client:
             resp = client.post(
                 "/api/v1/reports/excel",
@@ -80,8 +80,8 @@ class TestReportsRouter:
         assert resp.status_code == 202
 
     def test_esg_manager_can_trigger_excel(self) -> None:
-        """esg_manager can POST /reports/excel."""
-        app.dependency_overrides[get_current_user] = _user_override("esg_manager")
+        """admin can POST /reports/excel."""
+        app.dependency_overrides[get_current_user] = _user_override("admin")
         with TestClient(app, raise_server_exceptions=False) as client:
             resp = client.post(
                 "/api/v1/reports/excel",
@@ -92,7 +92,7 @@ class TestReportsRouter:
 
     def test_get_status_returns_404_for_unknown_job(self) -> None:
         """GET /reports/status/{job_id} returns 404 for unknown job_id."""
-        app.dependency_overrides[get_current_user] = _user_override("esg_manager")
+        app.dependency_overrides[get_current_user] = _user_override("admin")
         with TestClient(app, raise_server_exceptions=False) as client:
             resp = client.get(f"/api/v1/reports/status/{uuid.uuid4()}")
         app.dependency_overrides.clear()
@@ -100,7 +100,7 @@ class TestReportsRouter:
 
     def test_get_status_returns_job_for_known_id(self) -> None:
         """GET /reports/status/{job_id} returns PENDING for a just-created job."""
-        app.dependency_overrides[get_current_user] = _user_override("esg_manager")
+        app.dependency_overrides[get_current_user] = _user_override("admin")
         with TestClient(app, raise_server_exceptions=False) as client:
             create_resp = client.post(
                 "/api/v1/reports/pdf",

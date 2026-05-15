@@ -1,13 +1,13 @@
 """Unit tests for the two-eyes factor publish approval workflow (#12).
 
 Covers:
-- 202: first esg_manager calls /publish -> approval row created PENDING
-- 409: same esg_manager calls /publish again -> self_approval_forbidden
-- 200: second esg_manager calls /publish -> factor published, approval APPROVED
+- 202: first admin calls /publish -> approval row created PENDING
+- 409: same admin calls /publish again -> self_approval_forbidden
+- 200: second admin calls /publish -> factor published, approval APPROVED
 - 409: third call after approval -> already_published
 - 200: list pending approvals
 - 200: reject approval, factor remains draft
-- 403: data_steward calls /publish
+- 403: editor calls /publish
 - 422: rejection_reason < 10 chars
 
 All DB access is mocked; no live PostgreSQL instance required.
@@ -179,7 +179,7 @@ def _db_self_approval(factor: MagicMock, approval: MagicMock) -> Any:
 
 
 def _db_second_esg_publish(factor: MagicMock, approval: MagicMock) -> Any:
-    """DB for second esg_manager /publish: PENDING by ESG1, caller is ESG2.
+    """DB for second admin /publish: PENDING by ESG1, caller is ESG2.
 
     execute() calls:
       1. repo.get_by_uuid -> factor (draft)
@@ -279,11 +279,11 @@ def _clear_overrides() -> Any:
 
 
 class TestFirstPublishRequestCreatesApproval:
-    """Happy path: first esg_manager calls /publish -> 202, PENDING row created."""
+    """Happy path: first admin calls /publish -> 202, PENDING row created."""
 
     def test_first_call_returns_202_with_approval_id(self) -> None:
         factor = _make_factor_orm(is_published=False)
-        app.dependency_overrides[get_current_user] = _auth("esg_manager", _ESG1)
+        app.dependency_overrides[get_current_user] = _auth("admin", _ESG1)
         app.dependency_overrides[get_db] = _db_first_publish(factor)
 
         with TestClient(app, raise_server_exceptions=False) as client:
@@ -315,7 +315,7 @@ class TestFirstPublishRequestCreatesApproval:
             session.execute = AsyncMock(side_effect=[sel_factor, sel_approval])
             yield session
 
-        app.dependency_overrides[get_current_user] = _auth("esg_manager", _ESG1)
+        app.dependency_overrides[get_current_user] = _auth("admin", _ESG1)
         app.dependency_overrides[get_db] = _gen
 
         with TestClient(app, raise_server_exceptions=False) as client:
@@ -325,13 +325,13 @@ class TestFirstPublishRequestCreatesApproval:
 
 
 class TestSelfApprovalForbidden:
-    """409 when the same esg_manager who proposed tries to approve."""
+    """409 when the same admin who proposed tries to approve."""
 
     def test_same_proposer_gets_409_self_approval_forbidden(self) -> None:
         factor = _make_factor_orm(is_published=False)
         # Approval was proposed by _ESG1, caller is also _ESG1
         approval = _make_approval_orm(proposed_by=_ESG1, decision="PENDING")
-        app.dependency_overrides[get_current_user] = _auth("esg_manager", _ESG1)
+        app.dependency_overrides[get_current_user] = _auth("admin", _ESG1)
         app.dependency_overrides[get_db] = _db_self_approval(factor, approval)
 
         with TestClient(app, raise_server_exceptions=False) as client:
@@ -342,13 +342,13 @@ class TestSelfApprovalForbidden:
 
 
 class TestSecondEsgManagerApproves:
-    """Happy path: second esg_manager calls /publish -> 200, factor published."""
+    """Happy path: second admin calls /publish -> 200, factor published."""
 
     def test_second_esg_manager_gets_200_is_published_true(self) -> None:
         factor = _make_factor_orm(is_published=False)
         approval = _make_approval_orm(proposed_by=_ESG1, decision="PENDING")
         # Caller is _ESG2 (different from proposer _ESG1)
-        app.dependency_overrides[get_current_user] = _auth("esg_manager", _ESG2)
+        app.dependency_overrides[get_current_user] = _auth("admin", _ESG2)
         app.dependency_overrides[get_db] = _db_second_esg_publish(factor, approval)
 
         with TestClient(app, raise_server_exceptions=False) as client:
@@ -363,7 +363,7 @@ class TestAlreadyPublished:
 
     def test_third_call_returns_409_already_published(self) -> None:
         factor = _make_factor_orm(is_published=True)
-        app.dependency_overrides[get_current_user] = _auth("esg_manager", _ESG2)
+        app.dependency_overrides[get_current_user] = _auth("admin", _ESG2)
         app.dependency_overrides[get_db] = _db_already_published(factor)
 
         with TestClient(app, raise_server_exceptions=False) as client:
@@ -385,7 +385,7 @@ class TestListPendingApprovals:
         row.proposed_at = datetime(2026, 5, 1, tzinfo=UTC)
         row.reason_code = "INITIAL_PUBLICATION"
 
-        app.dependency_overrides[get_current_user] = _auth("esg_manager", _ESG1)
+        app.dependency_overrides[get_current_user] = _auth("admin", _ESG1)
         app.dependency_overrides[get_db] = _db_pending_list([row])
 
         with TestClient(app, raise_server_exceptions=False) as client:
@@ -398,7 +398,7 @@ class TestListPendingApprovals:
         assert items[0]["reason_code"] == "INITIAL_PUBLICATION"
 
     def test_403_data_steward_cannot_list_approvals(self) -> None:
-        app.dependency_overrides[get_current_user] = _auth("data_steward", _DS)
+        app.dependency_overrides[get_current_user] = _auth("editor", _DS)
         app.dependency_overrides[get_db] = _db_pending_list([])
 
         with TestClient(app, raise_server_exceptions=False) as client:
@@ -412,7 +412,7 @@ class TestRejectApproval:
 
     def test_happy_path_reject_returns_200_decision_rejected(self) -> None:
         approval = _make_approval_orm(proposed_by=_ESG1, decision="PENDING")
-        app.dependency_overrides[get_current_user] = _auth("esg_manager", _ESG2)
+        app.dependency_overrides[get_current_user] = _auth("admin", _ESG2)
         app.dependency_overrides[get_db] = _db_reject(approval)
 
         with TestClient(app, raise_server_exceptions=False) as client:
@@ -427,7 +427,7 @@ class TestRejectApproval:
     def test_happy_path_reject_sets_decision_on_approval_orm(self) -> None:
         """After rejection the ORM object's decision attribute is REJECTED."""
         approval = _make_approval_orm(proposed_by=_ESG1, decision="PENDING")
-        app.dependency_overrides[get_current_user] = _auth("esg_manager", _ESG2)
+        app.dependency_overrides[get_current_user] = _auth("admin", _ESG2)
         app.dependency_overrides[get_db] = _db_reject(approval)
 
         with TestClient(app, raise_server_exceptions=False) as client:
@@ -442,7 +442,7 @@ class TestRejectApproval:
     def test_422_rejection_reason_too_short(self) -> None:
         """rejection_reason shorter than 10 chars -> 422 from Pydantic."""
         approval = _make_approval_orm(proposed_by=_ESG1, decision="PENDING")
-        app.dependency_overrides[get_current_user] = _auth("esg_manager", _ESG2)
+        app.dependency_overrides[get_current_user] = _auth("admin", _ESG2)
         app.dependency_overrides[get_db] = _db_reject(approval)
 
         with TestClient(app, raise_server_exceptions=False) as client:
@@ -452,7 +452,7 @@ class TestRejectApproval:
 
     def test_404_unknown_approval(self) -> None:
         """Unknown approval UUID -> 404."""
-        app.dependency_overrides[get_current_user] = _auth("esg_manager", _ESG2)
+        app.dependency_overrides[get_current_user] = _auth("admin", _ESG2)
         app.dependency_overrides[get_db] = _db_reject(None)
 
         with TestClient(app, raise_server_exceptions=False) as client:
@@ -468,9 +468,9 @@ class TestPublishRbac:
     """RBAC enforcement on /publish."""
 
     def test_403_data_steward_cannot_publish(self) -> None:
-        """data_steward may not call /publish -> 403."""
+        """editor may not call /publish -> 403."""
         factor = _make_factor_orm(is_published=False)
-        app.dependency_overrides[get_current_user] = _auth("data_steward", _DS)
+        app.dependency_overrides[get_current_user] = _auth("editor", _DS)
         app.dependency_overrides[get_db] = _db_first_publish(factor)
 
         with TestClient(app, raise_server_exceptions=False) as client:

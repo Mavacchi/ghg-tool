@@ -77,8 +77,8 @@ class TestAuditTrail:
     """Tests for GET /api/v1/audit-trail/."""
 
     def test_esg_manager_can_read(self) -> None:
-        """esg_manager has audit_trail:read permission."""
-        _setup("esg_manager")
+        """admin has audit_trail:read permission."""
+        _setup("admin")
         with TestClient(app, raise_server_exceptions=False) as client:
             resp = client.get("/api/v1/audit-trail/")
         _teardown()
@@ -89,16 +89,16 @@ class TestAuditTrail:
         assert "correlation_id" in data
 
     def test_auditor_can_read(self) -> None:
-        """auditor has audit_trail:read permission."""
-        _setup("auditor")
+        """viewer has audit_trail:read permission."""
+        _setup("viewer")
         with TestClient(app, raise_server_exceptions=False) as client:
             resp = client.get("/api/v1/audit-trail/")
         _teardown()
         assert resp.status_code == 200
 
     def test_data_steward_cannot_read(self) -> None:
-        """data_steward does NOT have audit_trail:read permission — should return 403."""
-        _setup("data_steward")
+        """editor does NOT have audit_trail:read permission — should return 403."""
+        _setup("editor")
         with TestClient(app, raise_server_exceptions=False) as client:
             resp = client.get("/api/v1/audit-trail/")
         _teardown()
@@ -113,7 +113,7 @@ class TestAuditTrail:
 
     def test_filter_params_accepted(self) -> None:
         """Query params anno, codice_sito, limit are accepted without error."""
-        _setup("auditor")
+        _setup("viewer")
         with TestClient(app, raise_server_exceptions=False) as client:
             resp = client.get(
                 "/api/v1/audit-trail/",
@@ -126,7 +126,7 @@ class TestAuditTrail:
         """REV-009: SQLAlchemyError raises 500; RuntimeError (non-SQLAlchemy) propagates."""
         from sqlalchemy.exc import OperationalError
 
-        app.dependency_overrides[get_current_user] = _auth("auditor")
+        app.dependency_overrides[get_current_user] = _auth("viewer")
 
         async def _failing_db() -> Any:
             session = AsyncMock()
@@ -156,7 +156,7 @@ class TestKPIs:
 
     def test_all_roles_can_read(self) -> None:
         """All three roles have kpis:read permission."""
-        for role in ("data_steward", "esg_manager", "auditor"):
+        for role in ("editor", "admin", "viewer"):
             _setup(role)
             with TestClient(app, raise_server_exceptions=False) as client:
                 resp = client.get("/api/v1/kpis/")
@@ -174,7 +174,7 @@ class TestKPIs:
         """If MV query raises ProgrammingError/OperationalError, stub payload returned."""
         from sqlalchemy.exc import ProgrammingError
 
-        app.dependency_overrides[get_current_user] = _auth("auditor")
+        app.dependency_overrides[get_current_user] = _auth("viewer")
 
         async def _failing_db() -> Any:
             session = AsyncMock()
@@ -195,7 +195,7 @@ class TestKPIs:
 
     def test_gwp_set_param_accepted(self) -> None:
         """gwp_set and anno query params are accepted without error."""
-        _setup("esg_manager")
+        _setup("admin")
         with TestClient(app, raise_server_exceptions=False) as client:
             resp = client.get("/api/v1/kpis/", params={"gwp_set": "AR6", "anno": 2024})
         _teardown()
@@ -249,7 +249,7 @@ class TestDQFindings:
 
     def test_all_roles_can_list(self) -> None:
         """All three roles have dq_findings:read permission."""
-        for role in ("data_steward", "esg_manager", "auditor"):
+        for role in ("editor", "admin", "viewer"):
             with patch(
                 "ghg_tool.api.routers.dq_findings.DQFindingsRepository"
             ) as mock_repo:
@@ -273,7 +273,7 @@ class TestDQFindings:
         with patch("ghg_tool.api.routers.dq_findings.DQFindingsRepository") as mock_repo:
             # REV-023: router now calls get_findings instead of get_open_findings
             mock_repo.return_value.get_findings = AsyncMock(return_value=[])
-            _setup("auditor")
+            _setup("viewer")
             with TestClient(app, raise_server_exceptions=False) as client:
                 resp = client.get(
                     "/api/v1/dq-findings/",
@@ -283,8 +283,8 @@ class TestDQFindings:
         assert resp.status_code == 200
 
     def test_waiver_requires_esg_manager(self) -> None:
-        """data_steward cannot create waiver — 403."""
-        _setup("data_steward")
+        """editor cannot create waiver — 403."""
+        _setup("editor")
         finding_id = uuid.uuid4()
         with TestClient(app, raise_server_exceptions=False) as client:
             resp = client.post(
@@ -298,8 +298,8 @@ class TestDQFindings:
         assert resp.status_code == 403
 
     def test_auditor_cannot_waive(self) -> None:
-        """auditor cannot create waiver — 403."""
-        _setup("auditor")
+        """viewer cannot create waiver — 403."""
+        _setup("viewer")
         finding_id = uuid.uuid4()
         with TestClient(app, raise_server_exceptions=False) as client:
             resp = client.post(
@@ -314,7 +314,7 @@ class TestDQFindings:
 
     def test_waiver_not_found_returns_404(self) -> None:
         """When the finding is not in DB, waiver returns 404."""
-        app.dependency_overrides[get_current_user] = _auth("esg_manager")
+        app.dependency_overrides[get_current_user] = _auth("admin")
 
         async def _db_not_found() -> Any:
             session = AsyncMock()
@@ -337,11 +337,11 @@ class TestDQFindings:
         assert resp.status_code == 404
 
     def test_waiver_success(self) -> None:
-        """esg_manager can apply a waiver, which calls insert_finding."""
+        """admin can apply a waiver, which calls insert_finding."""
         original = _dq_finding_mock()
         waiver_row = _dq_finding_mock(resolution_status="WAIVED")
 
-        app.dependency_overrides[get_current_user] = _auth("esg_manager")
+        app.dependency_overrides[get_current_user] = _auth("admin")
 
         async def _db_with_finding() -> Any:
             session = AsyncMock()
@@ -413,7 +413,7 @@ class TestFactorCatalog:
 
     def test_all_roles_can_list(self) -> None:
         """All three roles have factor_catalog:read permission."""
-        for role in ("data_steward", "esg_manager", "auditor"):
+        for role in ("editor", "admin", "viewer"):
             _setup(role)
             with TestClient(app, raise_server_exceptions=False) as client:
                 resp = client.get("/api/v1/factor-catalog/")
@@ -429,15 +429,15 @@ class TestFactorCatalog:
 
     def test_list_factor_versions(self) -> None:
         """GET /factor-catalog/{factor_id}/versions returns 200."""
-        _setup("auditor")
+        _setup("viewer")
         with TestClient(app, raise_server_exceptions=False) as client:
             resp = client.get("/api/v1/factor-catalog/WTT_GAS_NAT_DEFRA_2025/versions")
         _teardown()
         assert resp.status_code == 200
 
     def test_auditor_cannot_create_factor(self) -> None:
-        """auditor does NOT have factor_catalog:write permission → 403."""
-        _setup("auditor")
+        """viewer does NOT have factor_catalog:write permission → 403."""
+        _setup("viewer")
         with TestClient(app, raise_server_exceptions=False) as client:
             resp = client.post(
                 "/api/v1/factor-catalog/",
@@ -459,8 +459,8 @@ class TestFactorCatalog:
         assert resp.status_code == 403
 
     def test_esg_manager_cannot_create_factor(self) -> None:
-        """esg_manager does NOT have factor_catalog:write permission → 403."""
-        _setup("esg_manager")
+        """admin does NOT have factor_catalog:write permission → 403."""
+        _setup("admin")
         with TestClient(app, raise_server_exceptions=False) as client:
             resp = client.post(
                 "/api/v1/factor-catalog/",
@@ -482,14 +482,14 @@ class TestFactorCatalog:
         assert resp.status_code == 403
 
     def test_data_steward_can_create_factor(self) -> None:
-        """data_steward can POST a new factor catalog entry."""
+        """editor can POST a new factor catalog entry."""
         mock_factor = _factor_mock()
 
         with patch(
             "ghg_tool.api.routers.factor_catalog.FactorCatalogRepository"
         ) as mock_repo:
             mock_repo.return_value.insert = AsyncMock(return_value=mock_factor)
-            _setup("data_steward")
+            _setup("editor")
             with TestClient(app, raise_server_exceptions=False) as client:
                 resp = client.post(
                     "/api/v1/factor-catalog/",
@@ -512,7 +512,7 @@ class TestFactorCatalog:
 
     def test_invalid_source_rejected(self) -> None:
         """Factor source must be from allowed list; unknown source → 422."""
-        _setup("data_steward")
+        _setup("editor")
         with TestClient(app, raise_server_exceptions=False) as client:
             resp = client.post(
                 "/api/v1/factor-catalog/",
@@ -581,7 +581,7 @@ class TestGoCertificates:
 
     def test_all_roles_can_list(self) -> None:
         """All three roles have go_certificates:read permission."""
-        for role in ("data_steward", "esg_manager", "auditor"):
+        for role in ("editor", "admin", "viewer"):
             _setup(role)
             with TestClient(app, raise_server_exceptions=False) as client:
                 resp = client.get("/api/v1/go-certificates/")
@@ -617,18 +617,18 @@ class TestGoCertificates:
     }
 
     def test_auditor_cannot_create(self) -> None:
-        """auditor does not have go_certificates:write permission → 403."""
-        _setup("auditor")
+        """viewer does not have go_certificates:write permission → 403."""
+        _setup("viewer")
         with TestClient(app, raise_server_exceptions=False) as client:
             resp = client.post("/api/v1/go-certificates/", json=self._VALID_GO_BODY)
         _teardown()
         assert resp.status_code == 403
 
     def test_data_steward_can_create(self) -> None:
-        """data_steward can POST a new GO certificate."""
+        """editor can POST a new GO certificate."""
         mock_cert = _go_cert_mock()
 
-        app.dependency_overrides[get_current_user] = _auth("data_steward")
+        app.dependency_overrides[get_current_user] = _auth("editor")
 
         async def _db_with_flush() -> Any:
             session = AsyncMock()
@@ -670,7 +670,7 @@ class TestGoCertificates:
 
     def test_validate_not_found_returns_404(self) -> None:
         """POST /go-certificates/{go_id}/validations on unknown go_id → 404 (REV-015)."""
-        app.dependency_overrides[get_current_user] = _auth("data_steward")
+        app.dependency_overrides[get_current_user] = _auth("editor")
 
         async def _db_not_found() -> Any:
             session = AsyncMock()
@@ -693,7 +693,7 @@ class TestGoCertificates:
         """POST /go-certificates/{go_id}/validations creates a new row (append-only, REV-015)."""
         existing = _go_cert_mock()
 
-        app.dependency_overrides[get_current_user] = _auth("data_steward")
+        app.dependency_overrides[get_current_user] = _auth("editor")
 
         async def _db_with_existing() -> Any:
             session = AsyncMock()
@@ -735,7 +735,7 @@ class TestGoCertificates:
 
     def test_list_with_all_qc_filter(self) -> None:
         """GET with all_qc_passed=true filter is accepted without error."""
-        _setup("auditor")
+        _setup("viewer")
         with TestClient(app, raise_server_exceptions=False) as client:
             resp = client.get(
                 "/api/v1/go-certificates/",
@@ -764,7 +764,7 @@ class TestDQFindingsResolutionStatusRegression:
 
         with patch("ghg_tool.api.routers.dq_findings.DQFindingsRepository") as mock_repo:
             mock_repo.return_value.get_findings = AsyncMock(return_value=[waived_finding])
-            _setup("auditor")
+            _setup("viewer")
             with TestClient(app, raise_server_exceptions=False) as client:
                 resp = client.get(
                     "/api/v1/dq-findings/",
@@ -783,7 +783,7 @@ class TestDQFindingsResolutionStatusRegression:
         with patch("ghg_tool.api.routers.dq_findings.DQFindingsRepository") as mock_repo:
             mock_get_findings = AsyncMock(return_value=[])
             mock_repo.return_value.get_findings = mock_get_findings
-            _setup("auditor")
+            _setup("viewer")
             with TestClient(app, raise_server_exceptions=False) as client:
                 resp = client.get(
                     "/api/v1/dq-findings/",

@@ -338,7 +338,7 @@ async def test_fn_emit_correction_audit_log_entry_created(
                 resource, resource_id, before_state, after_state
             ) VALUES (
                 CAST(:audit_id AS uuid), CAST(:tenant_id AS uuid), CAST(:corr_id AS uuid),
-                'data_steward', 'EMISSION_CORRECTION',
+                'editor', 'EMISSION_CORRECTION',
                 'calc.emissions_consolidated', CAST(:res_id AS uuid),
                 CAST(:before_state AS jsonb), CAST(:after_state AS jsonb)
             )

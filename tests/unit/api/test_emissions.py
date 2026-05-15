@@ -108,12 +108,12 @@ class TestEmissionsGet:
     """Tests for GET /api/v1/emissions/."""
 
     def test_auditor_can_read(self) -> None:
-        """auditor role can read emissions."""
+        """viewer role can read emissions."""
         with patch(
             "ghg_tool.api.routers.emissions.EmissionsRepository"
         ) as MockRepo:
             MockRepo.return_value.get_active = AsyncMock(return_value=[])
-            app.dependency_overrides[get_current_user] = _user_override("auditor")
+            app.dependency_overrides[get_current_user] = _user_override("viewer")
             app.dependency_overrides[get_db] = _empty_session()
             with TestClient(app, raise_server_exceptions=False) as client:
                 resp = client.get("/api/v1/emissions/")
@@ -121,10 +121,10 @@ class TestEmissionsGet:
         assert resp.status_code == 200
 
     def test_esg_manager_can_read(self) -> None:
-        """esg_manager role can read emissions."""
+        """admin role can read emissions."""
         with patch("ghg_tool.api.routers.emissions.EmissionsRepository") as MockRepo:
             MockRepo.return_value.get_active = AsyncMock(return_value=[])
-            app.dependency_overrides[get_current_user] = _user_override("esg_manager")
+            app.dependency_overrides[get_current_user] = _user_override("admin")
             app.dependency_overrides[get_db] = _empty_session()
             with TestClient(app, raise_server_exceptions=False) as client:
                 resp = client.get("/api/v1/emissions/")
@@ -132,10 +132,10 @@ class TestEmissionsGet:
         assert resp.status_code == 200
 
     def test_data_steward_can_read(self) -> None:
-        """data_steward role can read emissions."""
+        """editor role can read emissions."""
         with patch("ghg_tool.api.routers.emissions.EmissionsRepository") as MockRepo:
             MockRepo.return_value.get_active = AsyncMock(return_value=[])
-            app.dependency_overrides[get_current_user] = _user_override("data_steward")
+            app.dependency_overrides[get_current_user] = _user_override("editor")
             app.dependency_overrides[get_db] = _empty_session()
             with TestClient(app, raise_server_exceptions=False) as client:
                 resp = client.get("/api/v1/emissions/")
@@ -175,11 +175,11 @@ class TestEmissionsPost:
     """Tests for POST /api/v1/emissions/."""
 
     def test_data_steward_can_create(self) -> None:
-        """data_steward can POST a new emission row."""
+        """editor can POST a new emission row."""
         mock_row = _emission_orm_row()
         with patch("ghg_tool.api.routers.emissions.EmissionsRepository") as MockRepo:
             MockRepo.return_value.insert = AsyncMock(return_value=mock_row)
-            app.dependency_overrides[get_current_user] = _user_override("data_steward")
+            app.dependency_overrides[get_current_user] = _user_override("editor")
             app.dependency_overrides[get_db] = _empty_session()
             with TestClient(app, raise_server_exceptions=False) as client:
                 resp = client.post(
@@ -192,8 +192,8 @@ class TestEmissionsPost:
         assert "id" in resp.json()
 
     def test_auditor_cannot_create(self) -> None:
-        """auditor role cannot POST — must return 403."""
-        app.dependency_overrides[get_current_user] = _user_override("auditor")
+        """viewer role cannot POST — must return 403."""
+        app.dependency_overrides[get_current_user] = _user_override("viewer")
         app.dependency_overrides[get_db] = _empty_session()
         with TestClient(app, raise_server_exceptions=False) as client:
             resp = client.post(
@@ -205,8 +205,8 @@ class TestEmissionsPost:
         assert resp.status_code == 403
 
     def test_esg_manager_cannot_create(self) -> None:
-        """esg_manager role cannot POST emissions — must return 403."""
-        app.dependency_overrides[get_current_user] = _user_override("esg_manager")
+        """admin role cannot POST emissions — must return 403."""
+        app.dependency_overrides[get_current_user] = _user_override("admin")
         app.dependency_overrides[get_db] = _empty_session()
         with TestClient(app, raise_server_exceptions=False) as client:
             resp = client.post(
@@ -219,7 +219,7 @@ class TestEmissionsPost:
 
     def test_missing_idempotency_key_returns_422(self) -> None:
         """POST without Idempotency-Key header returns 422."""
-        app.dependency_overrides[get_current_user] = _user_override("data_steward")
+        app.dependency_overrides[get_current_user] = _user_override("editor")
         app.dependency_overrides[get_db] = _empty_session()
         with TestClient(app, raise_server_exceptions=False) as client:
             resp = client.post("/api/v1/emissions/", json=_VALID_CREATE_BODY)
@@ -229,7 +229,7 @@ class TestEmissionsPost:
     def test_negative_tco2e_rejected(self) -> None:
         """POST with negative tco2e must be rejected with 422."""
         bad_body = {**_VALID_CREATE_BODY, "tco2e": -1.0}
-        app.dependency_overrides[get_current_user] = _user_override("data_steward")
+        app.dependency_overrides[get_current_user] = _user_override("editor")
         app.dependency_overrides[get_db] = _empty_session()
         with TestClient(app, raise_server_exceptions=False) as client:
             resp = client.post(
@@ -243,7 +243,7 @@ class TestEmissionsPost:
     def test_invalid_scope_sub_scope_combo_rejected(self) -> None:
         """scope=1 with sub_scope='LB' (Scope 2 only) must be rejected."""
         bad_body = {**_VALID_CREATE_BODY, "scope": 1, "sub_scope": "LB"}
-        app.dependency_overrides[get_current_user] = _user_override("data_steward")
+        app.dependency_overrides[get_current_user] = _user_override("editor")
         app.dependency_overrides[get_db] = _empty_session()
         with TestClient(app, raise_server_exceptions=False) as client:
             resp = client.post(
@@ -257,7 +257,7 @@ class TestEmissionsPost:
     def test_invalid_codice_sito_rejected(self) -> None:
         """POST with unknown codice_sito returns 422."""
         bad_body = {**_VALID_CREATE_BODY, "codice_sito": "UNKNOWN_SITE"}
-        app.dependency_overrides[get_current_user] = _user_override("data_steward")
+        app.dependency_overrides[get_current_user] = _user_override("editor")
         app.dependency_overrides[get_db] = _empty_session()
         with TestClient(app, raise_server_exceptions=False) as client:
             resp = client.post(

@@ -39,8 +39,8 @@ from ghg_tool.infrastructure.db.models.factor_publish_approval import FactorPubl
 
 _TENANT_A = str(uuid.uuid4())
 _USER_DS = str(uuid.uuid4())
-_USER_ESG = str(uuid.uuid4())   # second esg_manager: the approver in the 200-flow
-_USER_ESG_PROPOSER = str(uuid.uuid4())  # first esg_manager: proposed the PENDING row
+_USER_ESG = str(uuid.uuid4())   # second admin: the approver in the 200-flow
+_USER_ESG_PROPOSER = str(uuid.uuid4())  # first admin: proposed the PENDING row
 _FACTOR_UUID = uuid.uuid4()
 _APPROVAL_UUID = uuid.uuid4()
 
@@ -174,7 +174,7 @@ def _db_for_publish_second_call(
     """Mock a DB session for the TWO-EYES publish 200-flow.
 
     Models the case where a PENDING approval already exists (proposed by
-    _USER_ESG_PROPOSER) and a *different* esg_manager (_USER_ESG) calls
+    _USER_ESG_PROPOSER) and a *different* admin (_USER_ESG) calls
     POST /publish to approve.
 
     session.execute side_effect (in order):
@@ -243,7 +243,7 @@ class TestDraftCreateHasNullPublishFields:
         """MG-03: published_at must be None on a freshly created draft."""
         draft = _make_draft_orm()
         app.dependency_overrides[get_current_user] = _auth_override(
-            "data_steward", user_id=_USER_DS
+            "editor", user_id=_USER_DS
         )
         app.dependency_overrides[get_db] = _db_for_create(draft)
 
@@ -280,7 +280,7 @@ class TestDraftCreateHasNullPublishFields:
         """published_by must be None for a draft (not the creator sub)."""
         draft = _make_draft_orm()
         app.dependency_overrides[get_current_user] = _auth_override(
-            "data_steward", user_id=_USER_DS
+            "editor", user_id=_USER_DS
         )
         app.dependency_overrides[get_db] = _db_for_create(draft)
 
@@ -308,19 +308,19 @@ class TestPublishSetsPublishFields:
     """Publish endpoint must set published_at and published_by to non-None.
 
     All tests drive the two-eyes ISAE-3000 §A99 200-flow:
-    - A PENDING approval was created by _USER_ESG_PROPOSER (first esg_manager).
-    - The test client calls POST /publish as _USER_ESG (second, different esg_manager).
+    - A PENDING approval was created by _USER_ESG_PROPOSER (first admin).
+    - The test client calls POST /publish as _USER_ESG (second, different admin).
     - Expected outcome: HTTP 200, factor published.
     """
 
     def test_publish_sets_published_at_non_null(self) -> None:
-        """After publish (second esg_manager approves), published_at must be non-None."""
+        """After publish (second admin approves), published_at must be non-None."""
         draft = _make_draft_orm()
         pending = _make_approval_orm(proposed_by=_USER_ESG_PROPOSER)
         published = _make_published_orm()
         # Caller is _USER_ESG — DIFFERENT from the proposer _USER_ESG_PROPOSER.
         app.dependency_overrides[get_current_user] = _auth_override(
-            "esg_manager", user_id=_USER_ESG
+            "admin", user_id=_USER_ESG
         )
         app.dependency_overrides[get_db] = _db_for_publish_second_call(
             draft, pending, published
@@ -343,14 +343,14 @@ class TestPublishSetsPublishFields:
         )
 
     def test_publish_sets_published_by_to_caller_uuid(self) -> None:
-        """published_by must equal the UUID of the approving esg_manager."""
+        """published_by must equal the UUID of the approving admin."""
         draft = _make_draft_orm()
         pending = _make_approval_orm(proposed_by=_USER_ESG_PROPOSER)
         published = _make_published_orm()
         # Caller is _USER_ESG; published_by on the refreshed ORM object must
         # match _USER_ESG (set by _make_published_orm / _refresh in the mock).
         app.dependency_overrides[get_current_user] = _auth_override(
-            "esg_manager", user_id=_USER_ESG
+            "admin", user_id=_USER_ESG
         )
         app.dependency_overrides[get_db] = _db_for_publish_second_call(
             draft, pending, published
@@ -363,7 +363,7 @@ class TestPublishSetsPublishFields:
         data = resp.json()
         assert data["is_published"] is True
         assert data["published_by"] == _USER_ESG, (
-            "MG-03: published_by must be the UUID of the approving esg_manager"
+            "MG-03: published_by must be the UUID of the approving admin"
         )
 
     def test_published_factor_response_has_all_mg03_fields(self) -> None:
@@ -373,7 +373,7 @@ class TestPublishSetsPublishFields:
         pending = _make_approval_orm(proposed_by=_USER_ESG_PROPOSER)
         published = _make_published_orm()
         app.dependency_overrides[get_current_user] = _auth_override(
-            "esg_manager", user_id=_USER_ESG
+            "admin", user_id=_USER_ESG
         )
         app.dependency_overrides[get_db] = _db_for_publish_second_call(
             draft, pending, published
