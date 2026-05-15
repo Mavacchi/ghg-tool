@@ -70,7 +70,7 @@ class SbtiTargetCreate(BaseModel):
     sbti_validation_date: date | None = None
 
     @model_validator(mode="after")
-    def _validate_domain_invariants(self) -> "SbtiTargetCreate":
+    def _validate_domain_invariants(self) -> SbtiTargetCreate:
         """Mirror the SbtiTarget.__post_init__ invariants at the API boundary."""
         if self.scope_coverage not in _ALLOWED_SCOPES:
             raise ValueError(

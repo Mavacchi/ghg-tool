@@ -24,7 +24,6 @@ os.environ.setdefault("GHG_JWT_ALGORITHM", "HS256")
 os.environ.setdefault("GHG_JWT_SECRET", "test-secret-key-for-unit-tests-only")
 os.environ.setdefault("GHG_ENVIRONMENT", "development")
 
-import pytest
 from fastapi.testclient import TestClient
 
 from ghg_tool.api.dependencies.auth import CurrentUser, get_current_user
@@ -249,12 +248,11 @@ def test_import_excel_422_parse_failure() -> None:
     with patch(
         "ghg_tool.api.routers.excel_import.parse_workbook",
         side_effect=WorkbookParseError("Sheet 'Scope1' is missing required columns: ['Anno']"),
-    ):
-        with TestClient(app, raise_server_exceptions=False) as client:
-            resp = client.post(
-                "/api/v1/raw/excel/import",
-                files=_multipart_upload(),
-            )
+    ), TestClient(app, raise_server_exceptions=False) as client:
+        resp = client.post(
+            "/api/v1/raw/excel/import",
+            files=_multipart_upload(),
+        )
 
     app.dependency_overrides.clear()
 
@@ -288,13 +286,12 @@ def test_import_excel_422_dq_crit_blocked() -> None:
         patch(
             "ghg_tool.api.routers.excel_import.run_ingestion_pipeline",
             return_value=blocked_result,
-        ),
+        ),TestClient(app, raise_server_exceptions=False) as client
     ):
-        with TestClient(app, raise_server_exceptions=False) as client:
-            resp = client.post(
-                "/api/v1/raw/excel/import",
-                files=_multipart_upload(),
-            )
+        resp = client.post(
+            "/api/v1/raw/excel/import",
+            files=_multipart_upload(),
+        )
 
     app.dependency_overrides.clear()
 
@@ -341,12 +338,12 @@ def test_import_excel_200_happy_path() -> None:
         ),
         # siem.emit is best-effort; avoid real HTTP calls in tests
         patch("ghg_tool.api.routers.excel_import.siem.emit"),
+        TestClient(app, raise_server_exceptions=False) as client,
     ):
-        with TestClient(app, raise_server_exceptions=False) as client:
-            resp = client.post(
-                "/api/v1/raw/excel/import",
-                files=_multipart_upload(),
-            )
+        resp = client.post(
+            "/api/v1/raw/excel/import",
+            files=_multipart_upload(),
+        )
 
     app.dependency_overrides.clear()
 
@@ -385,3 +382,56 @@ def test_import_excel_422_too_large() -> None:
     assert resp.status_code == 422, resp.text
     body = resp.json()
     assert "10 MB" in str(body) or "size limit" in str(body).lower()
+
+
+# ---------------------------------------------------------------------------
+# Test 7: 422 when the upload is not a valid XLSX (magic-byte check, BUG-13)
+# ---------------------------------------------------------------------------
+
+
+def test_import_excel_422_invalid_magic_bytes() -> None:
+    """A payload that does not start with PK\\x03\\x04 must return 422 (BUG-13).
+
+    This test sends a non-ZIP binary payload (PDF-like header 0x25504446 = "%PDF")
+    and asserts that the endpoint rejects it with 422 and the
+    ``invalid_excel_format`` error_code before openpyxl is invoked.
+    """
+    # Craft a payload that looks like a PDF, not a ZIP/XLSX.
+    non_xlsx_bytes = b"%PDF-1.4 fake content that is not an xlsx archive"
+
+    app.dependency_overrides[get_current_user] = _user_override("data_steward", _USER_DS)
+    app.dependency_overrides[get_db] = _noop_db()
+
+    with TestClient(app, raise_server_exceptions=False) as client:
+        resp = client.post(
+            "/api/v1/raw/excel/import",
+            files=_multipart_upload(non_xlsx_bytes),
+        )
+
+    app.dependency_overrides.clear()
+
+    assert resp.status_code == 422, resp.text
+    body = resp.json()
+    # The response must surface the magic-byte error_code.
+    detail_str = str(body)
+    assert "invalid_excel_format" in detail_str or "magic bytes" in detail_str.lower(), (
+        f"Expected invalid_excel_format error_code, got: {body}"
+    )
+
+
+def test_import_excel_422_invalid_magic_bytes_all_zeros() -> None:
+    """A payload of all-zero bytes must also be rejected with 422 (BUG-13)."""
+    zero_bytes = b"\x00" * 200
+
+    app.dependency_overrides[get_current_user] = _user_override("data_steward", _USER_DS)
+    app.dependency_overrides[get_db] = _noop_db()
+
+    with TestClient(app, raise_server_exceptions=False) as client:
+        resp = client.post(
+            "/api/v1/raw/excel/import",
+            files=_multipart_upload(zero_bytes),
+        )
+
+    app.dependency_overrides.clear()
+
+    assert resp.status_code == 422, resp.text

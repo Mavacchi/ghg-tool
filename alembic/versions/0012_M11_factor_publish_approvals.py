@@ -45,7 +45,10 @@ def upgrade() -> None:
         sa.Column(
             "factor_id",
             sa.UUID(as_uuid=True),
-            sa.ForeignKey("calc.factor_catalog.id"),
+            # 0001_M0 creates the table under ref.factor_catalog (no calc.* version
+            # exists). The wave-2 author wrote 'calc.factor_catalog' here by mistake;
+            # the FK then fails at runtime on real Postgres with UndefinedTable.
+            sa.ForeignKey("ref.factor_catalog.id"),
             nullable=False,
         ),
         sa.Column(

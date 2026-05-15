@@ -69,7 +69,13 @@ def calculate(
             methodology="declared-zero",
             regulatory_stream=regulatory_stream,
             created_by=created_by,
-            co2_tonne=None,
+            # M-24 / ESRS E1-7 §49: synthesised zero-line records MUST
+            # carry explicit Decimal('0') component values so that
+            # downstream SUM(co2_biogenic_tonne) / SUM(co2_fossil_tonne)
+            # aggregations are NULL-safe.
+            co2_tonne=Decimal("0"),
+            co2_biogenic_tonne=Decimal("0"),
+            co2_fossil_tonne=Decimal("0"),
             disclosure_notes=_RATIONALE,
         )
         for codice_sito in sites

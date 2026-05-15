@@ -19,7 +19,6 @@ Design notes:
 
 from __future__ import annotations
 
-import asyncio
 import uuid
 from typing import Annotated, Literal
 
@@ -162,10 +161,10 @@ def _background_run(
 
     from ghg_tool.application.services.calc_persistence import run_calc_and_persist  # noqa: PLC0415
 
-    raw_dsn = os.getenv("DATABASE_URL") or os.getenv(
+    raw_dsn: str = os.getenv("DATABASE_URL") or os.getenv(
         "SQLALCHEMY_URL",
         "postgresql+asyncpg://ghg_app:changeme@localhost:5432/ghg_tool",
-    )
+    ) or "postgresql+asyncpg://ghg_app:changeme@localhost:5432/ghg_tool"
 
     def _sync_dsn(raw: str) -> str:
         no_driver = re.sub(r"^postgresql\\+\\w+://", "postgresql://", raw)
@@ -175,8 +174,12 @@ def _background_run(
         no_driver = re.sub(r"^postgresql\\+\\w+://", "postgresql://", raw)
         return no_driver.replace("postgresql://", "postgresql+asyncpg://", 1)
 
-    sync_engine = create_engine(_sync_dsn(raw_dsn), pool_pre_ping=True, pool_size=2, max_overflow=0)
-    async_engine = create_async_engine(_async_dsn(raw_dsn), pool_pre_ping=True, pool_size=2, max_overflow=0)
+    sync_engine = create_engine(
+        _sync_dsn(raw_dsn), pool_pre_ping=True, pool_size=2, max_overflow=0
+    )
+    async_engine = create_async_engine(
+        _async_dsn(raw_dsn), pool_pre_ping=True, pool_size=2, max_overflow=0
+    )
     session_factory = async_sessionmaker(
         bind=async_engine, expire_on_commit=False, autoflush=False, autocommit=False
     )

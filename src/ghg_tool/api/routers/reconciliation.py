@@ -515,3 +515,29 @@ def _json_dumps_decimal(obj: Any) -> str:
         raise TypeError(f"Unserialisable type: {type(v).__name__}")
 
     return json.dumps(obj, default=_default, sort_keys=True)
+
+
+# ---------------------------------------------------------------------------
+# C-008: explicit 405 DELETE handler -- reconciliation snapshots are append-only.
+# ---------------------------------------------------------------------------
+
+
+@router.delete(
+    "/snapshots/{snapshot_id}",
+    status_code=status.HTTP_405_METHOD_NOT_ALLOWED,
+    summary="DELETE not allowed -- reconciliation snapshots are append-only",
+    description=(
+        "Reconciliation snapshots are immutable once created. "
+        "Corrections must be submitted as new snapshots."
+    ),
+    responses={405: {"description": "Method not allowed"}},
+)
+async def delete_snapshot_not_allowed(snapshot_id: uuid.UUID) -> dict[str, str]:
+    """Return 405 for DELETE on reconciliation snapshots.
+
+    C-008: The append-only invariant is enforced at the API layer.
+    """
+    raise HTTPException(
+        status_code=status.HTTP_405_METHOD_NOT_ALLOWED,
+        detail="Reconciliation snapshots are append-only; use deactivation",
+    )

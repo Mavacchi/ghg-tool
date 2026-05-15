@@ -154,3 +154,26 @@ async def get_audit_trail(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Internal error retrieving audit trail",
         ) from exc
+
+
+# ---------------------------------------------------------------------------
+# C-009: explicit 405 DELETE handler -- audit trail is append-only.
+# ---------------------------------------------------------------------------
+
+
+@router.delete(
+    "/",
+    status_code=status.HTTP_405_METHOD_NOT_ALLOWED,
+    summary="DELETE not allowed -- audit trail is append-only",
+    description="The audit trail is an immutable record. No entries may be deleted.",
+    responses={405: {"description": "Method not allowed"}},
+)
+async def delete_audit_trail_not_allowed() -> dict[str, str]:
+    """Return 405 for DELETE on the audit trail.
+
+    C-009: The append-only invariant is enforced at the API layer.
+    """
+    raise HTTPException(
+        status_code=status.HTTP_405_METHOD_NOT_ALLOWED,
+        detail="Audit trail is append-only; entries cannot be deleted",
+    )

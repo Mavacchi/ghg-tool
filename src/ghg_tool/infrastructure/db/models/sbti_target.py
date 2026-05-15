@@ -26,7 +26,6 @@ from sqlalchemy import (
     Numeric,
     SmallInteger,
     String,
-    Text,
     func,
 )
 from sqlalchemy.dialects.postgresql import UUID

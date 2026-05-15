@@ -9,14 +9,26 @@ Endpoints:
 Security constraints:
 - totp_secret is NEVER logged, NEVER returned after the enroll one-shot.
 - pre_2fa partial tokens are rejected by get_current_user on all other endpoints.
-- OTP replay within the valid_window is handled by pyotp's internal check.
+- OTP replay is prevented by persisting totp_last_counter per user (S-008 / BUG-25).
+  NOTE: pyotp.verify() does NOT track replays internally -- the docstring
+  claim in earlier versions was factually incorrect.  The counter guard here
+  is the sole replay defence.
+- Partial token jti replay is prevented by inserting into
+  auth.consumed_partial_jti (BUG-02 / S-010), with an in-process asyncio.Lock
+  as a best-effort within-worker guard.
 - All write paths emit audit_log + SIEM.
+- S-029: re-enrollment when totp_enabled=True requires proof-of-possession
+  of the current OTP.
+
+R-10: PARTIAL_TOKEN_TTL_S imported from infrastructure.security.constants.
 """
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import io
+import time
 import uuid
 from datetime import UTC, datetime
 from typing import Any
@@ -33,6 +45,7 @@ from ghg_tool.api.dependencies.auth import CurrentUser, get_current_user
 from ghg_tool.api.dependencies.db import get_db_no_auth
 from ghg_tool.api.middleware.correlation_id import get_correlation_id
 from ghg_tool.api.schemas.auth_schemas import TokenResponse
+from ghg_tool.application.services.session_service import insert_auth_session
 from ghg_tool.infrastructure.db.models.audit_log import AuditLog
 from ghg_tool.infrastructure.security import jwt as jwt_module
 from ghg_tool.infrastructure.security import siem
@@ -41,10 +54,37 @@ logger = structlog.get_logger(__name__)
 
 router = APIRouter(prefix="/api/v1/auth/totp", tags=["totp"])
 
-# 5-minute TTL for the partial pre-2FA token (section C).
-_PARTIAL_TOKEN_TTL_S = 300
-
 _TOTP_ISSUER = "Carbontrace"
+
+# ---------------------------------------------------------------------------
+# BUG-02 / S-010: in-process partial-jti consumed cache.
+# This is best-effort within-worker defence only.  The authoritative check
+# is the DB INSERT ON CONFLICT in challenge().  Under multi-worker uvicorn
+# the DB constraint is the sole reliable guard.
+# ---------------------------------------------------------------------------
+_consumed_partial_jtis: dict[str, float] = {}
+_consumed_lock: asyncio.Lock = asyncio.Lock()
+
+# Evict entries whose exp timestamp has passed (checked lazily on each call).
+async def _mark_partial_jti_consumed(jti: str, exp: float) -> bool:
+    """Mark a partial jti as consumed in the in-process cache.
+
+    Returns True if this call consumed the jti (first use).
+    Returns False if the jti was already present (replay attempt).
+
+    Evicts expired entries as a side-effect (best-effort GC).
+    """
+    now = time.time()
+    async with _consumed_lock:
+        # Evict expired entries.
+        expired = [k for k, v in _consumed_partial_jtis.items() if v < now]
+        for k in expired:
+            del _consumed_partial_jtis[k]
+
+        if jti in _consumed_partial_jtis:
+            return False  # replay detected
+        _consumed_partial_jtis[jti] = exp
+        return True
 
 
 # ---------------------------------------------------------------------------
@@ -68,6 +108,19 @@ class TOTPVerifyRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     otp: str = Field(min_length=6, max_length=8, pattern=r"^\d+$")
+
+
+class TOTPEnrollRequest(BaseModel):
+    """Body for /totp/enroll.
+
+    S-029: when the user already has totp_enabled=TRUE, current_otp must
+    be supplied to prove possession of the existing secret before a new
+    secret is issued.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    current_otp: str | None = Field(default=None, min_length=6, max_length=8, pattern=r"^\d+$")
 
 
 class TOTPChallengeRequest(BaseModel):
@@ -113,11 +166,11 @@ def _problem(
 async def _fetch_totp_row(
     session: AsyncSession, user_id: str
 ) -> dict[str, Any] | None:
-    """Fetch totp_secret, totp_enabled, username, tenant_id for a user."""
+    """Fetch totp_secret, totp_enabled, totp_last_counter, username, tenant_id."""
     result = await session.execute(
         text(
             "SELECT totp_secret, totp_enabled, totp_enrolled_at, "
-            "username, tenant_id "
+            "totp_last_counter, username, tenant_id "
             "FROM ref.users WHERE id = CAST(:uid AS uuid)"
         ),
         {"uid": user_id},
@@ -129,9 +182,66 @@ async def _fetch_totp_row(
         "totp_secret": row.totp_secret,
         "totp_enabled": row.totp_enabled,
         "totp_enrolled_at": row.totp_enrolled_at,
+        "totp_last_counter": int(row.totp_last_counter) if row.totp_last_counter is not None else 0,
         "username": row.username,
         "tenant_id": str(row.tenant_id),
     }
+
+
+def _current_totp_counter() -> int:
+    """Return the current TOTP time-step counter (floor(epoch / 30)).
+
+    S-008 / BUG-25: used to detect and reject OTP replay attacks.
+    """
+    return int(time.time() // 30)
+
+
+async def _verify_otp_no_replay(
+    session: AsyncSession,
+    user_id: str,
+    totp_secret: str,
+    otp: str,
+    last_counter: int,
+    correlation_id: str | None,
+) -> int:
+    """Verify the OTP and reject replays.
+
+    S-008 / BUG-25: persists the consumed counter so the same OTP cannot
+    be reused within the ~90s valid_window.  pyotp.verify() does NOT track
+    replays internally.
+
+    Returns the consumed counter value (for the caller to persist).
+
+    Raises:
+        HTTPException 401 if the OTP is wrong or replayed.
+    """
+    totp = pyotp.TOTP(totp_secret)
+    if not totp.verify(otp, valid_window=1):
+        raise _problem(
+            status.HTTP_401_UNAUTHORIZED,
+            "Unauthorized",
+            "Invalid OTP.",
+            correlation_id,
+        )
+
+    current_counter = _current_totp_counter()
+    if current_counter <= last_counter:
+        raise _problem(
+            status.HTTP_401_UNAUTHORIZED,
+            "Unauthorized",
+            "OTP already used. Wait for the next 30-second window.",
+            correlation_id,
+        )
+
+    # Persist the consumed counter.
+    await session.execute(
+        text(
+            "UPDATE ref.users SET totp_last_counter = :ctr "
+            "WHERE id = CAST(:uid AS uuid)"
+        ),
+        {"ctr": current_counter, "uid": user_id},
+    )
+    return current_counter
 
 
 # ---------------------------------------------------------------------------
@@ -149,28 +259,68 @@ async def _fetch_totp_row(
         "ref.users.totp_secret, and returns a one-shot response with the "
         "base32 secret, the otpauth:// URL, and a QR code as a base64 PNG. "
         "The secret is NEVER returned again; the caller must verify (POST /verify) "
-        "before 2FA is activated. Calling enroll again overwrites any pending secret."
+        "before 2FA is activated. "
+        "S-029: if totp_enabled is already TRUE, the body must include "
+        "current_otp to prove possession of the existing secret."
     ),
     responses={
         200: {"description": "Enrollment started"},
-        401: {"description": "Not authenticated"},
+        401: {"description": "Not authenticated or OTP verification required"},
     },
 )
 async def enroll(
     request: Request,
+    body: TOTPEnrollRequest | None = None,
     user: CurrentUser = Depends(get_current_user),
     session: AsyncSession = Depends(get_db_no_auth),
 ) -> TOTPEnrollResponse:
-    """Generate a new TOTP secret and store it (not yet enabled)."""
+    """Generate a new TOTP secret and store it (not yet enabled).
+
+    S-029: if the user already has totp_enabled=TRUE, requires current_otp
+    as proof of possession before overwriting the existing secret.
+    """
     correlation_id = get_correlation_id()
     log = logger.bind(correlation_id=correlation_id, user=user.sub[:8])
 
-    secret = pyotp.random_base32()
-    totp = pyotp.TOTP(secret)
-
-    # Fetch username for a friendly provisioning URI.
     row = await _fetch_totp_row(session, user.sub)
     account_name = row["username"] if row else user.sub[:8]
+
+    # S-029: if already enrolled, require proof of possession.
+    if row and row["totp_enabled"]:
+        current_otp = (body.current_otp if body else None)
+        if not current_otp:
+            raise _problem(
+                status.HTTP_401_UNAUTHORIZED,
+                "Unauthorized",
+                "Re-enrollment requires current_otp when TOTP is already enabled.",
+                correlation_id,
+            )
+        # Verify the current OTP against the EXISTING secret with replay guard.
+        try:
+            await _verify_otp_no_replay(
+                session,
+                user_id=user.sub,
+                totp_secret=row["totp_secret"],
+                otp=current_otp,
+                last_counter=row["totp_last_counter"],
+                correlation_id=correlation_id,
+            )
+        except HTTPException:
+            log.warning(
+                "totp_reenroll_otp_failed",
+                user_sub=user.sub[:8],
+                probe_attempt=True,
+            )
+            raise
+
+        log.info(
+            "totp_reenroll_initiated",
+            event="totp_reenroll_initiated",
+            user_sub=user.sub[:8],
+        )
+
+    secret = pyotp.random_base32()
+    totp = pyotp.TOTP(secret)
 
     otpauth_url = totp.provisioning_uri(
         name=account_name, issuer_name=_TOTP_ISSUER
@@ -208,7 +358,8 @@ async def enroll(
     description=(
         "Verifies the submitted OTP against the pending secret stored during "
         "enrollment. On success sets totp_enabled=TRUE and stamps "
-        "totp_enrolled_at. 401 on wrong OTP or if enrollment has not started."
+        "totp_enrolled_at. 401 on wrong OTP or if enrollment has not started. "
+        "S-008: persists totp_last_counter to prevent OTP replay."
     ),
     responses={
         200: {"description": "2FA activated"},
@@ -231,8 +382,16 @@ async def verify(
         raise _problem(status.HTTP_401_UNAUTHORIZED, "Unauthorized",
                        "TOTP enrollment not started. Call /enroll first.", correlation_id)
 
-    totp = pyotp.TOTP(row["totp_secret"])
-    if not totp.verify(body.otp, valid_window=1):
+    try:
+        await _verify_otp_no_replay(
+            session,
+            user_id=user.sub,
+            totp_secret=row["totp_secret"],
+            otp=body.otp,
+            last_counter=row["totp_last_counter"],
+            correlation_id=correlation_id,
+        )
+    except HTTPException:
         log.warning("totp_verify_wrong_otp", probe_attempt=True)
         siem.emit(
             event="totp_verify_failed",
@@ -242,8 +401,7 @@ async def verify(
             severity="WARN",
             payload={"ip": client_ip},
         )
-        raise _problem(status.HTTP_401_UNAUTHORIZED, "Unauthorized",
-                       "Invalid OTP.", correlation_id)
+        raise
 
     now = datetime.now(tz=UTC)
     await session.execute(
@@ -297,7 +455,8 @@ async def verify(
         "Disables 2FA for the authenticated user. A valid OTP is required "
         "as proof of possession before disabling. Clears totp_enabled and "
         "totp_enrolled_at (totp_secret is retained until next enroll to "
-        "prevent race-condition re-use). Audit log + SIEM emitted."
+        "prevent race-condition re-use). Audit log + SIEM emitted. "
+        "S-008: persists totp_last_counter to prevent OTP replay."
     ),
     responses={
         200: {"description": "2FA disabled"},
@@ -320,8 +479,16 @@ async def disable(
         raise _problem(status.HTTP_401_UNAUTHORIZED, "Unauthorized",
                        "TOTP 2FA is not enabled for this account.", correlation_id)
 
-    totp = pyotp.TOTP(row["totp_secret"])
-    if not totp.verify(body.otp, valid_window=1):
+    try:
+        await _verify_otp_no_replay(
+            session,
+            user_id=user.sub,
+            totp_secret=row["totp_secret"],
+            otp=body.otp,
+            last_counter=row["totp_last_counter"],
+            correlation_id=correlation_id,
+        )
+    except HTTPException:
         log.warning("totp_disable_wrong_otp", probe_attempt=True)
         siem.emit(
             event="totp_disable_failed",
@@ -331,8 +498,7 @@ async def disable(
             severity="WARN",
             payload={"ip": client_ip},
         )
-        raise _problem(status.HTTP_401_UNAUTHORIZED, "Unauthorized",
-                       "Invalid OTP.", correlation_id)
+        raise
 
     now = datetime.now(tz=UTC)
     await session.execute(
@@ -386,7 +552,12 @@ async def disable(
     description=(
         "Accepts the short-lived partial_token (pre_2fa=true, 5 min TTL) "
         "plus the current TOTP OTP. On success returns the full access + "
-        "refresh token pair. 401 on wrong OTP or if partial_token is invalid."
+        "refresh token pair. 401 on wrong OTP or if partial_token is invalid. "
+        "BUG-02 / S-010: the partial_token jti is recorded in "
+        "auth.consumed_partial_jti to prevent replay within the TTL window. "
+        "An in-process asyncio.Lock provides best-effort within-worker guard. "
+        "S-008: OTP replay is prevented via totp_last_counter. "
+        "BUG-01: session row inserted before returning the token."
     ),
     responses={
         200: {"description": "Full token pair issued"},
@@ -402,6 +573,7 @@ async def challenge(
     correlation_id = get_correlation_id()
     log = logger.bind(correlation_id=correlation_id)
     client_ip = request.client.host if request.client else None
+    user_agent = request.headers.get("user-agent")
 
     # Decode and validate the partial token -- it must carry pre_2fa=true.
     try:
@@ -415,17 +587,69 @@ async def challenge(
         raise _problem(status.HTTP_401_UNAUTHORIZED, "Unauthorized",
                        "Token is not a pre-2FA partial token.", correlation_id)
 
+    partial_jti: str = claims.get("jti", "")
+    partial_exp: float = float(claims.get("exp", 0))
     user_id: str = claims.get("sub", "")
     tenant_id: str = claims.get("tenant_id", "")
     role: str = claims.get("role", "")
+
+    # BUG-02 / S-010 -- in-process best-effort replay guard (within same worker).
+    first_use = await _mark_partial_jti_consumed(partial_jti, partial_exp)
+    if not first_use:
+        log.warning(
+            "totp_challenge_partial_token_replayed",
+            jti_prefix=partial_jti[:8],
+            probe_attempt=True,
+        )
+        raise _problem(
+            status.HTTP_401_UNAUTHORIZED,
+            "Unauthorized",
+            "partial_token_replayed",
+            correlation_id,
+        )
+
+    # BUG-02 / S-010 -- authoritative DB-level replay guard.
+    # ON CONFLICT on the PK means a second worker that also got the token
+    # will fail here even if the in-process dict missed it.
+    try:
+        await session.execute(
+            text(
+                "INSERT INTO auth.consumed_partial_jti (jti) VALUES (:jti)"
+            ),
+            {"jti": partial_jti},
+        )
+    except Exception as exc:  # noqa: BLE001
+        # Any exception here (including unique constraint violation) means
+        # the jti was already consumed -- treat as replay.
+        log.warning(
+            "totp_challenge_partial_token_db_replay",
+            jti_prefix=partial_jti[:8],
+            probe_attempt=True,
+            error=str(exc),
+        )
+        raise _problem(
+            status.HTTP_401_UNAUTHORIZED,
+            "Unauthorized",
+            "partial_token_replayed",
+            correlation_id,
+        ) from exc
 
     row = await _fetch_totp_row(session, user_id)
     if not row or not row["totp_enabled"] or not row["totp_secret"]:
         raise _problem(status.HTTP_401_UNAUTHORIZED, "Unauthorized",
                        "TOTP not configured for this user.", correlation_id)
 
-    totp = pyotp.TOTP(row["totp_secret"])
-    if not totp.verify(body.otp, valid_window=1):
+    # S-008 / BUG-25: verify OTP with replay protection.
+    try:
+        await _verify_otp_no_replay(
+            session,
+            user_id=user_id,
+            totp_secret=row["totp_secret"],
+            otp=body.otp,
+            last_counter=row["totp_last_counter"],
+            correlation_id=correlation_id,
+        )
+    except HTTPException:
         log.warning("totp_challenge_wrong_otp", probe_attempt=True)
         siem.emit(
             event="totp_challenge_failed",
@@ -435,13 +659,26 @@ async def challenge(
             severity="WARN",
             payload={"ip": client_ip},
         )
-        raise _problem(status.HTTP_401_UNAUTHORIZED, "Unauthorized",
-                       "Invalid OTP.", correlation_id)
+        raise
 
     access_token = jwt_module.create_access_token(
         sub=user_id, role=role, tenant_id=tenant_id
     )
     refresh_token = jwt_module.create_refresh_token(sub=user_id, tenant_id=tenant_id)
+
+    # BUG-01 / S-007: insert the session row BEFORE returning the token.
+    access_claims = jwt_module.decode_token(access_token)
+    access_jti: str = access_claims.get("jti", "")
+    await insert_auth_session(
+        session,
+        user_id=user_id,
+        tenant_id=tenant_id,
+        jti=access_jti,
+        ip_address=client_ip,
+        user_agent=user_agent,
+        correlation_id=correlation_id,
+    )
+    await session.flush()
 
     log.info("totp_challenge_success", user_id=user_id[:8])
     siem.emit(
@@ -453,9 +690,10 @@ async def challenge(
         payload={},
     )
 
+    from ghg_tool.infrastructure.security.constants import ACCESS_TOKEN_TTL_S  # noqa: PLC0415
     return TokenResponse(
         access_token=access_token,
         refresh_token=refresh_token,
-        expires_in=jwt_module.ACCESS_TOKEN_TTL_S,
+        expires_in=ACCESS_TOKEN_TTL_S,
         token_type="bearer",
     )

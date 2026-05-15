@@ -185,14 +185,14 @@ def _build_chart_png(
     fig.patch.set_facecolor("#ffffff")
     ax.set_facecolor("#ffffff")
 
-    bars_pri = ax.bar(
+    ax.bar(
         x - width / 2, values_pri, width,
         label=str(prior_anno),
         color=["#D55E00", "#0072B2", "#009E73"],
         alpha=0.45,
         edgecolor="none",
     )
-    bars_cur = ax.bar(
+    ax.bar(
         x + width / 2, values_cur, width,
         label=str(anno),
         color=["#D55E00", "#0072B2", "#009E73"],

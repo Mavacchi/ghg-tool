@@ -10,13 +10,17 @@ class LoginRequest(BaseModel):
 
     Attributes:
         username: Application username (not email).
-        password: Raw password — never echoed or logged.
+        password: Raw password -- never echoed or logged.
+        tenant_code: Optional tenant discriminator.  When two tenants share
+            the same username (unique constraint is per-tenant, not global)
+            this field disambiguates the lookup.  S-027.
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     username: str = Field(min_length=1, max_length=120)
     password: str = Field(min_length=1, max_length=200)
+    tenant_code: str | None = Field(default=None, max_length=80)
 
     @field_validator("username")
     @classmethod

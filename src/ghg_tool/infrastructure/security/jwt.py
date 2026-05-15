@@ -97,6 +97,17 @@ _JWT_AUDIENCE = os.environ.get("GHG_JWT_AUDIENCE", "")
 ACCESS_TOKEN_TTL_S: int = int(os.environ.get("GHG_ACCESS_TOKEN_TTL", "3600"))
 REFRESH_TOKEN_TTL_S: int = int(os.environ.get("GHG_REFRESH_TOKEN_TTL", "86400"))
 
+
+def get_unverified_claims(token: str) -> dict[str, Any]:
+    """Decode JWT payload WITHOUT signature verification.
+
+    For routing decisions only (rate-limit key extraction, jti peeking)
+    where the caller has not yet completed full validation. NEVER use the
+    returned claims for authorization.
+    """
+    return jwt.get_unverified_claims(token)  # type: ignore[no-any-return]
+
+
 # Algorithms that must never be accepted (SG-01). Compared case-insensitively
 # in decode_token to catch mixed-case spellings (e.g. "nOnE") that some
 # attacker tooling has historically used to slip past naive string matches.

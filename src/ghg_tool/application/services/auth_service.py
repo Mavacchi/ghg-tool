@@ -112,6 +112,9 @@ async def authenticate_user(
         return None
 
     if not user.is_active:
+        # BUG-14: equalise timing so observers cannot distinguish "user disabled"
+        # from "user not found".  Pay the bcrypt cost before returning None.
+        verify_password(password, _DUMMY_BCRYPT_HASH)
         log.info("Login failed: inactive user", user_id=str(user.id)[:8])
         return None
 

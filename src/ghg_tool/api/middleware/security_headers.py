@@ -20,8 +20,9 @@ from starlette.requests import Request
 from starlette.responses import Response
 
 _SECURITY_HEADERS: dict[str, str] = {
-    # HSTS: enforce HTTPS for 1 year including all sub-domains.
-    "Strict-Transport-Security": "max-age=31536000; includeSubDomains",
+    # HSTS: enforce HTTPS for 1 year including all sub-domains; preload eligible.
+    # ``preload`` enables submission to browser HSTS preload lists (S-020).
+    "Strict-Transport-Security": "max-age=31536000; includeSubDomains; preload",
     # Prevent browsers from MIME-sniffing the content-type.
     "X-Content-Type-Options": "nosniff",
     # Block embedding in <iframe> / <frame> / <object> to prevent clickjacking.

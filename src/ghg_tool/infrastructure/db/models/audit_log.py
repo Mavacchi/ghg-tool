@@ -16,8 +16,26 @@ class AuditLog(Base):
     """Immutable audit log for all sensitive API and ETL operations (calc.audit_log).
 
     Append-only: mutation blocked by ``trg_audit_log_deny_mutation``.
-    ``before_state`` / ``after_state`` are populated for correction operations
-    only (FR-21 requirement).  PII is excluded from logs per NFR-08 / SG-07.
+
+    ``before_state`` / ``after_state`` JSONB columns are populated only where
+    documented in the relevant router (e.g. emission corrections per FR-21,
+    factor publications).  PII is excluded from these columns per NFR-08 / SG-07
+    and GDPR Art. 5(1)(c) data minimisation:
+
+    - ``after_state`` for ``action='user_created'`` stores the user UUID, tenant UUID,
+      and role UUID only.  No ``username`` or ``email`` are stored.  Forensic lookup
+      joins ``ref.users`` on ``user_id`` UUID for human-readable details (C-012).
+    - ``ip_address`` (INET) and ``user_agent`` (TEXT) are stored per row and classified
+      as GDPR Art. 4(1) personal data (CJEU Breyer C-582/14 for IP; WP29 Opinion 4/2007
+      for UA-string fingerprinting).  Retention: 10 years per GDPR Art. 6(1)(c) +
+      Art. 32 (security monitoring obligation).  IP and UA are disclosed in the Art. 30
+      register under Art. 6(1)(f) legitimate interest (SIEM / security monitoring).
+    - ``user_id`` is a UUID FK to ``ref.users``; it is pseudonymous, not directly
+      identifiable.  Audit-trail forensic lookup uses the UUID to join ``ref.users``
+      for the human-readable username where legally required (e.g. ISAE 3000 review).
+
+    Retention: 10 years per CSRD Art. 19a assurance continuity requirement and
+    GDPR Art. 6(1)(c) + Art. 32 security-monitoring obligation.
     """
 
     __tablename__ = "audit_log"

@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import pytest
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
@@ -53,9 +52,9 @@ def minimal_data() -> dict:
             "trajectory_note": "Trajectory 2025 = 9700 tCO2e; actual = 9700 tCO2e",
         },
         "top_scope3_categories": [
-            {"sub_scope": "Cat1", "category_label": "Cat. 1 Purchased goods", "tco2e": 4000.0, "pct": 50.0},
-            {"sub_scope": "Cat4", "category_label": "Cat. 4 Upstream transport", "tco2e": 2000.0, "pct": 25.0},
-            {"sub_scope": "Cat11", "category_label": "Cat. 11 Use of sold products", "tco2e": 1000.0, "pct": 12.5},
+            {"sub_scope": "Cat1", "category_label": "Cat. 1 Purchased goods", "tco2e": 4000.0, "pct": 50.0},  # noqa: E501
+            {"sub_scope": "Cat4", "category_label": "Cat. 4 Upstream transport", "tco2e": 2000.0, "pct": 25.0},  # noqa: E501
+            {"sub_scope": "Cat11", "category_label": "Cat. 11 Use of sold products", "tco2e": 1000.0, "pct": 12.5},  # noqa: E501
         ],
         "dq_summary": {"crit_open": 2, "warn_open": 5, "total_findings": 10},
         "assurance_status": "limited",

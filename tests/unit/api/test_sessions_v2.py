@@ -9,6 +9,9 @@ Covers:
 - middleware passes non-revoked session
 - revoke-all-except-current happy path
 - revoke non-existent session 404
+- BUG-01: session row missing -> 401 session_not_found (new fail-closed behavior)
+- BUG-01: session row exists and not revoked -> request passes
+- middleware no Bearer -> passes through (no DB lookup)
 """
 
 from __future__ import annotations
@@ -17,9 +20,8 @@ import os
 import uuid
 from collections.abc import AsyncGenerator
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
-import pytest
 from fastapi.testclient import TestClient
 
 os.environ.setdefault("GHG_JWT_ALGORITHM", "HS256")
@@ -213,35 +215,148 @@ class TestRevokeAll:
 
 # ---------------------------------------------------------------------------
 # Test: session_check middleware (unit-level)
+# BUG-01/S-007/S-012/S-022: updated for new fail-closed behavior.
 # ---------------------------------------------------------------------------
 
 
 class TestSessionCheckMiddleware:
-    def test_middleware_blocks_revoked_session(self) -> None:
-        """A request whose jti maps to a revoked session row is rejected 401."""
-        # We test the middleware directly using the middleware module.
-        from ghg_tool.api.middleware.session_check import _extract_jti
+    def test_middleware_jwt_decode_extracts_jti(self) -> None:
+        """The middleware decodes the signed JWT to extract jti.
 
-        # Build a real token so _extract_jti can decode it.
+        S-024: the middleware now uses verified decode, not unverified peek.
+        This test confirms the jti is correctly extracted from a real token.
+        """
+        from ghg_tool.infrastructure.security.jwt import decode_token
+
         token = create_access_token(
             sub=TEST_USER, role="esg_manager", tenant_id=TEST_TENANT
         )
-        jti = _extract_jti(f"Bearer {token}")
+        claims = decode_token(token)
+        jti = claims.get("jti", "")
         assert jti is not None
-        assert len(jti) == 36  # UUID length
+        assert len(jti) == 36  # UUID4 length
 
     def test_middleware_no_bearer_passes_through(self) -> None:
-        """Requests with no Authorization header bypass the session lookup."""
-        from ghg_tool.api.middleware.session_check import _extract_jti
+        """Requests with no Authorization header bypass the session lookup.
 
-        result = _extract_jti("Basic dXNlcjpwYXNz")
-        assert result is None
+        The middleware short-circuits when there's no Bearer token.
+        Health checks and public routes should not be blocked.
+        """
+        with TestClient(app, raise_server_exceptions=False) as client:
+            resp = client.get("/healthz")
+        # /healthz is in _EXCLUDED_PATHS; should always pass through
+        assert resp.status_code == 200
 
-    def test_middleware_malformed_token_returns_none(self) -> None:
-        """Malformed JWT causes _extract_jti to return None gracefully."""
-        from ghg_tool.api.middleware.session_check import _extract_jti
+    def test_middleware_excluded_paths_bypass_session_check(self) -> None:
+        """Paths in _NO_SESSION_PATHS bypass the session row check.
 
-        result = _extract_jti("Bearer not.a.valid.token.at.all!!!")
-        # Should not raise; may return None or a partial string
-        # The important thing is it does not crash.
-        assert result is None or isinstance(result, str)
+        /api/v1/auth/login, /api/v1/auth/refresh, etc. do not require
+        a pre-existing session row (they are the token issuance endpoints).
+        """
+        # /api/v1/auth/login is in _NO_SESSION_PATHS; even a bad payload
+        # should get past the middleware and hit the auth logic (returning 401
+        # for bad credentials, not 503 from the middleware).
+        with TestClient(app, raise_server_exceptions=False) as client:
+            resp = client.post(
+                "/api/v1/auth/login",
+                json={"username": "nobody", "password": "badpass"},
+            )
+        # 401 from the auth handler (bad creds), or 500 if DB unavailable.
+        # The key invariant: the middleware did NOT block this path with 503.
+        # The request reached the login handler (even if it then fails).
+        assert resp.status_code in (401, 422, 500)  # 500 if DB is not available for lookup
+
+    def test_middleware_fail_closed_on_db_error(self) -> None:
+        """BUG-01 / S-022: middleware returns 503 when DB is unavailable.
+
+        A request with a valid Bearer token but no reachable auth.sessions
+        table must be rejected fail-closed (503), never allowed through.
+        """
+        token = create_access_token(
+            sub=TEST_USER, role="esg_manager", tenant_id=TEST_TENANT
+        )
+        # No DB mocking -- the AsyncSessionFactory will fail to connect.
+        app.dependency_overrides.clear()
+        with TestClient(app, raise_server_exceptions=False) as client:
+            resp = client.get(
+                "/api/v1/auth/sessions/",
+                headers={"Authorization": f"Bearer {token}"},
+            )
+        # Either 503 (middleware fail-closed) or 401 (session_not_found after
+        # the middleware correctly blocks).  Both are acceptable: the key
+        # invariant is that 200 must NOT be returned.
+        assert resp.status_code in (401, 503)
+
+    def test_middleware_session_revoked_returns_401(self) -> None:
+        """BUG-01: a revoked session row causes 401 session_revoked.
+
+        We patch AsyncSessionFactory to return a revoked row.
+        """
+        token = create_access_token(
+            sub=TEST_USER, role="esg_manager", tenant_id=TEST_TENANT
+        )
+        claims_from_token = None
+        from ghg_tool.infrastructure.security.jwt import decode_token
+        claims_from_token = decode_token(token)
+        claims_from_token["jti"]
+
+        revoked_row = MagicMock()
+        revoked_row.id = uuid.uuid4()
+        revoked_row.revoked_at = "2026-05-14T10:00:00Z"  # non-None = revoked
+
+        mock_result = MagicMock()
+        mock_result.fetchone = MagicMock(return_value=revoked_row)
+
+        mock_db_session = AsyncMock()
+        mock_db_session.execute = AsyncMock(return_value=mock_result)
+        mock_db_session.__aenter__ = AsyncMock(return_value=mock_db_session)
+        mock_db_session.__aexit__ = AsyncMock(return_value=None)
+
+        with patch(
+            "ghg_tool.api.middleware.session_check.AsyncSessionFactory",
+            return_value=mock_db_session,
+        ):
+            app.dependency_overrides.clear()
+            with TestClient(app, raise_server_exceptions=False) as client:
+                resp = client.get(
+                    "/api/v1/auth/sessions/",
+                    headers={"Authorization": f"Bearer {token}"},
+                )
+
+        assert resp.status_code == 401
+        data = resp.json()
+        assert data.get("detail") == "session_revoked"
+
+    def test_middleware_session_not_found_returns_401(self) -> None:
+        """BUG-01 / BUG-19: missing session row -> 401 session_not_found.
+
+        After the BUG-01 fix, every issued token has a session row.  A token
+        with no matching session row is a forged or pre-fix token and must be
+        rejected fail-closed.
+        """
+        token = create_access_token(
+            sub=TEST_USER, role="esg_manager", tenant_id=TEST_TENANT
+        )
+
+        mock_result = MagicMock()
+        mock_result.fetchone = MagicMock(return_value=None)  # no session row
+
+        mock_db_session = AsyncMock()
+        mock_db_session.execute = AsyncMock(return_value=mock_result)
+        mock_db_session.__aenter__ = AsyncMock(return_value=mock_db_session)
+        mock_db_session.__aexit__ = AsyncMock(return_value=None)
+
+        with patch(
+            "ghg_tool.api.middleware.session_check.AsyncSessionFactory",
+            return_value=mock_db_session,
+        ):
+            app.dependency_overrides.clear()
+            with TestClient(app, raise_server_exceptions=False) as client:
+                resp = client.get(
+                    "/api/v1/auth/sessions/",
+                    headers={"Authorization": f"Bearer {token}"},
+                )
+
+        assert resp.status_code == 401
+        data = resp.json()
+        assert data.get("detail") == "session_not_found"

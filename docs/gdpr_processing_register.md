@@ -1,16 +1,24 @@
 # GDPR Article 30 Records of Processing Activities
 
-**Controller**: Saturnia Ceramica S.r.l. (placeholder — substitute legal entity name before production deployment)
-**Document version**: 1.0.0
+**Controller**: Gruppo Ceramiche Gresmalt S.p.A. (short name: Gresmalt)
+**Document version**: 1.1.0
 **Date**: 2026-05-14
 **Status**: DRAFT — controller DPO or legal officer must review and countersign before production deployment
 **Closes**: COMP-P1-001 (Art. 30 register), COMP-P1-003 (Art. 17 erasure reconciliation)
+
+> **Canonical controller name (C-011)**: The legal entity operating the Carbontrace tool is
+> **Gruppo Ceramiche Gresmalt S.p.A.** (short name: "Gresmalt"). This name supersedes all
+> earlier placeholder strings ("Saturnia Ceramica S.r.l." and "Ceramic Tile Manufacturer
+> S.p.A.") that appeared in earlier draft versions of this register and in the DB seed.
+> GDPR Art. 30(1)(a) requires the controller's name to be unambiguous. DPO countersignature
+> is required before production deployment to confirm that this register accurately identifies
+> the controller. Countersignature block: [DPO name] [Date] [Signature].
 
 ---
 
 ## Controller
 
-**Legal name**: Saturnia Ceramica S.r.l. (placeholder)
+**Legal name**: Gruppo Ceramiche Gresmalt S.p.A.
 **Registered office**: [TBD — insert registered address before deployment]
 **VAT / fiscal code**: [TBD]
 **Contact point for data protection enquiries**: [TBD — insert DPO email or legal@domain.it]
@@ -68,15 +76,23 @@ this system in v1.
 
 ## Categories of Personal Data
 
-Processing is limited to system-user account management data:
+Processing covers system-user account management data and security-monitoring technical data:
 
-| Category | Fields | Special category (Art. 9)? |
-|---|---|---|
-| User identity | `username` (corporate account name), `email` (corporate email address) | No |
-| Authentication credential | `password_hash` (bcrypt-12; the plaintext password is never stored or logged) | No |
-| Access control | `role_id` (FK to `ref.roles`; values: esg_manager, data_steward, auditor), `is_active` flag | No |
-| Account lifecycle | `created_at` timestamp | No |
-| Operational | `tenant_id` (single-tenant v1; UUID of the controller entity) | No |
+| Category | Fields | Retention | Lawful basis | Special category (Art. 9)? |
+|---|---|---|---|---|
+| User identity | `username` (corporate account name), `email` (corporate email address) | Active: employment duration; inactive: 5 years post-departure | Art. 6(1)(b) contract | No |
+| Authentication credential | `password_hash` (bcrypt-12; the plaintext password is never stored or logged) | Same as user account; erasable on Art. 17 request | Art. 6(1)(b) contract | No |
+| Access control | `role_id` (FK to `ref.roles`; values: esg_manager, data_steward, auditor), `is_active` flag | Same as user account | Art. 6(1)(b) contract | No |
+| Account lifecycle | `created_at` timestamp | Same as user account | Art. 6(1)(b) contract | No |
+| Operational | `tenant_id` (single-tenant v1; UUID of the controller entity) | Same as user account | Art. 6(1)(b) contract | No |
+| Network identifier | `ip_address` (INET) stored in `calc.audit_log` on every authenticated API call | 10 years (same as audit_log per CSRD Art. 19a + Art. 32 security obligation) | Art. 6(1)(f) legitimate interest: security monitoring and SIEM alerting; CJEU Breyer C-582/14 classification as personal data | No |
+| Browser/client identifier | `user_agent` (TEXT) stored in `calc.audit_log` on every authenticated API call | 10 years (same as audit_log) | Art. 6(1)(f) legitimate interest: security monitoring; UA-string treated as personal data per WP29 Opinion 4/2007 (browser fingerprinting) | No |
+
+**SIEM forwarding flow**: Structured audit_log entries (including `ip_address` and `user_agent`)
+are forwarded to the organisation's SIEM platform via an internal message queue. The SIEM
+operates as an internal sub-processor under the same retention policy (10 years). No
+third-party SIEM processor is involved in v1; if a third-party SIEM provider is introduced,
+a Data Processing Agreement under Art. 28 must be in place and this register must be updated.
 
 **No special-category data** (Art. 9) is processed: no health data, no racial or ethnic origin,
 no biometric data, no trade-union membership, no criminal records.

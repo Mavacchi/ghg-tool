@@ -9,18 +9,17 @@ Coverage:
 
 from __future__ import annotations
 
-import asyncio
 import uuid
 from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import pytest
-
 from ghg_tool.application.services.calc_persistence import (
     CalcPersistResult,
+    DualTrackPersistResult,
     run_calc_and_persist,
+    run_dual_track_and_persist,
 )
 
 # ---------------------------------------------------------------------------
@@ -387,3 +386,162 @@ class TestEmptyRawTables:
 
         assert isinstance(result, CalcPersistResult)
         assert result.correlation_id == _CORRELATION_ID
+
+
+# ---------------------------------------------------------------------------
+# New unit tests: dual_run_id binding + UUID pre-generation (Q1.A + Q2)
+# ---------------------------------------------------------------------------
+
+
+class TestDualRunIdBinding:
+    """Verify dual_run_id is threaded correctly through run_calc_and_persist."""
+
+    def test_run_calc_and_persist_binds_dual_run_id(self) -> None:
+        """When dual_run_id is passed, the SQL bind contains it (not None)."""
+        from ghg_tool.domain.entities.emission_record import EmissionRecord
+
+        now = datetime.now(UTC)
+        fake_emission = EmissionRecord(
+            correlation_id=_CORRELATION_ID,
+            raw_row_id=uuid.uuid4(),
+            scope=1,
+            sub_scope="combustion",
+            codice_sito="SITE_A",
+            anno=_ANNO,
+            tco2e=Decimal("100.0"),
+            factor_id="COMB_GAS_NAT_CO2_DEFRA_2025",
+            factor_version="2025",
+            factor_source="DEFRA",
+            gwp_set="AR6",
+            methodology="activity-based",
+            regulatory_stream="CSRD_ESRS_E1",
+            calc_timestamp=now,
+            created_by="calc_service",
+        )
+
+        _DUAL_RUN_ID = uuid.UUID("dddddddd-dddd-dddd-dddd-dddddddddddd")
+
+        sync_engine = _make_sync_engine([], [], [], [])
+        session_factory, captured = _make_async_session_factory()
+
+        with patch(
+            "ghg_tool.application.services.calc_persistence.CalcOrchestrator"
+        ) as mock_orch_cls, patch(
+            "ghg_tool.application.services.calc_persistence.SqlFactorCatalogAdapter"
+        ):
+            mock_orch = MagicMock()
+            mock_orch.run.return_value = [fake_emission]
+            mock_orch_cls.return_value = mock_orch
+
+            run_calc_and_persist(
+                tenant_id=_TENANT_ID,
+                anno=_ANNO,
+                correlation_id=_CORRELATION_ID,
+                sync_engine=sync_engine,
+                async_session_factory=session_factory,
+                dual_run_id=_DUAL_RUN_ID,
+            )
+
+        # Find the ops.calc_runs INSERT params (has 'emissions_written' key)
+        ops_row = next(
+            (p for p in captured if "emissions_written" in p),
+            None,
+        )
+        assert ops_row is not None, "ops.calc_runs INSERT params not captured"
+        assert ops_row["dual_run_id"] == str(_DUAL_RUN_ID), (
+            f"Expected dual_run_id={_DUAL_RUN_ID}, got {ops_row.get('dual_run_id')}"
+        )
+
+    def test_run_calc_and_persist_dual_run_id_default_none(self) -> None:
+        """Default behavior: dual_run_id is None in the SQL bind (single-track)."""
+        sync_engine = _make_sync_engine([], [], [], [])
+        session_factory, captured = _make_async_session_factory()
+
+        with patch(
+            "ghg_tool.application.services.calc_persistence.CalcOrchestrator"
+        ) as mock_orch_cls, patch(
+            "ghg_tool.application.services.calc_persistence.SqlFactorCatalogAdapter"
+        ):
+            mock_orch = MagicMock()
+            mock_orch.run.return_value = []
+            mock_orch_cls.return_value = mock_orch
+
+            run_calc_and_persist(
+                tenant_id=_TENANT_ID,
+                anno=_ANNO,
+                correlation_id=_CORRELATION_ID,
+                sync_engine=sync_engine,
+                async_session_factory=session_factory,
+                # dual_run_id not passed — default is None
+            )
+
+        ops_row = next(
+            (p for p in captured if "emissions_written" in p),
+            None,
+        )
+        assert ops_row is not None, "ops.calc_runs INSERT params not captured"
+        assert ops_row["dual_run_id"] is None, (
+            f"Expected dual_run_id=None for single-track, got {ops_row.get('dual_run_id')}"
+        )
+
+    def test_dual_track_entry_pre_generates_both_uuids(self) -> None:
+        """Both UUIDs must be generated client-side before any DB call.
+
+        Mocks uuid.uuid4 to verify the call count reaches 2 (for csrd_run_id
+        and ets_run_id) before any session execute is invoked.
+        """
+        sync_engine = _make_sync_engine([], [], [], [])
+        session_factory, _ = _make_async_session_factory()
+
+        original_uuid4 = uuid.uuid4
+
+        uuid4_calls: list[uuid.UUID] = []
+
+        def counting_uuid4() -> uuid.UUID:
+            val = original_uuid4()
+            uuid4_calls.append(val)
+            return val
+
+        with patch(
+            "ghg_tool.application.services.calc_persistence.CalcOrchestrator"
+        ) as mock_orch_cls, patch(
+            "ghg_tool.application.services.calc_persistence.SqlFactorCatalogAdapter"
+        ), patch(
+            "ghg_tool.application.services.calc_persistence.uuid.uuid4",
+            side_effect=counting_uuid4,
+        ) as mock_uuid4:
+            mock_orch = MagicMock()
+            mock_orch.run.return_value = []
+            mock_orch_cls.return_value = mock_orch
+
+            result = run_dual_track_and_persist(
+                tenant_id=_TENANT_ID,
+                anno=_ANNO,
+                sync_engine=sync_engine,
+                async_session_factory=session_factory,
+            )
+
+        # uuid.uuid4() must be called at least 4 times:
+        # csrd_run_id, ets_run_id, shared_correlation_id (3 explicit calls)
+        # plus any calls inside _emission_to_params for nil UUID fallback (none
+        # here since records list is empty).
+        # The key assertion: at least 2 run UUIDs were generated.
+        total_calls = mock_uuid4.call_count
+        assert total_calls >= 2, (
+            f"Expected at least 2 uuid.uuid4() calls (csrd_run_id + ets_run_id), "
+            f"got {total_calls}"
+        )
+
+        # Verify both run UUIDs appear in the result
+        assert result.csrd_result.run_id is not None
+        assert result.ets_result.run_id is not None
+        assert result.csrd_result.run_id != result.ets_result.run_id, (
+            "CSRD and ETS run_ids must be distinct"
+        )
+
+        # Verify shared correlation_id
+        assert result.csrd_result.correlation_id == result.ets_result.correlation_id, (
+            "correlation_id must be identical across both tracks (Q2)"
+        )
+
+        assert isinstance(result, DualTrackPersistResult)

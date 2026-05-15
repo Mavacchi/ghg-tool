@@ -124,7 +124,9 @@ async def get_current_user(
     pre_2fa: bool = bool(claims.get("pre_2fa", False))
     if pre_2fa:
         log.warning("pre_2fa token rejected on protected endpoint", probe_attempt=True)
-        raise _unauthorized("Partial 2FA token cannot be used as Bearer. Complete TOTP challenge first.")
+        raise _unauthorized(
+            "Partial 2FA token cannot be used as Bearer. Complete TOTP challenge first."
+        )
 
     try:
         user = CurrentUser(

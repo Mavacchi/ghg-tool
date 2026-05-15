@@ -251,6 +251,36 @@ async def _do_publish(
     """
     now_utc = datetime.now(tz=UTC)
 
+    # C-006 / C-004: assert created_by != approved_by (defence-in-depth above
+    # the DB CHECK constraint added in migration 0020).
+    factor_created_by = getattr(factor, "created_by", None)
+    if factor_created_by is not None and str(factor_created_by) == user.sub:
+        log.warning(
+            "publish_factor_self_approval_creator_blocked",
+            factor_id=factor.factor_id,
+            user_sub=user.sub[:8],
+        )
+        siem.emit(
+            event="factor_self_approval_creator_attempt",
+            correlation_id=correlation_id,
+            tenant_id=user.tenant_id,
+            user_sub=user.sub,
+            severity="HIGH",
+            payload={
+                "factor_id": factor.factor_id,
+                "version": factor.version,
+                "created_by": str(factor_created_by),
+                "approver": user.sub,
+            },
+        )
+        raise _problem(
+            status.HTTP_409_CONFLICT,
+            "Conflict",
+            "The factor creator cannot also approve publication (ISAE 3000).",
+            "self_approval_creator",
+            correlation_id,
+        )
+
     # Conditional UPDATE guards against concurrent publishers.
     update_stmt = (
         update(FactorCatalog)
@@ -514,6 +544,8 @@ async def create_factor(
         # set by the DB server_default (func.now()); do not pass it here.
         published_at=None,
         published_by=None,
+        # C-004: set created_by from the authenticated user sub.
+        created_by=uuid.UUID(user.sub),
         is_published=False,
         is_tbc=False,
     )
@@ -571,7 +603,7 @@ async def list_pending_approvals(
             "SELECT a.id, a.factor_id, f.factor_id AS factor_string_id, "
             "       a.proposed_by, a.proposed_at, a.reason_code "
             "FROM calc.factor_publish_approvals a "
-            "JOIN calc.factor_catalog f ON f.id = a.factor_id "
+            "JOIN ref.factor_catalog f ON f.id = a.factor_id "
             "WHERE a.tenant_id = CAST(:tenant AS uuid) "
             "  AND a.decision = 'PENDING' "
             "ORDER BY a.proposed_at ASC"

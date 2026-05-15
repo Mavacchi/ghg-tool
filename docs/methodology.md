@@ -1,7 +1,7 @@
 # GHG Methodology — Ceramic Tile Manufacturer
 
-**Version**: 1.0.0 (Phase 9 — initial publication incorporating Phase 7/8 changes)
-**Date**: 2026-05-14
+**Version**: 1.3.0 (Phase 9 — formalises dual_run_id FK linkage per Q1 decision option A)
+**Date**: 2026-05-15
 **Status**: APPROVED — reflects SustainabilityExpertAgent methodology_validation.md v1.0.0 and
 Phase 7/8 security and data-model decisions
 **References**:
@@ -24,6 +24,37 @@ introduce new methodology; it records and structures existing validated decision
 
 **Method**: Operational control per GHG Protocol Corporate Standard Chapter 4. The company
 accounts for 100% of GHG emissions from operations over which it exercises operational control.
+
+### 1.1 Consolidation Procedure (M-12)
+
+Under the operational-control approach (GHG Protocol Corporate Standard Ch.4):
+
+- **Attribution rule**: 100% of GHG emissions are attributed to Gresmalt for every site where
+  Gresmalt exercises operational control, regardless of equity ownership percentage.
+- **Equity-share calculations**: Not applied. No equity-share consolidation is used in v1.
+- **Jointly-controlled or minority-lease assets**: None identified in the current boundary
+  (confirmed by user 2026-05-13). For any future partially-controlled asset (e.g. a minority
+  lease or shared-utility arrangement): if Gresmalt exercises operational control, 100%
+  attribution applies; if another entity exercises operational control, the asset is excluded.
+  Any addition of a partially-controlled site must be reviewed against GHG Protocol Ch.4
+  before it enters the emissions inventory and must be documented in a methodology revision.
+- **Joint ventures**: No consolidated joint ventures in scope (confirmed by user 2026-05-13).
+
+### 1.2 Reporting Period and Data Lock-date (M-20)
+
+**Reporting period**: Calendar year, 1 January to 31 December.
+
+**Data lock-date**: 31 March of year N+1. After this date, the inventory for year N is
+considered closed for routine data entry. Activity data received after the lock date is
+accepted only via the FR-21 correction workflow (see §5), which requires an explicit
+reason code and creates a new audit-trail row without modifying the original.
+
+**Late corrections post-lock**: Any correction to year N data submitted after 31 March N+1
+follows the FR-21 correction workflow. Corrections that cause a shift exceeding the 5%
+significance threshold (§6) trigger mandatory base-year recalculation per FR-26.
+
+**Normative basis**: GHG Protocol Corporate Standard Ch.3 (reporting period definition);
+FR-21 (correction workflow); FR-26 (recalculation threshold).
 
 **Sites in scope**:
 
@@ -68,6 +99,17 @@ No CH4 or N2O component. GWP conversion is 1.0 (CO2 is the reference gas). Class
 fired product mass). Typical uncertainty bound: +/-10-20% relative. Flagged as
 DQ-WARN-02; disclosed in PDF report. Upgrade path to XRF measurement (Tier 2) recommended
 for Year 1 improvement plan. Source: methodology_validation.md §6.4.
+
+**Net vs. gross Scope 1 (M-21)**: Gresmalt has no GHG removal or carbon storage activities
+at any of the 7 in-scope sites. Accordingly, net Scope 1 equals gross Scope 1 for every
+reporting period. The ESRS E1-7 biogenic-removals disclosure for Scope 1 is zero removals.
+Rationale: the company operates ceramic tile manufacturing with no on-site biological
+sequestration, no carbon capture and storage, and no geological storage of CO2. This
+statement must be re-assessed if the operational boundary expands to include forestry assets
+or CCS installations.
+
+**Normative basis**: ESRS E1-6 §44(a)(v) (net Scope 1); ESRS E1-7 §48 (removals and
+storage disclosure).
 
 ### Scope 2 — Indirect energy emissions
 
@@ -114,6 +156,51 @@ Nine material categories identified; five categories disclosed as "not applicabl
 | Cat 14 | Not applicable | No franchise network |
 | Cat 15 | Not applicable | Non-financial undertaking; no investment portfolio in scope (OI-8 confirmed by user 2026-05-13) |
 
+**Cat 12 split proxy (M-19)**: The 30% landfill / 70% recycling split used for end-of-life
+treatment of sold products is a sector proxy sourced from Cerame-Unie (2023) sectoral
+end-of-life waste characterisation for ceramic tile products in the European market. This
+proxy is applied uniformly across all Gresmalt product lines in v1. The constants
+`LANDFILL_SHARE` / `RECYCLING_SHARE` should be made per-tenant configurable in v2 to allow
+market-specific overrides where national waste-flow statistics are available (e.g. ISTAT
+C&D waste flows). **Normative basis**: ESRS E1-6 §44(c); GHG Protocol Scope 3 Standard Ch.5
+(proxy data disclosure).
+
+**Gas-by-gas disclosure limitation for Scope 3 (M-10)**: Scope 3 emission factors sourced
+from ecoinvent v3.10, DEFRA 2025, and EXIOBASE 3 are provided as aggregate CO2-equivalent
+values. The upstream factor databases do not expose a per-gas (CO2, CH4, N2O) component
+split for spend-based or mass-based factors. Accordingly, the gas-by-gas breakdown required
+by ESRS E1-6 §44(b) is provided for Scope 1 and Scope 2 only. For Scope 3, only the total
+tCO2e is disclosed. This is a documented limitation of available secondary factor data; it
+does not indicate non-compliance where the factor database design prevents recovery of
+per-gas values.
+
+**Normative basis**: ESRS E1-6 §44(b) (gas-by-gas breakdown); GHG Protocol Scope 3
+Standard Ch.11 (data-quality guidance for secondary factors).
+
+### 2.1 Scope 3 Materiality Assessment Procedure (M-22)
+
+The nine material Scope 3 categories listed above were identified through a two-stage
+screening process:
+
+**Stage 1 — Quantitative screening**: Each Scope 3 category was estimated using order-of-
+magnitude spend or activity data from management accounts (FY2023 proxied to FY2024). A
+category is considered potentially material if the estimated tCO2e exceeds either:
+- 1% of the total estimated Scope 3 tCO2e, or
+- 5,000 tCO2e in absolute terms.
+
+**Stage 2 — Qualitative review**: Categories below the quantitative threshold were reviewed
+against ESRS E1-6 §44(c) qualitative criteria (strategic relevance, stakeholder concerns,
+sector-specific guidance). Cat 11 (use of sold products) was retained as a zero-line
+disclosure despite being immaterial in tCO2e terms, because CSRD requires explicit
+disclosure of all categories assessed.
+
+The screening file is documented in `docs/methodology_validation.md §3`. Any future change
+to the operational boundary or product mix that could push a previously non-material
+category above the thresholds must trigger a re-screening before the next reporting cycle.
+
+**Normative basis**: ESRS E1-6 §44(c) (materiality of Scope 3 categories); GHG Protocol
+Scope 3 Standard Ch.6 (materiality screening methodology).
+
 ---
 
 ## 3. GWP Set and Emission Factor Catalog
@@ -128,6 +215,48 @@ Nine material categories identified; five categories disclosed as "not applicabl
 GWP sets are **never mixed within a single report run** (FR-19). AR6 is the default. AR5
 runs are a separate, clearly labelled output (`regulatory_stream = EU_ETS_PHASE_IV`).
 AR4 values (CH4=25, N2O=298) are NOT used.
+
+**AR5 GWP source (M-08)**: The AR5 values CH4=28 and N2O=265 are taken from **Reg. UE
+2018/2066 Annex VI Section 3** (the EU ETS Monitoring and Reporting Regulation), which
+mandates these specific 100-year GWP values without climate-carbon feedback for Phase IV
+ETS compliance reporting. The same values appear in IPCC AR5 WG1 Ch.8 Table 8.7 (column
+"no climate-carbon feedback"), but the binding normative reference for EU ETS reporting
+is the MRR Annex, not the IPCC table directly. Citing both provides traceability.
+
+### 3.1 GWP100 Source-class Selection Rationale (M-02)
+
+IPCC AR6 WG1 Chapter 7 Supplementary Material Table 7.SM.7 defines **three distinct**
+CH4 GWP100 values by emission source class:
+
+| Source class | AR6 CH4 GWP100 |
+|---|---|
+| Fossil-combustion CH4 (natural gas, liquid fuels) | 29.8 |
+| Fossil-fugitive CH4 (leaks, venting) | 29.8 |
+| Biogenic CH4 (anaerobic decomposition, landfill gas) | 27.0 |
+
+The v1 implementation encodes a single **aggregate default value of 27.9** for all CH4
+emissions, stored in `GWPSet.AR6.ch4`. This convention was adopted because:
+
+1. Gresmalt's Scope 1 CH4 emissions arise almost exclusively from natural gas combustion;
+   biogenic CH4 and fugitive CH4 are either zero or immaterial for a ceramic manufacturer.
+2. All eight DEFRA 2025 emission factors already embed the relevant GWP weighting; the
+   aggregate is a consistent simplification for the ceramic sector.
+3. The magnitude of approximation: for a site with 100% fossil combustion CH4, using 27.9
+   instead of 29.8 under-states CH4 tCO2e by approximately 6.4%. Because CH4 from natural
+   gas combustion at ceramic kilns is typically less than 0.5% of total Scope 1 tCO2e
+   (dominated by CO2 from CaCO3 decarbonation and fossil fuel combustion), the aggregate
+   error is less than 0.03% of reported Scope 1, which is below the IAASB ISA 320
+   materiality threshold.
+
+**Conditions for per-class GWP replacement**: If future scope expansion includes fugitive
+emissions from refrigerant CH4 or significant biogenic CH4 (e.g. landfill gas capture),
+the aggregate should be replaced with per-class GWP values
+(`ch4_fossil=29.8`, `ch4_biogenic=27.0`) and `GWPTablePort.get()` extended accordingly.
+
+**Disclosure basis**: ESRS 2 BP-2 (disclosure of methodologies and significant judgements)
+requires this rationale to be disclosed. IPCC AR6 WGI Ch.7 SM Table 7.SM.7 is the primary
+source; GHG Protocol "Required gases and GWP values" (Aug 2024 update) lists fossil-CH4=29.8
+and biogenic-CH4=27.0 as the preferred per-class values.
 
 ### Factor source cascade
 
@@ -222,7 +351,7 @@ Scope 1+2 total tCO2e triggers mandatory base-year recalculation.
 2. Each predecessor row receives `valid_to = now()`, `superseded_by = <new_row_id>`,
    and `reason_code` from the canonical set above.
 3. Old rows are NEVER deleted. The full correction chain is traversable via the
-   `/api/v1/corrections` endpoint.
+   `GET /api/v1/emissions/{id}/corrections` endpoint (C-025).
 4. A `recalculation_id` (UUID, stored in `correlation_id` of the recalculation batch)
    links all recalculation rows.
 
@@ -285,6 +414,27 @@ supports ISAE 3000 Limited assurance of any historical reporting period.
 Every emission row carries: `raw_row_id` (FK to the ingestion staging row), `factor_id`
 (FK to `ref.factor_catalog`), `factor_version`, `factor_source`, `gwp_set`, `methodology`,
 `calc_timestamp`, `created_by`, `correlation_id`. No unlinked rows are permitted.
+
+### Verifier reconciliation query — dual-track pair (§11.1)
+
+The `dual_run_id` FK on `ops.calc_runs` (see §11.1) enables a deterministic, single-query
+reconciliation of a dual-track pair. This is the audit-grade alternative to a
+temporal-window join, which would be non-deterministic when multiple runs exist for the same
+reporting year:
+
+```sql
+-- Verifier reconciliation: pair an AR6/CSRD run with its AR5/ETS counterpart
+SELECT a.*, b.*
+FROM   ops.calc_runs a
+JOIN   ops.calc_runs b ON a.dual_run_id = b.id
+WHERE  a.id = :run_id;
+```
+
+The query returns exactly one row (or zero if `:run_id` is a single-track run with
+`dual_run_id IS NULL`). It gives the verifier direct, side-by-side access to both the
+CSRD/AR6 and EU ETS/AR5 calculation records, confirming that both share the same
+`tenant_id`, `anno`, and raw activity-data snapshot as required by Reg. UE 2018/2067 Art. 6
+and ISAE 3000 §A99.
 
 ---
 
@@ -384,6 +534,60 @@ This is mandated by:
   checks that AR5-based CO2e totals are reproduced from the same underlying activity data as
   the CSRD report, so both tracks must derive from the same raw ingestion snapshot.
 
+#### Relational linkage via `dual_run_id` (Decision Q1 — option A)
+
+The assertion that "both tracks must derive from the same raw ingestion snapshot" is
+enforceable only through an explicit relational link between the two `ops.calc_runs` rows.
+Temporal-proximity joins or composite-key joins on `(tenant_id, anno, regulatory_stream)`
+are not deterministic: if one track is re-run after a factor update without re-running the
+other, a natural join silently pairs a newer row with an older one that derived from a
+different raw snapshot, breaking reproducibility.
+
+The linkage is therefore enforced relationally via a **`dual_run_id UUID FK` column on
+`ops.calc_runs`**. The column is self-referential (references `ops.calc_runs.id`) and the
+relationship is **reciprocal**: each row in a dual-track pair stores the `id` of the other
+row in its `dual_run_id` field. A partial unique index on `(dual_run_id)` supports
+verifier-join performance. A CHECK constraint `dual_run_id IS NULL OR dual_run_id <> id`
+prevents self-reference.
+
+**Normative anchors requiring this relational linkage**:
+
+- **Reg. UE 2018/2067 Art. 6** — the verifier must confirm that the AR5/ETS tCO2e values
+  and the AR6/CSRD tCO2e values were produced from the same raw activity-data snapshot.
+  Opaque joins do not satisfy this requirement.
+- **GHG Protocol Corporate Standard Ch.5** — recalculation events must be linked to the
+  prior baseline in a way that is "traceable and unambiguous". A re-run of one track is
+  exactly the recalculation pattern Ch.5 addresses; without `dual_run_id` the pairing is
+  ambiguous on its face.
+- **CSRD ESRS E1 §50–§55** — §53–§55 require the reconciliation between disclosed climate
+  metrics and any parallel regulatory reporting (e.g. EU ETS) to be evidenced. A FK column
+  is the canonical relational way to evidence a pairwise reconciliation.
+- **ISAE 3000 §A99** — the verifier must be able to "obtain sufficient evidence"; opaque
+  joins are not sufficient evidence under this standard.
+
+#### Two-row insert pattern (preferred)
+
+The **preferred** implementation uses pre-generated UUIDs for both calc-run rows and inserts
+them inside a single transaction:
+
+1. Generate `run1_id = uuid4()` and `run2_id = uuid4()` before opening the transaction.
+2. Insert the CSRD/AR6 row with `id = run1_id, dual_run_id = run2_id`.
+3. Insert the EU ETS/AR5 row with `id = run2_id, dual_run_id = run1_id`.
+4. Commit.
+
+Both rows are inserted in one atomic transaction; no UPDATE is required. This preserves the
+append-only spirit of `ops.calc_runs`.
+
+An alternative back-fill pattern — insert track 1, obtain `run1_id`, insert track 2 with
+`dual_run_id = run1_id`, then UPDATE track 1 to set `dual_run_id = run2_id` inside the same
+transaction — is also acceptable but **discouraged** because it requires an UPDATE on
+`ops.calc_runs`, breaking append-only semantics.
+
+#### Single-track runs
+
+Single-track runs (CSRD-only for tenants with no Annex I EU ETS installation) leave
+`dual_run_id` NULL — this is valid and audited as such.
+
 Operators must trigger dual-track runs using either:
 - CLI: `python -m scripts.run_calc --anno <year> --dual`
 - API: `POST /api/v1/calc/run-dual` (esg_manager role required)
@@ -394,13 +598,29 @@ Running only the CSRD track before an EU ETS filing is a compliance defect.
 
 ## 12. EU Taxonomy and SFDR Scope
 
-**EU Taxonomy (Regulation 2020/852)**: Alignment assessment (substantial contribution,
-do-no-significant-harm, minimum safeguards) is out of scope for v1. The PDF appendix A.7
-carries a placeholder disclosure per CG-10: "EU Taxonomy alignment: assessment deferred to v2."
+**EU Taxonomy (Regulation 2020/852) — M-25**: EU Taxonomy alignment **is applicable** to
+Gresmalt under Art. 8 of Reg. UE 2020/852 (the Taxonomy Regulation), as transposed via
+Delegated Regulation 2021/2178. Gresmalt manufactures ceramic floor and wall tiles
+classified under NACE C 23.31, which falls within Annex I economic activities subject to
+Taxonomy assessment. Art. 8 requires in-scope undertakings to disclose the proportion of
+turnover, CapEx, and OpEx that is Taxonomy-aligned (applying the substantial-contribution
+criteria, do-no-significant-harm assessment, and minimum safeguards check).
+
+The v1 tool produces the GHG inventory required as an **input** to the Taxonomy alignment
+assessment, but does **not** compute the substantial-contribution / DNSH / minimum-safeguards
+classification or the Art. 8 KPIs (turnover, CapEx, OpEx aligned percentages). These KPIs
+are **deferred to v2**. This deferral is a project scope decision, not a normative
+non-applicability.
+
+The PDF appendix A.7 carries a disclosure per CG-10: "EU Taxonomy alignment: Article 8 KPI
+calculation deferred to v2; GHG inventory available as input."
 
 **SFDR PAI indicators**: Not applicable. This is an issuer-level GHG accounting tool; the
 reporting entity is not a financial-market participant. No financial-product PAI reporting
 is in scope.
+
+**Normative basis**: Reg. UE 2020/852 Art. 8; Delegated Reg. 2021/2178 (Art. 8 KPI
+disclosure rules); NACE Rev. 2 code C 23.31 (manufacture of ceramic tiles and flags).
 
 ---
 
@@ -510,9 +730,65 @@ to the `esg_manager` and escalated to ComplianceAgent.
 
 ---
 
+## 15. Multi-year Outlier Detection (Sigma) — M-16
+
+The YoY comparison module (`yoy_stats.py`) and hotspot service use a 2-sigma test to flag
+rows whose year-over-year absolute delta is statistically anomalous relative to the entity's
+own multi-year history. This section documents the rationale for the chosen parameters.
+
+### Sample-size minimum (min_sample = 3)
+
+The service marks a baseline as `is_reliable = True` only when at least 3 historical
+year-over-year deltas are available (i.e. at least 4 years of emission data). The rationale
+is:
+
+1. With fewer than 3 data points, the sample standard deviation is dominated by a single
+   outlier and the sigma band is not a meaningful signal (a 2-point sample has zero degrees
+   of freedom for an unbiased sigma estimate).
+2. 3 is the minimum practical sample for a t-distribution approximation; IAASB ISA 320 §A3
+   guidance on materiality assessment implicitly requires a representative prior-period
+   sample.
+3. For base year 2024 (first reporting year), the fallback applies automatically.
+
+### Fallback threshold (plus-or-minus 20%)
+
+When `is_reliable = False` (fewer than 3 historical deltas), the module falls back to a
+fixed +/-20% year-over-year change threshold. This value is derived from:
+
+- GHG Protocol Corporate Standard §7 guidance that changes of 5% or more relative to base
+  year trigger recalculation; year-to-year operational variability in ceramic manufacturing
+  (energy intensity variation, production mix) is typically within +/-15-20%.
+- IAASB ISA 320 §A14 characterises 5% as a common audit materiality threshold for financial
+  statements, and 10% as the upper end for individual items. The 20% fallback for YoY
+  comparison is intentionally wider than the recalculation trigger (5%) to avoid flagging
+  normal operational volatility as anomalous.
+
+### Relationship to FR-26 recalculation trigger
+
+The 2-sigma / 20% fallback in the YoY UI is a data-quality signal tool, not a recalculation
+trigger. The definitive recalculation trigger is the 5% base-year shift threshold per FR-26
+(§6 of this document). A sigma flag prompts the ESG manager to investigate; the manager then
+decides whether the change warrants a correction (FR-21) or a base-year recalculation (FR-26).
+
+### Alignment with IAASB ISA 320
+
+The 5%/10% materiality thresholds referenced in FR-26 / FR-21 align with IAASB ISA 320
+§A3-§A14 principles: 5% aggregate significance, 10%+100 tCO2e single-item significance
+(matching the snapshot reconciliation parameters in §6 / M13). The sigma band in the UI
+provides an early-warning layer consistent with this framework without replacing the
+auditor's professional judgement.
+
+**Normative basis**: IAASB ISA 320 §A3-§A14 (materiality); GHG Protocol Corporate Standard
+§7 (significance threshold); FR-26 (recalculation trigger); ADR-009 (uncertainty) where
+applicable.
+
+---
+
 ## 14. Methodology Changelog
 
 | Date | Version | Change | Impact |
 |---|---|---|---|
 | 2026-05-14 | 1.0.0 | Initial publication — incorporates SustainabilityExpertAgent methodology_validation.md v1.0.0 decisions; adds Phase 7/8 security and data-model sections (M7 security-barrier views, SEC-P0-004 refresh role re-fetch, SEC-P0-005 PII hygiene, ADR-007 biogenic column confirmation) | None — first publication; no prior baseline to compare |
 | 2026-05-14 | 1.1.0 | Added §13 Factor catalog lifecycle and publication: draft/publish workflow, MG-02 immutability trigger, MG-03 published_at split, separation of duties (data_steward / esg_manager), audit-trail surface. Required for ESRS 2 BP-2. | No change to emission calculations or GWP values. |
+| 2026-05-14 | 1.2.0 | Added §1.1 Consolidation procedure (M-12); §1.2 Reporting period and lock-date (M-20); Scope 1 net-vs-gross statement (M-21); Scope 3 gas-by-gas limitation (M-10); §2.1 Scope 3 materiality assessment (M-22); Cat 12 source citation (M-19); §3.1 GWP100 source-class rationale (M-02); AR5 MRR citation update (M-08); EU Taxonomy rephrasing (M-25); §15 Multi-year outlier detection sigma (M-16); C-025 endpoint URL corrected to GET /api/v1/emissions/{id}/corrections. | No change to emission calculations. Documentation completeness for ESRS 2 BP-2 and CSRD assurance. |
+| 2026-05-15 | 1.3.0 | §11.1 expanded to formalise `dual_run_id UUID FK` on `ops.calc_runs` as the mandatory relational linkage between CSRD/AR6 and EU ETS/AR5 calc-run pairs (sustainability-expert-agent Q1 decision, option A). Documents two-row insert pattern (preferred) vs. back-fill UPDATE (discouraged). Documents single-track NULL validity. §7 gains a verifier-query sub-section with the canonical one-row-pair reconciliation SQL as the audit-grade alternative to temporal-window joins. Normative anchors cited: Reg. UE 2018/2067 Art. 6, GHG Protocol Corporate Standard Ch.5, CSRD ESRS E1 §50–§55, ISAE 3000 §A99. | No change to emission calculations or GWP values. |

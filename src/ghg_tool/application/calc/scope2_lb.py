@@ -1,8 +1,25 @@
-"""Scope 2 — Location-Based emissions (FR-07).
+"""Scope 2 -- Location-Based emissions (FR-07).
 
 Applies the ISPRA Italian grid LB factor to total kWh per (site, year).
-LB and MB are always kept as separate rows — never aggregated (FR-07
+LB and MB are always kept as separate rows, never aggregated (FR-07
 acceptance criterion).
+
+Component-split handling (M-07 / ESRS E1-6 Section 44(b)):
+    The ISPRA grid factor is a composite CO2-equivalent number that already
+    aggregates CO2, CH4 and N2O at source. The per-gas split is not
+    recoverable from the ISPRA aggregate. To avoid mis-reporting the CO2
+    component this module sets ``co2_tonne = None`` and leaves the full
+    location-based value in ``tco2e``. Downstream ESRS E1-6 Section 44(b)
+    gas-by-gas disclosure for Scope 2 LB therefore reads:
+        * ``tco2e``               -> total Scope 2 LB (composite CO2e)
+        * ``co2_tonne``           -> NULL (component split not available)
+        * ``co2_fossil_tonne``    -> NULL (split not available)
+        * ``co2_biogenic_tonne``  -> NULL (no biogenic component in grid)
+
+Methodology references:
+  * GHG Protocol Scope 2 Guidance (2015) Chapter 6
+  * ESRS E1-6 Section 44(b) (gas-by-gas breakdown)
+  * ISPRA "Fattori di emissione atmosferica" aggregate CO2e factor
 """
 
 from __future__ import annotations
@@ -73,9 +90,13 @@ def calculate(
                 methodology="location-based",
                 regulatory_stream=regulatory_stream,
                 created_by=created_by,
-                # ISPRA grid factor is total CO2e; record as co2_tonne for transparency
-                co2_tonne=tco2e,
-                co2_fossil_tonne=tco2e,
+                # M-07: ISPRA grid factor is a composite CO2e; the
+                # CO2 component split (vs CH4 / N2O) is not available
+                # from the ISPRA aggregate. Leave gas-component columns
+                # NULL so downstream ESRS E1-6 §44(b) does not inflate CO2.
+                co2_tonne=None,
+                co2_fossil_tonne=None,
+                co2_biogenic_tonne=None,
                 disclosure_notes=(
                     f"Scope 2 LB: ISPRA factor applied to {quantita_kwh} kWh "
                     f"(voce_s2={row.get('voce_s2', 'unknown')!s})."

@@ -101,6 +101,11 @@ def calculate(
             methodology="declared-zero",
             regulatory_stream=regulatory_stream,
             created_by=created_by,
+            # M-24 / ESRS E1-7 §49: explicit Decimal('0') component
+            # values so SUM(co2_biogenic_tonne) is NULL-safe downstream.
+            co2_tonne=Decimal("0"),
+            co2_biogenic_tonne=Decimal("0"),
+            co2_fossil_tonne=Decimal("0"),
             disclosure_notes=rationale,
         )
         for (sub_scope, rationale, factor_id) in _OMITTED_CATEGORIES

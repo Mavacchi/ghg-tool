@@ -19,7 +19,7 @@ from __future__ import annotations
 import uuid
 from datetime import UTC, datetime
 from decimal import Decimal
-from typing import Annotated, Any
+from typing import Annotated
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
@@ -191,7 +191,7 @@ async def _load_actuals(
         Mapping of year -> total tco2e (Decimal) for matched rows.
     """
     # Map SBTi scope_coverage keys to sub_scope values in emissions_consolidated.
-    _SCOPE_MAP: dict[str, list[str]] = {
+    _scope_map: dict[str, list[str]] = {
         "S1": ["combustion", "process", "fugitive"],
         "S2_LB": ["2_LB"],
         "S2_MB": ["2_MB"],
@@ -205,7 +205,7 @@ async def _load_actuals(
             "3_cat7", "3_cat9", "3_cat11", "3_cat12",
         ],
     }
-    sub_scopes = _SCOPE_MAP.get(scope_coverage)
+    sub_scopes = _scope_map.get(scope_coverage)
     if not sub_scopes:
         return {}
 
@@ -662,4 +662,32 @@ async def get_trajectory(
             )
             for pt in annotated
         ],
+    )
+
+
+# ---------------------------------------------------------------------------
+# C-007: explicit 405 DELETE handler -- SBTi targets are append-only.
+# Pattern mirrors emissions.py and chart_annotations.py.
+# ---------------------------------------------------------------------------
+
+
+@router.delete(
+    "/targets/{target_id}",
+    status_code=status.HTTP_405_METHOD_NOT_ALLOWED,
+    summary="DELETE not allowed -- SBTi targets are append-only",
+    description=(
+        "SBTi targets are immutable once created. "
+        "Use PATCH /targets/{id}/deactivate to deactivate a target."
+    ),
+    responses={405: {"description": "Method not allowed"}},
+)
+async def delete_sbti_target_not_allowed(target_id: uuid.UUID) -> dict[str, str]:
+    """Return 405 for DELETE on SBTi targets.
+
+    C-007: The append-only invariant is enforced at the API layer.  Returns
+    a machine-readable detail string so clients can surface the correct action.
+    """
+    raise HTTPException(
+        status_code=status.HTTP_405_METHOD_NOT_ALLOWED,
+        detail="SBTi targets are append-only; use deactivation",
     )

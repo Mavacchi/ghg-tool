@@ -290,7 +290,13 @@ class TestAuthenticateUserFailurePaths:
 
     @pytest.mark.asyncio
     async def test_inactive_user_returns_none(self) -> None:
-        """Disabled user (is_active=False) → returns None; verify_password NOT called."""
+        """Disabled user (is_active=False) → returns None.
+
+        BUG-14: verify_password IS called (against a constant DUMMY hash) to
+        equalise timing so observers cannot distinguish 'user disabled' from
+        'user not found' via response-time differential. The dummy hash is
+        never the user's actual hash, so no plaintext-vs-hash leak occurs.
+        """
         user = _make_user_record(is_active=False)
 
         with patch(
@@ -303,23 +309,34 @@ class TestAuthenticateUserFailurePaths:
             )
 
         assert result is None
-        # auth_service short-circuits before password check for inactive users
-        mock_verify.assert_not_called()
+        # Timing-safety: bcrypt cost is paid on every inactive-user branch.
+        # The argument is the DUMMY hash, not the user's real password_hash.
+        mock_verify.assert_called_once()
+        assert mock_verify.call_args[0][0] == "any_password"
 
     @pytest.mark.asyncio
-    async def test_inactive_user_check_happens_before_password_verify(self) -> None:
-        """is_active=False is checked before verify_password to avoid leaking state."""
-        user = _make_user_record(is_active=False, password_hash="some_hash")
+    async def test_inactive_user_verify_password_called_against_dummy_hash(
+        self,
+    ) -> None:
+        """is_active=False still pays bcrypt cost against a DUMMY hash (BUG-14).
 
-        call_log: list[str] = []
+        Timing-safety pattern: verify_password is called for inactive users
+        but with the constant _DUMMY_BCRYPT_HASH, never with the user's real
+        password_hash. This equalises response time between 'user disabled'
+        and 'user not found' so observers cannot distinguish account states
+        via timing.
+        """
+        user = _make_user_record(is_active=False, password_hash="real_user_hash")
+
+        call_log: list[tuple[str, str]] = []
 
         async def lookup(username: str) -> MagicMock:
-            call_log.append("lookup")
+            call_log.append(("lookup", username))
             return user
 
         def fake_verify(plain: str, hashed: str) -> bool:
-            call_log.append("verify")
-            return True
+            call_log.append(("verify", hashed))
+            return False  # arbitrary; result is discarded for inactive users
 
         with patch(
             "ghg_tool.application.services.auth_service.verify_password",
@@ -332,8 +349,18 @@ class TestAuthenticateUserFailurePaths:
             )
 
         assert result is None
-        assert "lookup" in call_log
-        assert "verify" not in call_log
+        assert ("lookup", "testuser") in call_log
+        # verify_password IS called for inactive users (timing-safety) BUT
+        # the second arg is NOT the user's real password_hash — it is the
+        # constant dummy hash from auth_service._DUMMY_BCRYPT_HASH.
+        verify_calls = [c for c in call_log if c[0] == "verify"]
+        assert len(verify_calls) == 1, (
+            "verify_password should be called exactly once (timing equaliser)"
+        )
+        assert verify_calls[0][1] != "real_user_hash", (
+            "verify_password must NOT be called with the user's real hash for "
+            "an inactive account — that would defeat the timing equaliser."
+        )
 
 
 # ---------------------------------------------------------------------------
