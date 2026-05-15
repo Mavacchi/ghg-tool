@@ -33,7 +33,6 @@ from ghg_tool.ui.streamlit_app.lib.i18n import _  # noqa: E402
 from ghg_tool.ui.streamlit_app.lib.api_client import (  # noqa: E402
     fetch_emissions,
     emissions_to_dataframe,
-    post_correction,
     correct_emission,
     EmissionCorrectionError,
     list_chart_annotations,
@@ -627,62 +626,12 @@ else:
                 selected_sites=selected_sites,
             )
 
-        # -----------------------------------------------------------------------
-        # Emission correction (esg_manager only, FR-21)
-        # -----------------------------------------------------------------------
-        role = st.session_state.get("role", "viewer")
-        if role == "admin":
-            with st.expander(f"✏️ {_('correction_btn', lang)}", expanded=False):
-                emission_ids = df["id"].tolist() if "id" in df.columns else []
-                if emission_ids:
-                    selected_id = st.selectbox(
-                        "Emission ID da correggere", emission_ids,
-                        help=_help("audit_predecessor", lang),
-                    )
-                    reason = st.selectbox(
-                        _("correction_reason", lang),
-                        ["DATA_ERROR", "FACTOR_UPDATE", "BOUNDARY_CHANGE",
-                         "METHODOLOGY_REVISION", "RESTATEMENT_>5PCT"],
-                        help=_help("audit_valid_from_to", lang),
-                    )
-                    justification = st.text_area(
-                        _("correction_justification", lang),
-                        max_chars=4000,
-                        help="Minimo 10 caratteri",
-                    )
-                    tco2e_new = st.number_input("Nuovo valore tCO2e", min_value=0.0, step=0.001)
-
-                    if st.button(_("correction_btn", lang)):
-                        if len(justification) >= 10:
-                            # Build minimal new_record from the selected row
-                            row_dict = df[df["id"] == selected_id].iloc[0].to_dict()
-                            new_record: dict[str, object] = {
-                                "scope": row_dict.get("scope", 1),
-                                "sub_scope": row_dict.get("sub_scope", "combustion"),
-                                "codice_sito": row_dict.get("codice_sito"),
-                                "anno": row_dict.get("anno", selected_year),
-                                "tco2e": tco2e_new,
-                                "factor_id": str(row_dict.get("factor_id", "")),
-                                "factor_version": str(row_dict.get("factor_version", "1")),
-                                "factor_source": str(row_dict.get("factor_source", "DEFRA")),
-                                "gwp_set": gwp_set,
-                                "methodology": str(row_dict.get("methodology", "activity-based")),
-                                "raw_scope": row_dict.get("scope", 1),
-                            }
-                            result = post_correction(
-                                supersedes_id=str(selected_id),
-                                new_record=new_record,
-                                reason_code=reason,
-                                justification=justification,
-                            )
-                            if "error" in result:
-                                st.error(f"{_('correction_err', lang)}: {result['error']}")
-                            else:
-                                st.success(_("correction_ok", lang))
-                        else:
-                            st.error(_("justification_too_short", lang))
-                else:
-                    st.info("Nessuna emissione disponibile per correzione.")
+# Legacy bulk-correction expander removed. The per-row "Correggi" button
+# rendered next to each emission row above (gated by _WRITE_ROLES =
+# {editor, admin}) is the unified workflow for all corrections — it has
+# the same append-only semantics (calc.fn_emit_correction +
+# superseded_by) and a clearer UX (single-row context, no manual ID
+# selection).
 
 # ---------------------------------------------------------------------------
 # Footer
