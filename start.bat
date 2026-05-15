@@ -93,6 +93,30 @@ if not exist "docker-compose.quickstart.yml" (
     exit /b 1
 )
 
+REM ---- Auto-bootstrap .env al primo avvio -----------------------------------
+REM In modalita production l'API rifiuta di partire senza un GHG_JWT_SECRET
+REM di almeno 32 caratteri.  Se .env non esiste lo generiamo qui con un
+REM secret casuale + una password Postgres di default.  L'utente puo
+REM cambiare i valori a posteriori modificando il file.
+if not exist ".env" (
+    echo [INFO] Primo avvio: genero un file .env con un GHG_JWT_SECRET casuale.
+    powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+        "$s = -join ((48..57 + 65..90 + 97..122) | Get-Random -Count 48 | ForEach-Object {[char]$_}); ^
+         \"GHG_JWT_SECRET=$s`r`nPOSTGRES_PASSWORD=changeme\" ^| Out-File -Encoding ASCII -FilePath .env -NoNewline"
+    if errorlevel 1 (
+        echo [ERRORE] Non sono riuscito a generare il file .env.
+        echo Creane uno a mano con questo contenuto ^(sostituisci ^<secret^> con
+        echo una stringa casuale di almeno 32 caratteri^):
+        echo.
+        echo   GHG_JWT_SECRET=^<secret-di-almeno-32-caratteri^>
+        echo   POSTGRES_PASSWORD=changeme
+        echo.
+        exit /b 1
+    )
+    echo [OK] File .env creato. Custodiscilo: contiene il secret JWT.
+    echo.
+)
+
 echo Avvio dei container ^(db + migrate + api + dashboard^)...
 echo La prima volta puo' richiedere 3-5 minuti per scaricare
 echo e buildare le immagini. Le volte successive sara' pronto
