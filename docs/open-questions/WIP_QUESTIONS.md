@@ -339,3 +339,57 @@ endpoint) MUST NOT proceed until `affected_count = 0` for the current batch.
    - Expected: check returns `(False, [finding])` — the override lowers the threshold
      to 0.95 but 0.90 is still below it, so DQ-CRIT is still emitted.
    - Verify separately that coverage=0.96 with the same override returns `(True, [])`.
+
+
+### Q3 — Decision (requirements-agent)
+
+**Decision**: **Yes — the prior dual-track pair is frozen. Re-running a single track after
+an existing pair has been filed creates a NEW `ops.calc_runs` row and a NEW pair.** The
+original `dual_run_id` values on the prior pair MUST remain unchanged.
+
+**Rationale**:
+
+- **Project's append-only invariant on `ops.calc_runs`** (methodology.md §7, enforced
+  relationally by `ops.deny_emissions_mutation()` extended to `calc_runs` per Q2): any
+  UPDATE of a previously-inserted `dual_run_id` would violate the invariant. The
+  "frozen pair" rule is therefore not a new constraint — it is the direct consequence
+  of an invariant already accepted by ComplianceAgent in Q2.
+- **GHG Protocol Corporate Standard Ch.5 (recalculation / base-year integrity)**:
+  Ch.5 requires that a restatement preserve traceability to the prior figure. If the
+  prior pair were mutated to point at the new run, the historical disclosure would
+  silently rewrite itself; the verifier would lose the ability to evidence what was
+  filed at time T₀. A fresh pair preserves both the prior filing (immutable) and the
+  restated filing (new row set) as parallel auditable artefacts.
+- **ISAE 3000 §A99 ("sufficient appropriate audit evidence")**: an immutable prior
+  pair is direct evidence of the original filing; a mutated pair is corroborated
+  evidence requiring WAL/CDC inspection. Direct > corroborated.
+- **CSRD ESRS E1 §50–§55 (parallel-reporting reconciliation)**: §53–§55 require that
+  the methodology disclose how restatements are handled. "Each restatement is a new
+  row pair; the prior pair is frozen" is a one-sentence disclosure that maps cleanly
+  to the relational model.
+- **Reg. UE 2018/2067 Art. 6 (verifier traceability)**: the verifier's reconciliation
+  query `JOIN … ON a.dual_run_id = b.id` returns the SAME pair for the same `:rid`
+  on every run, regardless of subsequent restatements. Frozen pairs guarantee
+  query stability over the 10-year retention window.
+
+**FR-34 acceptance-criterion text (now in `docs/requirements.md` v1.2.3)**:
+
+> **Re-run AC**: after a restatement, the prior pair rows retain their original
+> `dual_run_id` values unchanged; the new pair is a distinct row set with new UUIDs.
+
+(Cross-references: methodology §7 append-only audit trail; methodology §11.1 dual-track
+snapshot parity; Q2 Decision mandating pre-generated UUID two-row insert pattern.)
+
+**Open follow-ups routed elsewhere**:
+
+- **DataQualityAgent**: the `iano_dual_track_pairing_complete` DQ-CRIT (Q4) should
+  evaluate ONLY the most recent pair for `(tenant_id, anno)` at publish time; prior
+  frozen pairs are out of scope for current-batch coverage but in scope for
+  historical-snapshot replay (audit window).
+- **BackendAgent**: the `POST /api/v1/calc/run-dual` endpoint must accept an optional
+  `supersedes_pair_run_id` parameter so restatements explicitly reference the prior
+  pair for audit purposes. The new pair's rows MUST set this column (added in a
+  follow-up migration `00XX_M2X_calc_runs_supersedes.py` — separate task).
+- **ReviewerAgent**: confirm that the `superseded_by` column already on emission
+  rows is sufficient for line-level supersession, or whether a parallel field on
+  `ops.calc_runs` is also required.
