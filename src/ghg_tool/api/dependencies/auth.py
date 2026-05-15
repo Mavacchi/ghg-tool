@@ -4,12 +4,21 @@ Extracts the ``Authorization: Bearer <token>`` header, decodes and validates
 the JWT, and returns a ``CurrentUser`` Pydantic model for injection into route
 handlers.  Raises 401 for all auth failures and 403 for RBAC failures
 (handled in the RBAC middleware layer).
+
+Wave4 Task B — JWT auto-provisioning (PR #43 integration-test fix):
+    When a JWT-verified user's ``sub`` UUID is not present in ``ref.users``
+    (typical for SSO-origin tokens), ``get_or_provision_user`` lazily inserts
+    a row with role=viewer and claims-derived username/email.  This prevents
+    FK violations on ``audit_log.user_id``.  The insert is idempotent:
+    ON CONFLICT DO NOTHING prevents double-insert on concurrent requests.
+    Auto-provisioned users start with the most-restrictive role; an admin
+    must promote them explicitly.
 """
 
 from __future__ import annotations
 
 import uuid
-from typing import Literal
+from typing import Any, Literal
 
 import structlog
 from fastapi import Depends, HTTPException, Request, status
@@ -78,6 +87,118 @@ class CurrentUser(BaseModel):
         return value
 
 
+async def get_or_provision_user(
+    session: Any,
+    jwt_payload: dict[str, Any],
+    *,
+    tenant_id: str,
+) -> None:
+    """Lazily provision a ``ref.users`` row for a JWT-verified but unknown user.
+
+    Called on every authenticated request so that SSO-origin tokens whose
+    ``sub`` UUID is not already in ``ref.users`` get a minimal row before
+    any downstream FK constraint (e.g. ``audit_log.user_id``) fires.
+
+    The insert is idempotent via ``ON CONFLICT (id) DO NOTHING``, so
+    concurrent first-requests for the same user only produce one row.
+
+    Default role is ``viewer`` (most restrictive).  An admin must promote
+    the user explicitly to grant broader permissions.
+
+    Username / email are extracted from standard OIDC claims:
+      - ``preferred_username`` or ``sub[:8]`` prefixed with ``auto_``
+      - ``email`` or ``auto_<sub[:8]>@unknown.local``
+
+    Args:
+        session: Async SQLAlchemy session (RLS GUCs already set by get_db).
+        jwt_payload: Decoded JWT claims dict.
+        tenant_id: UUID string of the tenant to associate the new user with.
+
+    Returns:
+        None.  All failures are logged but not raised so the request continues.
+    """
+    from sqlalchemy import text  # noqa: PLC0415
+
+    user_id: str = jwt_payload.get("sub", "")
+    if not user_id:
+        return
+
+    log = logger.bind(user_id=user_id[:8], source="jwt")
+
+    try:
+        # Fast path: check if the user already exists.
+        exists_result = await session.execute(
+            text("SELECT id FROM ref.users WHERE id = CAST(:id AS uuid) LIMIT 1"),
+            {"id": user_id},
+        )
+        if exists_result.scalar_one_or_none() is not None:
+            # Existing user — no action needed.
+            return
+
+        # Derive username and email from OIDC claims; never log raw values (PII).
+        sub_prefix = user_id[:8]
+        username: str = jwt_payload.get("preferred_username") or f"auto_{sub_prefix}"
+        email: str = jwt_payload.get("email") or f"auto_{sub_prefix}@unknown.local"
+
+        # Resolve the viewer role id.
+        role_result = await session.execute(
+            text("SELECT id FROM ref.roles WHERE role_code = 'viewer' LIMIT 1"),
+        )
+        viewer_role_id = role_result.scalar_one_or_none()
+        if viewer_role_id is None:
+            log.warning("user_auto_provision_skipped", reason="viewer_role_not_found")
+            return
+
+        # Insert with ON CONFLICT DO NOTHING for idempotency under concurrent requests.
+        await session.execute(
+            text(
+                """
+                INSERT INTO ref.users (
+                    id, tenant_id, username, email,
+                    password_hash, role_id, is_active
+                ) VALUES (
+                    CAST(:id AS uuid),
+                    CAST(:tenant_id AS uuid),
+                    :username,
+                    :email,
+                    :password_hash,
+                    CAST(:role_id AS uuid),
+                    TRUE
+                )
+                ON CONFLICT (id) DO NOTHING
+                """
+            ),
+            {
+                "id": user_id,
+                "tenant_id": tenant_id,
+                "username": username,
+                "email": email,
+                # No real password — SSO users authenticate via token only.
+                # A sentinel bcrypt-like string prevents accidental login via
+                # password form (the string is not a valid bcrypt hash).
+                "password_hash": "!sso_provisioned_no_password",
+                "role_id": str(viewer_role_id),
+            },
+        )
+
+        log.info(
+            "user_auto_provisioned",
+            user_id=user_id[:8],  # truncated — no full UUID in logs (NFR-08)
+            source="jwt",
+            default_role="viewer",
+        )
+
+    except Exception as exc:  # noqa: BLE001
+        # Auto-provisioning is a best-effort operation.  Failures must not
+        # abort the current request — the FK violation (if it occurs) will
+        # surface as a 500 at the point of the actual FK-constrained insert,
+        # which is a more actionable error than losing the whole request here.
+        log.warning(
+            "user_auto_provision_failed",
+            error_type=type(exc).__name__,
+        )
+
+
 async def get_current_user(
     request: Request,
     credentials: HTTPAuthorizationCredentials | None = Depends(_bearer_scheme),
@@ -85,6 +206,8 @@ async def get_current_user(
     """FastAPI dependency: decode JWT and return the current user.
 
     Sets ``request.state.user_sub`` for rate-limit key extraction.
+    Stashes decoded JWT claims in ``request.state.jwt_claims`` so that the
+    ``get_db`` dependency can trigger auto-provisioning without re-decoding.
 
     Args:
         request: The incoming HTTP request (for setting state).
@@ -142,8 +265,11 @@ async def get_current_user(
         log.warning("JWT claim validation failed", detail=str(exc))
         raise _unauthorized("Invalid token claims") from exc
 
-    # Store sub on request.state for rate-limit middleware
+    # Store sub on request.state for rate-limit middleware.
     request.state.user_sub = user.sub
+    # Stash full claims so get_db can call get_or_provision_user without
+    # decoding the token a second time.
+    request.state.jwt_claims = claims
 
     return user
 
