@@ -23,6 +23,14 @@ Unit conversions (§4 hybrid rules):
   UnitConversionError (422 at router level).
 
 Decimal precision: Decimal everywhere; never float for calc numerics.
+
+M6 additions (auto_calc_design.md §12 second round):
+  Task B: validate site_type == 'STABILIMENTO_PRODUTTIVO' before dispatching
+    to _handle_s1_process; raise HTTPException 422 otherwise.
+  Task C: resolve country from ref.sites for S2 LB factor lookup instead of
+    hardcoding 'IT'.
+  Task D: on compute_and_insert, also insert into raw.direct_entry and link
+    raw_row_id on the emissions_consolidated row.
 """
 
 from __future__ import annotations
@@ -33,6 +41,7 @@ from decimal import ROUND_HALF_UP, Decimal
 from typing import Any
 
 import structlog
+from fastapi import HTTPException, status
 
 from ghg_tool.api.middleware.correlation_id import get_correlation_id
 from ghg_tool.api.schemas.calc_schemas import (
@@ -55,6 +64,101 @@ class UnitConversionError(ValueError):
     non-dimension-preserving context (e.g. Sm3 → kWh for gas).
     Surfaces as HTTP 422 at the router level.
     """
+
+
+# ---------------------------------------------------------------------------
+# Site metadata dataclass (loaded on-demand for site-aware logic)
+# ---------------------------------------------------------------------------
+
+from dataclasses import dataclass  # noqa: E402 (imported here for grouping clarity)
+
+
+@dataclass(frozen=True)
+class _SiteMeta:
+    """Minimal site attributes retrieved from ref.sites for per-request logic.
+
+    Attributes:
+        codice_sito: Site code primary key.
+        site_type: STABILIMENTO_PRODUTTIVO | UFFICIO | MAGAZZINO
+        country: ISO-3166 alpha-2 country code (default 'IT').
+    """
+
+    codice_sito: str
+    site_type: str
+    country: str
+
+
+async def _fetch_site_meta(
+    session: Any,
+    *,
+    codice_sito: str,
+    tenant_id: str,
+) -> _SiteMeta | None:
+    """Query ref.sites for site_type and country given a codice_sito.
+
+    Returns None if no active site row matches (caller decides error handling).
+
+    Args:
+        session: Async SQLAlchemy session.
+        codice_sito: Site code to look up.
+        tenant_id: UUID string of the tenant (RLS pre-filtered but we also
+            pass it explicitly for defence-in-depth).
+
+    Returns:
+        _SiteMeta if found; None otherwise.
+    """
+    from sqlalchemy import text  # noqa: PLC0415
+
+    result = await session.execute(
+        text(
+            "SELECT codice_sito, site_type, country "
+            "FROM ref.sites "
+            "WHERE codice_sito = :codice_sito "
+            "  AND tenant_id = CAST(:tenant_id AS uuid) "
+            "  AND is_active = TRUE "
+            "LIMIT 1"
+        ),
+        {"codice_sito": codice_sito, "tenant_id": tenant_id},
+    )
+    row = result.mappings().first()
+    if row is None:
+        return None
+    return _SiteMeta(
+        codice_sito=str(row["codice_sito"]),
+        site_type=str(row["site_type"]),
+        country=str(row["country"]),
+    )
+
+
+def _assert_process_site_type(
+    codice_sito: str,
+    site_type: str,
+) -> None:
+    """Raise HTTPException 422 if site_type != 'STABILIMENTO_PRODUTTIVO'.
+
+    Decision #7 from auto_calc_design.md §12: Processo_Decarb is only
+    applicable to STABILIMENTO_PRODUTTIVO sites.  UFFICIO and MAGAZZINO
+    must be rejected at the application layer.
+
+    Args:
+        codice_sito: Site code (for error detail).
+        site_type: Actual site_type value from ref.sites.
+
+    Raises:
+        HTTPException 422 if site_type is not STABILIMENTO_PRODUTTIVO.
+    """
+    if site_type != "STABILIMENTO_PRODUTTIVO":
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "error": "site_type_invalid",
+                "message": (
+                    "Process emissions allowed only for STABILIMENTO_PRODUTTIVO sites"
+                ),
+                "codice_sito": codice_sito,
+                "site_type": site_type,
+            },
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -348,21 +452,51 @@ def _preview_s1_process(
 def _preview_s2_lb(
     req: CalcInputRequest,
     catalog: FactorCatalogPort,
+    *,
+    country: str = "IT",
 ) -> CalcPreviewResponse:
     """Scope 2 location-based: ISPRA Italian grid factor × kWh.
+
+    Decision #2 (M6): ``country`` is resolved from ``ref.sites`` at the call
+    site rather than being hardcoded.  When a non-IT country is requested and
+    no matching LB factor exists in the catalog the resolver raises
+    ``MissingFactorError`` with a clear message.
 
     Args:
         req: Validated CalcInputRequest.
         catalog: Factor catalog port.
+        country: ISO-3166 alpha-2 country code resolved from ref.sites
+            (default 'IT' when session is unavailable, e.g. in tests).
 
     Returns:
         CalcPreviewResponse for S2 LB.
     """
     from ghg_tool.application.calc.scope2_lb import _LB_FACTOR_ID
 
-    factor = require_factor(
-        catalog, _LB_FACTOR_ID, gwp_set=req.gwp_set, vintage_year=req.anno
-    )
+    # Build the country-aware factor ID.  The baseline factor is named
+    # LB_IT_GRID_ISPRA_2024; for non-IT countries we construct the variant
+    # name by substituting the country code and attempt lookup.
+    if country == "IT":
+        factor_id_to_use = _LB_FACTOR_ID
+    else:
+        # Non-IT sites: derive the expected factor ID pattern from the IT one.
+        # Example: LB_IT_GRID_ISPRA_2024 → LB_DE_GRID_ISPRA_2024 for country=DE.
+        factor_id_to_use = _LB_FACTOR_ID.replace("_IT_", f"_{country}_", 1)
+
+    try:
+        factor = require_factor(
+            catalog, factor_id_to_use, gwp_set=req.gwp_set, vintage_year=req.anno
+        )
+    except MissingFactorError as exc:
+        if country != "IT":
+            raise MissingFactorError(
+                f"No Location-Based emission factor found for country='{country}'. "
+                f"Expected factor_id='{factor_id_to_use}' (gwp_set={req.gwp_set}, "
+                f"vintage<={req.anno}). "
+                "Add the country-specific LB factor to the factor catalog, "
+                "or contact the data steward."
+            ) from exc
+        raise
 
     quantita = req.quantita
     unit_desc: str | None = None
@@ -378,9 +512,14 @@ def _preview_s2_lb(
         warnings.append(
             f"Vintage {factor.vintage} used (closest-prior to {req.anno} request)"
         )
+    if country != "IT":
+        warnings.append(
+            f"Non-IT site: LB factor resolved for country='{country}' "
+            f"(factor_id={factor_id_to_use!r})"
+        )
 
     fv = factor.value or Decimal("0")
-    formula = f"{quantita} kWh × {fv} kgCO2/kWh × 1e-3 = {tco2e} tCO2e"
+    formula = f"{quantita} kWh × {fv} kgCO2/kWh × 1e-3 = {tco2e} tCO2e [LB country={country}]"
 
     return CalcPreviewResponse(
         tco2e=tco2e,
@@ -1021,20 +1160,37 @@ async def compute_preview(
     request: CalcInputRequest,
     *,
     factor_catalog: FactorCatalogPort,
+    session: Any = None,
+    tenant_id: str | None = None,
 ) -> CalcPreviewResponse:
     """Compute a tCO2e preview for the given request without writing to the DB.
 
     Dispatches to the appropriate sub-handler based on (scope, sub_scope).
     All sub-handlers reuse existing application/calc/* factor IDs and logic.
 
+    M6 additions:
+        - Task B: when ``session`` is provided and sub_scope == 'process',
+          looks up ``site_type`` from ref.sites and rejects non-
+          STABILIMENTO_PRODUTTIVO sites with HTTP 422.
+        - Task C: when ``session`` is provided and sub_scope == 'lb',
+          reads ``country`` from ref.sites and passes it to _preview_s2_lb
+          instead of the hardcoded 'IT' default.
+
     Args:
         request: Validated CalcInputRequest.
         factor_catalog: Factor catalog port (SQL adapter or test double).
+        session: Optional async SQLAlchemy session.  When provided, site
+            metadata is fetched for Tasks B and C.  When absent (e.g. in
+            tests that do not inject a session), site validation is skipped
+            and LB defaults to 'IT'.
+        tenant_id: UUID string of the requesting tenant.  Required when
+            ``session`` is provided.
 
     Returns:
         CalcPreviewResponse with full audit trace.
 
     Raises:
+        HTTPException 422: For Task B site_type violations.
         MissingFactorError: Surfaces as HTTP 422 at router level.
         UnitConversionError: Surfaces as HTTP 422 at router level.
         ValueError: Validation failures surfaced as HTTP 422.
@@ -1054,7 +1210,33 @@ async def compute_preview(
             f"scope={request.scope} sub_scope={request.sub_scope!r}"
         )
 
-    preview: CalcPreviewResponse = handler(request, factor_catalog)
+    # -----------------------------------------------------------------------
+    # M6 Task B + Task C: site metadata lookup (requires session + codice_sito)
+    # -----------------------------------------------------------------------
+    site_meta: _SiteMeta | None = None
+    if session is not None and tenant_id and request.codice_sito:
+        site_meta = await _fetch_site_meta(
+            session,
+            codice_sito=request.codice_sito,
+            tenant_id=tenant_id,
+        )
+
+    # Task B: Processo_Decarb is only allowed for STABILIMENTO_PRODUTTIVO
+    if request.sub_scope == "process" and site_meta is not None:
+        _assert_process_site_type(
+            codice_sito=request.codice_sito or "",
+            site_type=site_meta.site_type,
+        )
+
+    # Task C: use country from ref.sites for S2 LB
+    if request.sub_scope == "lb" and site_meta is not None:
+        country = site_meta.country
+        preview: CalcPreviewResponse = _preview_s2_lb(
+            request, factor_catalog, country=country
+        )
+    else:
+        preview = handler(request, factor_catalog)
+
     log.info("auto_calc_preview_complete", tco2e=str(preview.tco2e))
     return preview
 
@@ -1069,10 +1251,14 @@ async def compute_and_insert(
     """Compute tCO2e and append a row to calc.emissions_consolidated.
 
     Steps:
-        1. compute_preview() — all factor lookups and arithmetic.
-        2. INSERT into calc.emissions_consolidated (append-only, raw_row_id=NULL).
-        3. INSERT audit_log row (action='emission_auto_calc').
-        4. Return CalcInsertResponse with emission_id + correlation_id.
+        1. compute_preview() — all factor lookups and arithmetic (with site
+           metadata lookup for Tasks B and C).
+        2. INSERT into raw.direct_entry (Task D, FR-22).
+        3. INSERT into calc.emissions_consolidated with raw_row_id pointing
+           to the raw.direct_entry row (no more nil UUID sentinel).
+        4. INSERT audit_log row (action='emission_auto_calc').
+        5. All three inserts in the same session transaction.
+        6. Return CalcInsertResponse with emission_id + correlation_id.
 
     Args:
         request: Validated CalcInputRequest.
@@ -1084,10 +1270,13 @@ async def compute_and_insert(
         CalcInsertResponse with DB identifiers.
 
     Raises:
+        HTTPException 422: For Task B site_type violations or missing factors.
         MissingFactorError: Surfaces as HTTP 422.
         UnitConversionError: Surfaces as HTTP 422.
     """
-    from sqlalchemy import text
+    import json as _json  # noqa: PLC0415
+
+    from sqlalchemy import text  # noqa: PLC0415
 
     log = logger.bind(
         scope=request.scope,
@@ -1098,16 +1287,24 @@ async def compute_and_insert(
     )
     log.info("auto_calc_insert_start")
 
-    # Step 1: compute preview
-    preview = await compute_preview(request, factor_catalog=factor_catalog)
+    tenant_id: str = user.tenant_id
+
+    # Step 1: compute preview (passes session for Task B + Task C)
+    preview = await compute_preview(
+        request,
+        factor_catalog=factor_catalog,
+        session=session,
+        tenant_id=tenant_id,
+    )
 
     # Step 2: generate IDs
     emission_id = uuid.uuid4()
+    # Task D: raw.direct_entry gets its own UUID
+    raw_entry_id = uuid.uuid4()
     correlation_id = uuid.UUID(get_correlation_id())
     now = datetime.now(UTC)
-    tenant_id = user.tenant_id
 
-    # Nil UUID sentinel for factor FK — consistent with calc_persistence.py pattern
+    # Nil UUID kept for factor FK (catalog FK is still sentinel per existing pattern)
     nil_uuid = str(uuid.UUID(int=0))
 
     sub_scope_map: dict[str, str] = {
@@ -1126,6 +1323,58 @@ async def compute_and_insert(
     }
     db_sub_scope = sub_scope_map.get(request.sub_scope, request.sub_scope)
 
+    # -----------------------------------------------------------------------
+    # Task D — Step 2a: INSERT into raw.direct_entry
+    # Stores the original user request payload + resolved factor metadata
+    # for FR-22 universal traceability.
+    # -----------------------------------------------------------------------
+    request_payload = _json.dumps(request.model_dump(mode="json"), sort_keys=True)
+
+    insert_raw_sql = text(
+        """
+        INSERT INTO raw.direct_entry (
+            id, tenant_id, correlation_id, inserted_by, inserted_at,
+            request_payload, factor_id, factor_vintage, tco2e
+        ) VALUES (
+            CAST(:id AS uuid),
+            CAST(:tenant_id AS uuid),
+            CAST(:correlation_id AS uuid),
+            :inserted_by,
+            :inserted_at,
+            CAST(:request_payload AS jsonb),
+            :factor_id,
+            :factor_vintage,
+            :tco2e
+        )
+        """
+    )
+
+    # Resolve factor_vintage: use integer form if possible, else current anno
+    try:
+        factor_vintage_int = int(preview.factor_vintage)
+    except (ValueError, TypeError):
+        factor_vintage_int = request.anno
+
+    await session.execute(
+        insert_raw_sql,
+        {
+            "id": str(raw_entry_id),
+            "tenant_id": str(tenant_id),
+            "correlation_id": str(correlation_id),
+            "inserted_by": user.sub,
+            "inserted_at": now,
+            "request_payload": request_payload,
+            "factor_id": preview.factor_id,
+            "factor_vintage": factor_vintage_int,
+            "tco2e": float(preview.tco2e),
+        },
+    )
+    log.info("raw_direct_entry_inserted", raw_entry_id=str(raw_entry_id))
+
+    # -----------------------------------------------------------------------
+    # Task D — Step 2b: INSERT into calc.emissions_consolidated
+    # raw_row_id now references the raw.direct_entry row (not nil UUID).
+    # -----------------------------------------------------------------------
     insert_emission_sql = text(
         """
         INSERT INTO calc.emissions_consolidated (
@@ -1152,7 +1401,8 @@ async def compute_and_insert(
             "id": str(emission_id),
             "tenant_id": str(tenant_id),
             "correlation_id": str(correlation_id),
-            "raw_row_id": nil_uuid,  # sentinel — direct API entry, no raw row
+            # Task D: raw_row_id now references raw.direct_entry (FR-22)
+            "raw_row_id": str(raw_entry_id),
             "raw_scope": request.scope,
             "scope": request.scope,
             "sub_scope": db_sub_scope,
@@ -1184,7 +1434,7 @@ async def compute_and_insert(
         },
     )
 
-    # Step 3: audit log (append-only)
+    # Step 3 (was step 3 before): audit log (append-only)
     insert_audit_sql = text(
         """
         INSERT INTO calc.audit_log (
@@ -1213,15 +1463,21 @@ async def compute_and_insert(
             "request_method": "POST",
             "request_path": "/api/v1/calc/insert",
             "status_code": 201,
-            "after_state": {"emission_id": str(emission_id)},  # PII-free: UUID only
+            # PII-free: UUID only
+            "after_state": {
+                "emission_id": str(emission_id),
+                "raw_entry_id": str(raw_entry_id),
+            },
         },
     )
 
     log.info(
         "auto_calc_insert_complete",
         emission_id=str(emission_id),
+        raw_entry_id=str(raw_entry_id),
         tco2e=str(preview.tco2e),
         correlation_id=str(correlation_id),
+        idempotency_replayed=False,
     )
 
     return CalcInsertResponse(

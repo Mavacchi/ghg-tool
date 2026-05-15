@@ -197,10 +197,71 @@ def _make_user(role: str) -> CurrentUser:
     )
 
 
-def _override_db_noop() -> Any:
-    """No-op async DB session."""
+def _make_mock_session(
+    *,
+    site_type: str = "STABILIMENTO_PRODUTTIVO",
+    site_country: str = "IT",
+    codice_sito: str | None = None,
+) -> MagicMock:
+    """Build an async mock session suitable for auto-calc tests.
+
+    For M6 Tasks B+C, the site lookup in ``_fetch_site_meta`` calls
+    ``session.execute(...).mappings().first()``.  This helper configures the
+    mock so that:
+
+    - If ``codice_sito`` is None or the site lookup query fires (any execute),
+      ``mappings().first()`` returns a dict-like object with ``site_type`` and
+      ``country`` for the configured values.  Set ``site_type`` to a
+      non-STABILIMENTO_PRODUTTIVO value to test Task B rejection.
+    - Additional execute() calls (audit log etc.) return plain MagicMock()
+      which is fine as write-side tests don't inspect those.
+
+    The session always returns the same site row regardless of which query was
+    executed — acceptable in unit tests where we control the scenario.
+    """
+    site_row: dict[str, Any] | None
+    if codice_sito is None:
+        # No site lookup expected (or site not found) — return None from first()
+        site_row = None
+    else:
+        site_row = {
+            "codice_sito": codice_sito,
+            "site_type": site_type,
+            "country": site_country,
+        }
+
+    def _make_row_proxy(row: dict[str, Any] | None) -> MagicMock:
+        mock_result = MagicMock()
+        mock_mappings = MagicMock()
+        mock_mappings.first.return_value = row
+        mock_result.mappings.return_value = mock_mappings
+        return mock_result
+
     mock_session = MagicMock()
-    mock_session.execute = AsyncMock(return_value=MagicMock())
+    mock_session.execute = AsyncMock(return_value=_make_row_proxy(site_row))
+    return mock_session
+
+
+def _override_db_noop(
+    *,
+    site_type: str = "STABILIMENTO_PRODUTTIVO",
+    site_country: str = "IT",
+    codice_sito: str | None = None,
+) -> Any:
+    """No-op async DB session that returns sensible values for site metadata lookups.
+
+    Args:
+        site_type: site_type to return from the mocked ref.sites query.
+            Defaults to 'STABILIMENTO_PRODUTTIVO' so existing tests are unaffected.
+        site_country: country code to return. Defaults to 'IT'.
+        codice_sito: When None, site lookup returns None (site not found).
+            When set to a string, returns a site row with the given attributes.
+    """
+    mock_session = _make_mock_session(
+        site_type=site_type,
+        site_country=site_country,
+        codice_sito=codice_sito,
+    )
 
     async def _override() -> AsyncGenerator[Any, None]:
         yield mock_session
@@ -210,10 +271,17 @@ def _override_db_noop() -> Any:
 
 @pytest.fixture
 def client_editor(mock_catalog: InMemoryFactorCatalog) -> TestClient:
-    """Editor role client with mocked catalog + no-op DB."""
+    """Editor role client with mocked catalog + no-op DB.
+
+    The DB mock returns site_row=None (site not found) by default so that
+    existing tests are unaffected by the M6 site_type validation: when
+    site metadata cannot be fetched, validation is skipped gracefully.
+    Tests that need specific site_type behaviour build their own override.
+    """
     editor_user = _make_user("editor")
     app.dependency_overrides[get_current_user] = lambda: editor_user
-    app.dependency_overrides[get_db] = _override_db_noop()
+    # codice_sito=None → _fetch_site_meta returns None → validation skipped
+    app.dependency_overrides[get_db] = _override_db_noop(codice_sito=None)
     app.dependency_overrides[get_factor_catalog] = lambda: mock_catalog
 
     with TestClient(app, raise_server_exceptions=False) as c:
@@ -226,7 +294,7 @@ def client_viewer(mock_catalog: InMemoryFactorCatalog) -> TestClient:
     """Viewer role client — should be denied emissions.write."""
     viewer_user = _make_user("viewer")
     app.dependency_overrides[get_current_user] = lambda: viewer_user
-    app.dependency_overrides[get_db] = _override_db_noop()
+    app.dependency_overrides[get_db] = _override_db_noop(codice_sito=None)
     app.dependency_overrides[get_factor_catalog] = lambda: mock_catalog
 
     with TestClient(app, raise_server_exceptions=False) as c:
@@ -636,16 +704,27 @@ def test_preview_viewer_role_403(client_viewer: TestClient) -> None:
 def test_insert_writes_emission_row_and_audit_log(
     mock_catalog: InMemoryFactorCatalog,
 ) -> None:
-    """compute_and_insert should call session.execute exactly twice."""
+    """compute_and_insert should call session.execute for: site lookup, raw.direct_entry,
+    emissions_consolidated, and audit_log — exactly 4 calls total (M6: Task B/C/D added).
+    """
     from ghg_tool.api.schemas.calc_schemas import CalcInputRequest
     from ghg_tool.application.services.auto_calc_service import compute_and_insert
 
-    mock_session = MagicMock()
     execute_calls: list[Any] = []
+
+    def _noop_result() -> MagicMock:
+        """Return a mock execute result where mappings().first() returns None."""
+        mock_result = MagicMock()
+        mock_mappings = MagicMock()
+        mock_mappings.first.return_value = None
+        mock_result.mappings.return_value = mock_mappings
+        return mock_result
+
+    mock_session = MagicMock()
 
     async def capture_execute(stmt: Any, params: Any = None) -> MagicMock:
         execute_calls.append((stmt, params))
-        return MagicMock()
+        return _noop_result()
 
     mock_session.execute = capture_execute
 
@@ -666,8 +745,10 @@ def test_insert_writes_emission_row_and_audit_log(
             )
         )
 
-    assert len(execute_calls) == 2, (
-        f"Expected 2 DB execute calls, got {len(execute_calls)}"
+    # M6: 4 execute calls = site_lookup + raw.direct_entry + emissions_consolidated + audit_log
+    assert len(execute_calls) == 4, (
+        f"Expected 4 DB execute calls (site_lookup + raw_entry + emission + audit), "
+        f"got {len(execute_calls)}"
     )
     assert result.emission_id is not None
     assert isinstance(result.emission_id, uuid.UUID)
@@ -682,8 +763,7 @@ def test_insert_returns_201_with_emission_id(
     mock_catalog: InMemoryFactorCatalog,
 ) -> None:
     """POST /api/v1/calc/insert must return HTTP 201 with a valid emission_id."""
-    mock_session = MagicMock()
-    mock_session.execute = AsyncMock(return_value=MagicMock())
+    mock_session = _make_mock_session(codice_sito=None)  # site not found → skip validation
 
     async def _override() -> AsyncGenerator[Any, None]:
         yield mock_session
@@ -815,3 +895,428 @@ def test_preview_s3_missing_metodo_returns_422(client_editor: TestClient) -> Non
         },
     )
     assert resp.status_code == 422, resp.text
+
+
+# ===========================================================================
+# M6 Task B — site_type validation for Processo_Decarb
+# ===========================================================================
+
+def _client_with_site_type(
+    mock_catalog: InMemoryFactorCatalog,
+    *,
+    codice_sito: str,
+    site_type: str,
+) -> TestClient:
+    """Helper: build a TestClient whose DB session reports a specific site_type.
+
+    Args:
+        mock_catalog: Seeded factor catalog.
+        codice_sito: The site code to configure in the mock DB.
+        site_type: The site_type value to return from ref.sites.
+
+    Returns:
+        A configured TestClient as context manager (caller must enter/exit).
+    """
+    editor_user = _make_user("editor")
+    app.dependency_overrides[get_current_user] = lambda: editor_user
+    app.dependency_overrides[get_db] = _override_db_noop(
+        codice_sito=codice_sito, site_type=site_type, site_country="IT"
+    )
+    app.dependency_overrides[get_factor_catalog] = lambda: mock_catalog
+    return TestClient(app, raise_server_exceptions=False)
+
+
+def test_processo_decarb_rejected_422_for_ufficio_casalgrande(
+    mock_catalog: InMemoryFactorCatalog,
+) -> None:
+    """Task B: Processo_Decarb on CASALGRANDE (UFFICIO) must return 422 site_type_invalid.
+
+    Decision #7 from auto_calc_design.md §12: process emissions are only
+    allowed for STABILIMENTO_PRODUTTIVO sites.
+    """
+    with _client_with_site_type(
+        mock_catalog, codice_sito="CASALGRANDE", site_type="UFFICIO"
+    ) as client:
+        resp = client.post(
+            "/api/v1/calc/preview",
+            json={
+                "scope": 1, "sub_scope": "process",
+                "anno": 2024, "codice_sito": "CASALGRANDE",
+                "quantita": "10.0", "unita": "tCO2",
+                "gwp_set": "AR6", "process_mode": "direct_tco2",
+            },
+        )
+    app.dependency_overrides.clear()
+
+    assert resp.status_code == 422, resp.text
+    detail = resp.json().get("detail", {})
+    assert detail.get("error") == "site_type_invalid", f"Unexpected detail: {detail}"
+    assert detail.get("codice_sito") == "CASALGRANDE"
+    assert detail.get("site_type") == "UFFICIO"
+
+
+def test_processo_decarb_rejected_422_for_ufficio_sassuolo(
+    mock_catalog: InMemoryFactorCatalog,
+) -> None:
+    """Task B: Processo_Decarb on SASSUOLO (UFFICIO) must return 422 site_type_invalid."""
+    with _client_with_site_type(
+        mock_catalog, codice_sito="SASSUOLO", site_type="UFFICIO"
+    ) as client:
+        resp = client.post(
+            "/api/v1/calc/preview",
+            json={
+                "scope": 1, "sub_scope": "process",
+                "anno": 2024, "codice_sito": "SASSUOLO",
+                "quantita": "5.0", "unita": "tCO2",
+                "gwp_set": "AR6", "process_mode": "direct_tco2",
+            },
+        )
+    app.dependency_overrides.clear()
+
+    assert resp.status_code == 422, resp.text
+    detail = resp.json().get("detail", {})
+    assert detail.get("error") == "site_type_invalid"
+    assert detail.get("site_type") == "UFFICIO"
+
+
+def test_processo_decarb_rejected_422_for_magazzino_viano_gargola(
+    mock_catalog: InMemoryFactorCatalog,
+) -> None:
+    """Task B: Processo_Decarb on VIANO_GARGOLA (MAGAZZINO) must return 422."""
+    with _client_with_site_type(
+        mock_catalog, codice_sito="VIANO_GARGOLA", site_type="MAGAZZINO"
+    ) as client:
+        resp = client.post(
+            "/api/v1/calc/preview",
+            json={
+                "scope": 1, "sub_scope": "process",
+                "anno": 2024, "codice_sito": "VIANO_GARGOLA",
+                "quantita": "3.0", "unita": "tCO2",
+                "gwp_set": "AR6", "process_mode": "direct_tco2",
+            },
+        )
+    app.dependency_overrides.clear()
+
+    assert resp.status_code == 422, resp.text
+    detail = resp.json().get("detail", {})
+    assert detail.get("error") == "site_type_invalid"
+    assert detail.get("site_type") == "MAGAZZINO"
+
+
+def test_processo_decarb_rejected_422_for_magazzino_fiorano(
+    mock_catalog: InMemoryFactorCatalog,
+) -> None:
+    """Task B: Processo_Decarb on FIORANO (MAGAZZINO) must return 422."""
+    with _client_with_site_type(
+        mock_catalog, codice_sito="FIORANO", site_type="MAGAZZINO"
+    ) as client:
+        resp = client.post(
+            "/api/v1/calc/preview",
+            json={
+                "scope": 1, "sub_scope": "process",
+                "anno": 2024, "codice_sito": "FIORANO",
+                "quantita": "7.5", "unita": "tCO2",
+                "gwp_set": "AR6", "process_mode": "direct_tco2",
+            },
+        )
+    app.dependency_overrides.clear()
+
+    assert resp.status_code == 422, resp.text
+    detail = resp.json().get("detail", {})
+    assert detail.get("error") == "site_type_invalid"
+    assert detail.get("site_type") == "MAGAZZINO"
+
+
+def test_processo_decarb_ok_for_stabilimento_iano(
+    mock_catalog: InMemoryFactorCatalog,
+) -> None:
+    """Task B: Processo_Decarb on IANO (STABILIMENTO_PRODUTTIVO) must return 200."""
+    with _client_with_site_type(
+        mock_catalog, codice_sito="IANO", site_type="STABILIMENTO_PRODUTTIVO"
+    ) as client:
+        resp = client.post(
+            "/api/v1/calc/preview",
+            json={
+                "scope": 1, "sub_scope": "process",
+                "anno": 2024, "codice_sito": "IANO",
+                "quantita": "5.5", "unita": "tCO2",
+                "gwp_set": "AR6", "process_mode": "direct_tco2",
+            },
+        )
+    app.dependency_overrides.clear()
+
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert Decimal(data["tco2e"]) == Decimal("5.5")
+
+
+def test_processo_decarb_ok_for_stabilimento_viano(
+    mock_catalog: InMemoryFactorCatalog,
+) -> None:
+    """Task B: Processo_Decarb on VIANO (STABILIMENTO_PRODUTTIVO) must return 200."""
+    with _client_with_site_type(
+        mock_catalog, codice_sito="VIANO", site_type="STABILIMENTO_PRODUTTIVO"
+    ) as client:
+        resp = client.post(
+            "/api/v1/calc/preview",
+            json={
+                "scope": 1, "sub_scope": "process",
+                "anno": 2024, "codice_sito": "VIANO",
+                "quantita": "3.0", "unita": "tCO2",
+                "gwp_set": "AR6", "process_mode": "direct_tco2",
+            },
+        )
+    app.dependency_overrides.clear()
+
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert Decimal(data["tco2e"]) == Decimal("3.0")
+
+
+def test_processo_decarb_ok_for_stabilimento_frassinoro(
+    mock_catalog: InMemoryFactorCatalog,
+) -> None:
+    """Task B: Processo_Decarb on FRASSINORO (STABILIMENTO_PRODUTTIVO) must return 200."""
+    with _client_with_site_type(
+        mock_catalog, codice_sito="FRASSINORO", site_type="STABILIMENTO_PRODUTTIVO"
+    ) as client:
+        resp = client.post(
+            "/api/v1/calc/preview",
+            json={
+                "scope": 1, "sub_scope": "process",
+                "anno": 2024, "codice_sito": "FRASSINORO",
+                "quantita": "12.0", "unita": "tCO2",
+                "gwp_set": "AR6", "process_mode": "direct_tco2",
+            },
+        )
+    app.dependency_overrides.clear()
+
+    assert resp.status_code == 200, resp.text
+
+
+# ===========================================================================
+# M6 Task E — Idempotency-Key header on /calc/insert
+# ===========================================================================
+
+def _make_idempotency_mock_session(
+    *,
+    cached_hit: dict[str, Any] | None = None,
+    raise_reuse: bool = False,
+) -> MagicMock:
+    """Build a mock session that simulates idempotency cache behavior.
+
+    Args:
+        cached_hit: If set, the idempotency lookup returns this response dict.
+            ``None`` means cache miss (no prior entry).
+        raise_reuse: If True, simulates a cache hit with mismatched body.
+
+    Returns:
+        A configured MagicMock session.
+    """
+
+    call_count = 0
+
+    def _make_first_result(cached: dict[str, Any] | None) -> MagicMock:
+        """Result for the idempotency lookup query."""
+        mock_result = MagicMock()
+        mock_mappings = MagicMock()
+        if cached is not None:
+            # Simulate a DB row with correct hash (same body)
+            mock_mappings.first.return_value = {
+                "request_hash": "a" * 64,  # matches computed hash below
+                "response_status": 201,
+                "response_body": cached,
+            }
+        else:
+            mock_mappings.first.return_value = None
+        mock_result.mappings.return_value = mock_mappings
+        return mock_result
+
+    # Default noop result (for site lookup and write statements)
+    noop_result = MagicMock()
+    noop_mappings = MagicMock()
+    noop_mappings.first.return_value = None
+    noop_result.mappings.return_value = noop_mappings
+
+    mock_session = MagicMock()
+
+    async def _execute(stmt: Any, params: Any = None) -> MagicMock:
+        nonlocal call_count
+        call_count += 1
+        # First call is the idempotency lookup
+        if call_count == 1 and (cached_hit is not None or raise_reuse):
+            return _make_first_result(cached_hit)
+        return noop_result
+
+    mock_session.execute = _execute
+    return mock_session
+
+
+def test_idempotency_key_same_body_returns_replay(
+    mock_catalog: InMemoryFactorCatalog,
+) -> None:
+    """Task E: same Idempotency-Key + same body → replay with X-Idempotency-Replayed: true.
+
+    We patch ``check_idempotency`` directly to return an ``IdempotencyHit``
+    so that the router's cache-hit branch is exercised without a real DB.
+    """
+    import uuid as _uuid  # noqa: PLC0415
+
+    from ghg_tool.application.services.idempotency_service import IdempotencyHit  # noqa: PLC0415
+
+    cached_emission_id = str(_uuid.uuid4())
+    cached_body: dict[str, Any] = {
+        "tco2e": "2.700000",
+        "co2_biogenic_tonne": None,
+        "co2_fossil_tonne": None,
+        "factor_id": "LB_IT_GRID_ISPRA_2024",
+        "factor_value": "0.27",
+        "factor_unit": "kg CO2 / kWh",
+        "factor_source": "ISPRA",
+        "factor_version": "2025",
+        "factor_vintage": "2025",
+        "gwp_set": "AR6",
+        "gwp_value": "1",
+        "methodology": "location-based",
+        "formula_human": "10000 kWh × 0.27 kgCO2/kWh × 1e-3 = 2.700000 tCO2e [LB country=IT]",
+        "unit_conversion_applied": None,
+        "warnings": [],
+        "emission_id": cached_emission_id,
+        "correlation_id": str(_uuid.uuid4()),
+        "created_at": "2026-05-15T10:00:00+00:00",
+    }
+
+    mock_session = _make_mock_session(codice_sito=None)
+
+    async def _override() -> AsyncGenerator[Any, None]:
+        yield mock_session
+
+    app.dependency_overrides[get_current_user] = lambda: _make_user("editor")
+    app.dependency_overrides[get_db] = _override
+    app.dependency_overrides[get_factor_catalog] = lambda: mock_catalog
+
+    idempotency_hit = IdempotencyHit(
+        response_status=201,
+        response_body=cached_body,
+    )
+
+    with (
+        TestClient(app, raise_server_exceptions=False) as client,
+        patch(
+            "ghg_tool.api.routers.calc.check_idempotency",
+            new=AsyncMock(return_value=idempotency_hit),
+        ),
+        patch(
+            "ghg_tool.application.services.auto_calc_service.get_correlation_id",
+            return_value=str(uuid.uuid4()),
+        ),
+    ):
+        resp = client.post(
+            "/api/v1/calc/insert",
+            json={
+                "scope": 2, "sub_scope": "lb",
+                "anno": 2024, "codice_sito": "IANO",
+                "quantita": "10000", "unita": "kWh", "gwp_set": "AR6",
+            },
+            headers={"Idempotency-Key": "test-idempotency-key-abc123"},
+        )
+
+    app.dependency_overrides.clear()
+
+    assert resp.status_code == 200, resp.text
+    assert resp.headers.get("X-Idempotency-Replayed") == "true"
+    data = resp.json()
+    assert data["emission_id"] == cached_emission_id
+
+
+def test_idempotency_key_different_body_returns_422(
+    mock_catalog: InMemoryFactorCatalog,
+) -> None:
+    """Task E: same Idempotency-Key with different body → 422 idempotency_key_reuse.
+
+    We patch ``check_idempotency`` to raise ``IdempotencyKeyReusedError``
+    simulating a body mismatch.
+    """
+    from ghg_tool.application.services.idempotency_service import (
+        IdempotencyKeyReusedError,  # noqa: PLC0415
+    )
+
+    mock_session = _make_mock_session(codice_sito=None)
+
+    async def _override() -> AsyncGenerator[Any, None]:
+        yield mock_session
+
+    app.dependency_overrides[get_current_user] = lambda: _make_user("editor")
+    app.dependency_overrides[get_db] = _override
+    app.dependency_overrides[get_factor_catalog] = lambda: mock_catalog
+
+    with (
+        TestClient(app, raise_server_exceptions=False) as client,
+        patch(
+            "ghg_tool.api.routers.calc.check_idempotency",
+            new=AsyncMock(
+                side_effect=IdempotencyKeyReusedError(
+                    "Idempotency-Key 'test-key' was previously used with a different body."
+                )
+            ),
+        ),
+    ):
+        resp = client.post(
+            "/api/v1/calc/insert",
+            json={
+                "scope": 2, "sub_scope": "lb",
+                "anno": 2024, "codice_sito": "IANO",
+                "quantita": "5000", "unita": "kWh", "gwp_set": "AR6",  # different body
+            },
+            headers={"Idempotency-Key": "test-idempotency-key-abc123"},
+        )
+
+    app.dependency_overrides.clear()
+
+    assert resp.status_code == 422, resp.text
+    detail = resp.json().get("detail", {})
+    assert detail.get("error") == "idempotency_key_reuse_with_different_body"
+
+
+def test_idempotency_key_absent_inserts_normally(
+    mock_catalog: InMemoryFactorCatalog,
+) -> None:
+    """Task E: no Idempotency-Key header → normal insert path (no cache check).
+
+    When the header is absent, ``check_idempotency`` must NOT be called.
+    """
+    mock_session = _make_mock_session(codice_sito=None)
+
+    async def _override() -> AsyncGenerator[Any, None]:
+        yield mock_session
+
+    app.dependency_overrides[get_current_user] = lambda: _make_user("editor")
+    app.dependency_overrides[get_db] = _override
+    app.dependency_overrides[get_factor_catalog] = lambda: mock_catalog
+
+    with (
+        TestClient(app, raise_server_exceptions=False) as client,
+        patch(
+            "ghg_tool.api.routers.calc.check_idempotency",
+            new=AsyncMock(),
+        ) as mock_check,
+        patch(
+            "ghg_tool.application.services.auto_calc_service.get_correlation_id",
+            return_value=str(uuid.uuid4()),
+        ),
+    ):
+        resp = client.post(
+            "/api/v1/calc/insert",
+            json={
+                "scope": 2, "sub_scope": "lb",
+                "anno": 2024, "codice_sito": "IANO",
+                "quantita": "1000", "unita": "kWh", "gwp_set": "AR6",
+            },
+            # No Idempotency-Key header
+        )
+        # check_idempotency must not have been called
+        mock_check.assert_not_called()
+
+    app.dependency_overrides.clear()
+
+    assert resp.status_code == 201, resp.text
