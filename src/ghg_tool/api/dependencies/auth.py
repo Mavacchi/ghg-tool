@@ -24,7 +24,7 @@ logger = structlog.get_logger(__name__)
 
 _bearer_scheme = HTTPBearer(auto_error=False)
 
-RoleCode = Literal["data_steward", "esg_manager", "auditor"]
+RoleCode = Literal["editor", "admin", "viewer"]
 
 
 class CurrentUser(BaseModel):
@@ -117,7 +117,7 @@ async def get_current_user(
         raise _unauthorized("Invalid token") from exc
 
     role = claims.get("role", "")
-    if role not in {"data_steward", "esg_manager", "auditor"}:
+    if role not in {"editor", "admin", "viewer"}:
         log.warning("JWT contains unknown role", role=role)
         raise _unauthorized(f"Unknown role in token: {role!r}")
 

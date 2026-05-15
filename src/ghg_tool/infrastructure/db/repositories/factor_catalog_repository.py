@@ -14,7 +14,7 @@ from ghg_tool.infrastructure.db.models.factor import FactorCatalog
 class FactorCatalogRepository:
     """Read-mostly repository for ref.factor_catalog.
 
-    INSERT is allowed by data_steward before publishing.  After
+    INSERT is allowed by editor before publishing.  After
     ``is_published=True`` the DB trigger blocks mutation (MG-02).
     """
 

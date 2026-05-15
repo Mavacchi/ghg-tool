@@ -1,7 +1,7 @@
 """DQ findings router — /api/v1/dq-findings (FR-32).
 
 All authenticated roles can read DQ findings.
-Only esg_manager can create waiver resolutions (append-only new row pattern).
+Only admin can create waiver resolutions (append-only new row pattern).
 """
 
 from __future__ import annotations
@@ -88,16 +88,16 @@ async def list_findings(
     "/waiver/{finding_id}",
     response_model=DqFindingResponse,
     status_code=status.HTTP_201_CREATED,
-    summary="Apply a waiver to a DQ finding (esg_manager only, append-only)",
+    summary="Apply a waiver to a DQ finding (admin only, append-only)",
     description=(
         "Creates a new resolution row with resolution_status='WAIVED' and "
         "parent_finding_id pointing to the original finding. Does not UPDATE "
-        "the original row (append-only pattern). esg_manager role only."
+        "the original row (append-only pattern). admin role only."
     ),
     responses={
         201: {"description": "Waiver applied"},
         401: {"description": "Not authenticated"},
-        403: {"description": "Insufficient role — esg_manager required"},
+        403: {"description": "Insufficient role — admin required"},
         404: {"description": "Finding not found"},
         422: {"description": "Validation error"},
     },
@@ -117,14 +117,14 @@ async def waive_finding(
     Args:
         finding_id: UUID of the DQ finding to waive.
         body: ``WaiverRequest`` with reason_code and justification.
-        user: Authenticated esg_manager user.
+        user: Authenticated admin user.
         session: Authenticated DB session.
 
     Returns:
         The newly created waiver resolution row.
 
     Raises:
-        HTTPException: 404 if finding not found; 403 if not esg_manager.
+        HTTPException: 404 if finding not found; 403 if not admin.
     """
     correlation_id = get_correlation_id()
     log = logger.bind(correlation_id=correlation_id, user=user.sub[:8])

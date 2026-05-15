@@ -2,8 +2,8 @@
 
 Key invariants (FR-20, FR-30, FR-31):
 - GET /  : all authenticated roles; filterable; cursor-paginated.
-- POST / : data_steward only; append-only insert.
-- POST /correction : data_steward + esg_manager; correction-as-new-row.
+- POST / : editor only; append-only insert.
+- POST /correction : editor + admin; correction-as-new-row.
 - GET /{id}/corrections : full superseded_by chain.
 - DELETE /{id} : returns 405 Method Not Allowed (not registered; FastAPI default).
 - PUT/PATCH /{id} : not registered — 405 by default.
@@ -212,17 +212,17 @@ async def list_emissions(
     "/",
     response_model=EmissionCreateResponse,
     status_code=status.HTTP_201_CREATED,
-    summary="Append a new emission record (data_steward only, append-only)",
+    summary="Append a new emission record (editor only, append-only)",
     description=(
         "Inserts a new row into calc.emissions_consolidated. "
         "Enforces append-only semantics (FR-20). "
         "Requires ``Idempotency-Key`` header (UUID v4) to prevent duplicates. "
-        "data_steward role only (FR-30, FR-31)."
+        "editor role only (FR-30, FR-31)."
     ),
     responses={
         201: {"description": "Record created"},
         401: {"description": "Not authenticated"},
-        403: {"description": "Insufficient role — data_steward required"},
+        403: {"description": "Insufficient role — editor required"},
         409: {"description": "Idempotency key already used"},
         422: {"description": "Validation error"},
     },
@@ -230,7 +230,7 @@ async def list_emissions(
 async def create_emission(
     body: EmissionCreate,
     idempotency_key: Annotated[str, Header(alias="Idempotency-Key", min_length=8)],
-    user: CurrentUser = Depends(require_role("data_steward")),
+    user: CurrentUser = Depends(require_role("editor")),
     session: AsyncSession = Depends(get_db),
 ) -> EmissionCreateResponse:
     """Append a new emission row (FR-30, append-only).
@@ -238,14 +238,14 @@ async def create_emission(
     Args:
         body: Validated ``EmissionCreate`` payload.
         idempotency_key: Client-supplied UUID v4 to deduplicate requests.
-        user: Authenticated data_steward user.
+        user: Authenticated editor user.
         session: Authenticated DB session with RLS GUCs.
 
     Returns:
         An ``EmissionCreateResponse`` with ``id``, ``correlation_id``, and ``created_at``.
 
     Raises:
-        HTTPException: 403 if role is not data_steward; 422 on validation error.
+        HTTPException: 403 if role is not editor; 422 on validation error.
     """
     correlation_id = get_correlation_id()
     log = logger.bind(
@@ -281,7 +281,7 @@ async def create_emission(
     description=(
         "Inserts a replacement emission row and closes the predecessor via "
         "calc.fn_emit_correction. Append-only — never overwrites the original. "
-        "data_steward or esg_manager role required."
+        "editor or admin role required."
     ),
     responses={
         201: {"description": "Correction applied"},
@@ -424,12 +424,12 @@ async def get_corrections(
         "The new row is active (``valid_to IS NULL``, ``superseded_by IS NULL``).  "
         "Append-only invariant strictly preserved (FR-20, NFR-14, CG-03).  "
         "Writes a mandatory audit_log row (ISAE 3000 trail).  "
-        "``data_steward`` role only (``emissions:write`` permission)."
+        "``editor`` role only (``emissions:write`` permission)."
     ),
     responses={
         201: {"description": "Correction applied — new row ID returned"},
         401: {"description": "Not authenticated"},
-        403: {"description": "Insufficient role — data_steward required"},
+        403: {"description": "Insufficient role — editor required"},
         404: {"description": "Emission not found or cross-tenant access denied"},
         422: {"description": "Validation error (negative tco2e, unknown reason_code, …)"},
     },
@@ -464,7 +464,7 @@ async def correct_emission_by_id(
     Args:
         emission_id: UUID path parameter identifying the row to correct.
         body: Validated ``EmissionCorrectionRequest`` payload.
-        user: Authenticated data_steward user.
+        user: Authenticated editor user.
         session: Authenticated DB session with RLS GUCs.
 
     Returns:

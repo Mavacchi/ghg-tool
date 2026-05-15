@@ -705,6 +705,72 @@ html, body,
   [data-testid="stMetric"] {
     padding: 0.85rem 1rem 0.75rem 1rem;
   }
+
+  /* ------------------------------------------------------------------
+   * Edit panel + correction note: full-width inputs, reduced padding,
+   * stacked button groups. Streamlit collapses st.columns([6,1]) below
+   * 640 px automatically; these rules ensure the panel wrapper does not
+   * set overflow:hidden or min-width that would fight that collapse.
+   * ---------------------------------------------------------------- */
+  .ct-edit-panel {
+    padding: 0.75rem 0.75rem;
+    /* No overflow:hidden — let Streamlit column stacking work freely. */
+    overflow: visible;
+  }
+
+  /* All form inputs inside the edit panel span the full available width. */
+  .ct-edit-panel [data-baseweb="select"],
+  .ct-edit-panel [data-baseweb="input"],
+  .ct-edit-panel [data-baseweb="textarea"],
+  .ct-edit-panel [data-testid="stTextInput"],
+  .ct-edit-panel [data-testid="stSelectbox"],
+  .ct-edit-panel [data-testid="stNumberInput"],
+  .ct-edit-panel [data-testid="stTextArea"] {
+    width: 100% !important;
+    min-width: 0 !important;
+    box-sizing: border-box;
+  }
+
+  /* Correction note: tighter padding, minimum readable font size. */
+  .ct-correction-note {
+    padding: 0.5rem 0.65rem;
+    font-size: 0.85rem;
+    /* Ensure it never drops below accessible minimum. */
+    line-height: 1.5;
+  }
+
+  /* Destructive + secondary buttons inside edit panel / correction note:
+   * stack vertically with a gap so they are easy to tap. */
+  .ct-edit-panel [data-testid="stButton"],
+  .ct-correction-note [data-testid="stButton"],
+  .ct-destructive-wrap + div [data-testid="stButton"] {
+    display: block;
+    width: 100%;
+    margin-bottom: 0.5rem;
+  }
+  .ct-edit-panel [data-testid="stButton"]:last-child,
+  .ct-correction-note [data-testid="stButton"]:last-child {
+    margin-bottom: 0;
+  }
+
+  /* Touch targets: Apple HIG / WCAG 2.5.5 minimum 44x44 px.
+   * Streamlit default buttons render at ~32 px height; elevate inside
+   * the CRUD panels so fat-finger taps land reliably. */
+  .ct-edit-panel [data-testid="stButton"] > button,
+  .ct-correction-note [data-testid="stButton"] > button,
+  .ct-destructive-wrap + div [data-testid="stButton"] > button {
+    min-height: 44px;
+    padding-top: 0.6rem;
+    padding-bottom: 0.6rem;
+  }
+
+  /* Empty state: scale down icon and title for narrow viewports. */
+  .ct-empty-state .ct-empty-icon {
+    font-size: 2rem;
+  }
+  .ct-empty-state .ct-empty-title {
+    font-size: 1.1rem;
+  }
 }
 
 /* ====================================================================

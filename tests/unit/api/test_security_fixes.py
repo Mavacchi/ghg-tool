@@ -39,7 +39,7 @@ _TENANT_B = str(uuid.uuid4())
 _USER_ID = str(uuid.uuid4())
 
 
-def _make_user(role: str = "data_steward", tenant_id: str = _TENANT_A) -> CurrentUser:
+def _make_user(role: str = "editor", tenant_id: str = _TENANT_A) -> CurrentUser:
     return CurrentUser(
         sub=_USER_ID,
         role=role,  # type: ignore[arg-type]
@@ -48,7 +48,7 @@ def _make_user(role: str = "data_steward", tenant_id: str = _TENANT_A) -> Curren
     )
 
 
-def _auth_override(role: str = "data_steward", tenant_id: str = _TENANT_A) -> Any:
+def _auth_override(role: str = "editor", tenant_id: str = _TENANT_A) -> Any:
     user = _make_user(role, tenant_id)
 
     async def _dep() -> CurrentUser:
@@ -315,8 +315,8 @@ class TestSecP0004RefreshRoleFromDb:
     def test_refresh_uses_db_role_not_token_role(self) -> None:
         """New access token carries the role from DB, not from the refresh token.
 
-        The refresh token has no role claim; the DB returns 'esg_manager'.
-        The new access token must carry 'esg_manager'.
+        The refresh token has no role claim; the DB returns 'admin'.
+        The new access token must carry 'admin'.
         """
         from ghg_tool.api.dependencies.db import get_db_no_auth
 
@@ -324,7 +324,7 @@ class TestSecP0004RefreshRoleFromDb:
         tenant = str(uuid.uuid4())
         refresh_token = create_refresh_token(sub=sub, tenant_id=tenant)
 
-        app.dependency_overrides[get_db_no_auth] = self._make_db_with_role("esg_manager")
+        app.dependency_overrides[get_db_no_auth] = self._make_db_with_role("admin")
         with TestClient(app, raise_server_exceptions=False) as client:
             resp = client.post(
                 "/api/v1/auth/refresh",
@@ -335,7 +335,7 @@ class TestSecP0004RefreshRoleFromDb:
         assert resp.status_code == 200, resp.text
         from ghg_tool.infrastructure.security.jwt import decode_token
         claims = decode_token(resp.json()["access_token"])
-        assert claims["role"] == "esg_manager"
+        assert claims["role"] == "admin"
 
     def test_refresh_returns_401_when_user_not_in_db(self) -> None:
         """Refresh fails with 401 when the user is no longer in the DB."""
@@ -364,7 +364,7 @@ class TestSecP0004RefreshRoleFromDb:
         refresh_token = create_refresh_token(sub=sub, tenant_id=tenant)
 
         app.dependency_overrides[get_db_no_auth] = self._make_db_with_role(
-            "data_steward", is_active=False
+            "editor", is_active=False
         )
         with TestClient(app, raise_server_exceptions=False) as client:
             resp = client.post(
@@ -691,7 +691,7 @@ class TestSecP1005LoginWired:
         fake_response = TokenResponse(
             access_token=create_access_token(
                 sub=str(uuid.uuid4()),
-                role="data_steward",
+                role="editor",
                 tenant_id=str(uuid.uuid4()),
             ),
             refresh_token=create_refresh_token(

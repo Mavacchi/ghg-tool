@@ -186,7 +186,7 @@ def _enable_demo_session(username: str) -> None:
     Guarded by ``_DEMO_MODE`` env var — only invoked when explicit opt-in.
     """
     st.session_state[_TOKEN_KEY] = _DEMO_TOKEN
-    st.session_state[_ROLE_KEY] = "esg_manager"
+    st.session_state[_ROLE_KEY] = "admin"
     st.session_state[_USER_KEY] = username[:8]  # truncated · no full PII
     st.session_state[_TENANT_KEY] = _DEMO_TENANT
 
@@ -245,7 +245,7 @@ def _do_login(username: str, password: str) -> bool:
             # server-side; the UI uses these only to gate menu visibility.
             role_claim = claims.get("role")
             tenant_claim = claims.get("tenant_id") or claims.get("tenant")
-            st.session_state[_ROLE_KEY] = str(role_claim) if role_claim else "esg_manager"
+            st.session_state[_ROLE_KEY] = str(role_claim) if role_claim else "admin"
             st.session_state[_USER_KEY] = username[:8]  # truncated -- no full PII
             st.session_state[_TENANT_KEY] = str(tenant_claim) if tenant_claim else _DEMO_TENANT
             return True
@@ -387,7 +387,7 @@ def _render_totp_challenge_form(lang: str, api_base: str) -> None:
                 st.session_state[_TOKEN_KEY] = full_token
                 role_claim = claims.get("role")
                 tenant_claim = claims.get("tenant_id") or claims.get("tenant")
-                st.session_state[_ROLE_KEY] = str(role_claim) if role_claim else "esg_manager"
+                st.session_state[_ROLE_KEY] = str(role_claim) if role_claim else "admin"
                 st.session_state[_TENANT_KEY] = str(tenant_claim) if tenant_claim else ""
                 st.session_state.pop(_PARTIAL_TOKEN_KEY, None)
                 st.session_state.pop(_TOTP_PENDING_KEY, None)

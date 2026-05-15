@@ -2,7 +2,7 @@
 
 Covers:
 - 401 unauthenticated (no token)
-- 403 auditor role
+- 403 viewer role
 - 422 invalid .xlsx (parser fails)
 - 422 DQ-CRIT blocked (orchestrator returns pipeline_blocked=True)
 - 200 happy path with mocked orchestrator returning 3 rows per scope
@@ -213,13 +213,13 @@ def test_import_excel_401_unauthenticated() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Test 2: 403 when role is auditor
+# Test 2: 403 when role is viewer
 # ---------------------------------------------------------------------------
 
 
 def test_import_excel_403_auditor() -> None:
     """Auditor role must receive 403 Forbidden."""
-    app.dependency_overrides[get_current_user] = _user_override("auditor", _USER_AU)
+    app.dependency_overrides[get_current_user] = _user_override("viewer", _USER_AU)
     app.dependency_overrides[get_db] = _noop_db()
     with TestClient(app, raise_server_exceptions=False) as client:
         resp = client.post(
@@ -242,7 +242,7 @@ def test_import_excel_422_parse_failure() -> None:
     """WorkbookParseError from parse_workbook must surface as 422."""
     from ghg_tool.etl.readers.excel_reader import WorkbookParseError
 
-    app.dependency_overrides[get_current_user] = _user_override("data_steward", _USER_DS)
+    app.dependency_overrides[get_current_user] = _user_override("editor", _USER_DS)
     app.dependency_overrides[get_db] = _noop_db()
 
     with patch(
@@ -270,7 +270,7 @@ def test_import_excel_422_dq_crit_blocked() -> None:
     """A pipeline_blocked result must return 422 with blocked_findings."""
     import pandas as pd
 
-    app.dependency_overrides[get_current_user] = _user_override("esg_manager", _USER_ESG)
+    app.dependency_overrides[get_current_user] = _user_override("admin", _USER_ESG)
     app.dependency_overrides[get_db] = _noop_db()
 
     fake_parsed = {
@@ -312,7 +312,7 @@ def test_import_excel_200_happy_path() -> None:
     """Happy path: 3 rows per scope inserted, batch_id returned, blocked=False."""
     import pandas as pd
 
-    app.dependency_overrides[get_current_user] = _user_override("data_steward", _USER_DS)
+    app.dependency_overrides[get_current_user] = _user_override("editor", _USER_DS)
     app.dependency_overrides[get_db] = _noop_db()
 
     fake_parsed = {
@@ -368,7 +368,7 @@ def test_import_excel_422_too_large() -> None:
     """Uploads larger than 10 MB must be rejected with 422."""
     large_bytes = b"A" * (10 * 1024 * 1024 + 1)
 
-    app.dependency_overrides[get_current_user] = _user_override("data_steward", _USER_DS)
+    app.dependency_overrides[get_current_user] = _user_override("editor", _USER_DS)
     app.dependency_overrides[get_db] = _noop_db()
 
     with TestClient(app, raise_server_exceptions=False) as client:
@@ -399,7 +399,7 @@ def test_import_excel_422_invalid_magic_bytes() -> None:
     # Craft a payload that looks like a PDF, not a ZIP/XLSX.
     non_xlsx_bytes = b"%PDF-1.4 fake content that is not an xlsx archive"
 
-    app.dependency_overrides[get_current_user] = _user_override("data_steward", _USER_DS)
+    app.dependency_overrides[get_current_user] = _user_override("editor", _USER_DS)
     app.dependency_overrides[get_db] = _noop_db()
 
     with TestClient(app, raise_server_exceptions=False) as client:
@@ -423,7 +423,7 @@ def test_import_excel_422_invalid_magic_bytes_all_zeros() -> None:
     """A payload of all-zero bytes must also be rejected with 422 (BUG-13)."""
     zero_bytes = b"\x00" * 200
 
-    app.dependency_overrides[get_current_user] = _user_override("data_steward", _USER_DS)
+    app.dependency_overrides[get_current_user] = _user_override("editor", _USER_DS)
     app.dependency_overrides[get_db] = _noop_db()
 
     with TestClient(app, raise_server_exceptions=False) as client:

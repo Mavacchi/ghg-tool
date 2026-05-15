@@ -207,7 +207,7 @@ async def rls_session(
     await db_session.execute(
         text(
             "SELECT set_config('app.tenant_id', :tid, true), "
-            "       set_config('app.role_code', 'data_steward', true)"
+            "       set_config('app.role_code', 'editor', true)"
         ),
         {"tid": tenant_id},
     )

@@ -1,10 +1,10 @@
 """Chart annotations router -- M17 dashboard narrative overlays.
 
 Endpoints:
-  POST  /api/v1/chart-annotations               Create annotation (data_steward, esg_manager).
+  POST  /api/v1/chart-annotations               Create annotation (editor, admin).
   GET   /api/v1/chart-annotations               List annotations for a chart_key (all roles).
-  PATCH /api/v1/chart-annotations/{id}/visibility  Toggle is_visible (data_steward, esg_manager).
-  PATCH /api/v1/chart-annotations/{id}/acknowledge Acknowledge annotation (esg_manager only).
+  PATCH /api/v1/chart-annotations/{id}/visibility  Toggle is_visible (editor, admin).
+  PATCH /api/v1/chart-annotations/{id}/acknowledge Acknowledge annotation (admin only).
 
 Immutability invariants (ISAE 3000):
   - Rows are append-only. No DELETE endpoint is exposed.
@@ -17,10 +17,10 @@ Immutability invariants (ISAE 3000):
   - ``created_by`` is always the JWT ``sub`` claim.
 
 include_hidden visibility rule:
-  Only ``esg_manager`` and ``auditor`` may pass ``include_hidden=true``.
-  ``data_steward`` always sees only visible annotations (is_visible=true).
-  Rationale: data_steward is an operational role and does not need to inspect
-  hidden audit trail entries; auditors and managers do for ISAE 3000 reviews.
+  Only ``admin`` and ``viewer`` may pass ``include_hidden=true``.
+  ``editor`` always sees only visible annotations (is_visible=true).
+  Rationale: editor is an operational role and does not need to inspect
+  hidden audit trail entries; viewers and managers do for ISAE 3000 reviews.
 """
 
 from __future__ import annotations
@@ -52,7 +52,7 @@ router = APIRouter(prefix="/api/v1/chart-annotations", tags=["chart-annotations"
 _VALID_SEVERITIES: frozenset[str] = frozenset({"INFO", "WARNING", "CRITICAL"})
 
 # Roles permitted to see hidden annotations.
-_CAN_SEE_HIDDEN: frozenset[str] = frozenset({"esg_manager", "auditor"})
+_CAN_SEE_HIDDEN: frozenset[str] = frozenset({"admin", "viewer"})
 
 
 # ---------------------------------------------------------------------------
@@ -293,12 +293,12 @@ async def _fetch_annotation_or_404(
         "The ``tenant_id`` is derived from the JWT; ``created_by`` is the JWT sub. "
         "Rows are frozen post-insert except for ``is_visible`` and "
         "``acknowledged_*`` columns (DB trigger enforces this). "
-        "Roles: data_steward, esg_manager."
+        "Roles: editor, admin."
     ),
     responses={
         201: {"description": "Annotation created"},
         401: {"description": "Not authenticated"},
-        403: {"description": "Requires data_steward or esg_manager role"},
+        403: {"description": "Requires editor or admin role"},
         422: {"description": "Payload validation failed"},
     },
 )
@@ -311,7 +311,7 @@ async def create_annotation(
 
     Args:
         body: Validated annotation payload.
-        user: Authenticated user (data_steward or esg_manager).
+        user: Authenticated user (editor or admin).
         session: Async DB session with RLS GUCs set.
 
     Returns:
@@ -375,15 +375,15 @@ async def create_annotation(
     description=(
         "Returns annotations filtered by ``chart_key`` (required) and optionally "
         "``anchor_year``. By default only ``is_visible=true`` rows are returned. "
-        "``include_hidden=true`` is restricted to esg_manager and auditor roles. "
-        "``data_steward`` always receives only visible annotations. "
+        "``include_hidden=true`` is restricted to admin and viewer roles. "
+        "``editor`` always receives only visible annotations. "
         "Roles: all authenticated."
     ),
     responses={
         200: {"description": "List of annotations"},
         400: {"description": "chart_key is required"},
         401: {"description": "Not authenticated"},
-        403: {"description": "include_hidden=true requires esg_manager or auditor role"},
+        403: {"description": "include_hidden=true requires admin or viewer role"},
     },
 )
 async def list_annotations(
@@ -399,7 +399,7 @@ async def list_annotations(
         chart_key: Required logical chart identifier to filter by.
         anchor_year: Optional year filter.
         include_hidden: When True, include is_visible=False rows. Requires
-            esg_manager or auditor role.
+            admin or viewer role.
         user: Authenticated user (any role).
         session: Async DB session with RLS GUCs set.
 
@@ -408,7 +408,7 @@ async def list_annotations(
         ``created_at`` descending.
 
     Raises:
-        HTTPException: 403 if data_steward requests include_hidden=true.
+        HTTPException: 403 if editor requests include_hidden=true.
     """
     correlation_id = get_correlation_id()
     log = logger.bind(
@@ -421,7 +421,7 @@ async def list_annotations(
         raise _problem(
             status.HTTP_403_FORBIDDEN,
             "Forbidden",
-            "include_hidden=true requires esg_manager or auditor role.",
+            "include_hidden=true requires admin or viewer role.",
             "insufficient_role_for_hidden",
             correlation_id,
         )
@@ -468,12 +468,12 @@ async def list_annotations(
         "Updates only ``is_visible`` on the specified annotation. "
         "The DB trigger permits this mutation; attempts to change any other "
         "frozen column would raise a 409. "
-        "Roles: data_steward, esg_manager."
+        "Roles: editor, admin."
     ),
     responses={
         200: {"description": "Visibility updated"},
         401: {"description": "Not authenticated"},
-        403: {"description": "Requires data_steward or esg_manager role"},
+        403: {"description": "Requires editor or admin role"},
         404: {"description": "Annotation not found in this tenant"},
         409: {"description": "DB trigger blocked the mutation (frozen column)"},
     },
@@ -489,7 +489,7 @@ async def patch_visibility(
     Args:
         annotation_id: UUID from the URL path.
         body: Visibility payload with ``is_visible`` boolean.
-        user: Authenticated user (data_steward or esg_manager).
+        user: Authenticated user (editor or admin).
         session: Async DB session with RLS GUCs set.
 
     Returns:
@@ -534,24 +534,24 @@ async def patch_visibility(
     "/{annotation_id}/acknowledge",
     response_model=AnnotationResponse,
     status_code=status.HTTP_200_OK,
-    summary="Acknowledge an annotation (esg_manager only)",
+    summary="Acknowledge an annotation (admin only)",
     description=(
         "Sets ``acknowledged_by`` to the JWT sub claim and ``acknowledged_at`` "
         "to the current UTC time. Returns 409 if the annotation has already been "
         "acknowledged. "
-        "Role: esg_manager only."
+        "Role: admin only."
     ),
     responses={
         200: {"description": "Annotation acknowledged"},
         401: {"description": "Not authenticated"},
-        403: {"description": "Requires esg_manager role"},
+        403: {"description": "Requires admin role"},
         404: {"description": "Annotation not found in this tenant"},
         409: {"description": "Already acknowledged"},
     },
 )
 async def acknowledge_annotation(
     annotation_id: uuid.UUID,
-    user: CurrentUser = Depends(require_role("esg_manager")),
+    user: CurrentUser = Depends(require_role("admin")),
     session: AsyncSession = Depends(get_db),
 ) -> AnnotationResponse:
     """Acknowledge a chart annotation.
@@ -560,7 +560,7 @@ async def acknowledge_annotation(
 
     Args:
         annotation_id: UUID from the URL path.
-        user: Authenticated esg_manager.
+        user: Authenticated admin.
         session: Async DB session with RLS GUCs set.
 
     Returns:

@@ -34,7 +34,7 @@ class RecalculationDecision:
             ``old_total_tco2e == 0`` (no division by zero — see invariant).
         threshold_pct: Fixed 5% policy threshold.
         reason_code: 'STRUCTURAL_CHANGE', 'METHODOLOGY_CHANGE', or None.
-        notify_roles: Roles to notify (``('esg_manager', 'data_steward')`` when triggered).
+        notify_roles: Roles to notify (``('admin', 'editor')`` when triggered).
     """
 
     triggered: bool
@@ -83,7 +83,7 @@ def evaluate(
         relative_delta=rel_delta,
         threshold_pct=_THRESHOLD_PCT,
         reason_code=reason_code if triggered else None,
-        notify_roles=("esg_manager", "data_steward") if triggered else (),
+        notify_roles=("admin", "editor") if triggered else (),
     )
 
 

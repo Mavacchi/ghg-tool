@@ -10,7 +10,7 @@ Security constraints:
 - Temp CSVs for the orchestrator use NamedTemporaryFile(delete=True) and are
   unlinked immediately after the orchestrator returns.
 - tenant_id always sourced from the JWT; never from the request body.
-- data_steward OR esg_manager required (raw_ingestions.import permission).
+- editor OR admin required (raw_ingestions.import permission).
 
 Append-only guarantee: the endpoint only INSERTs new rows.  The same
 ON CONFLICT DO NOTHING idempotency-key guard used by seed_demo_data.py applies.
@@ -285,12 +285,12 @@ def _do_db_work(
         "If all DQ-CRIT gates pass the rows are appended (ON CONFLICT DO NOTHING "
         "on idempotency_key) and a new raw.ingestion_batches row is created.  "
         "Max upload size: 10 MB.  "
-        "Requires data_steward or esg_manager role."
+        "Requires editor or admin role."
     ),
     responses={
         200: {"description": "Import successful"},
         401: {"description": "Not authenticated"},
-        403: {"description": "Insufficient role (data_steward or esg_manager required)"},
+        403: {"description": "Insufficient role (editor or admin required)"},
         422: {"description": "Workbook parse error or DQ-CRIT gate blocked the import"},
     },
 )
@@ -308,7 +308,7 @@ async def import_excel(
     Args:
         request: The incoming HTTP request (used for ip_address / user_agent).
         workbook: Uploaded .xlsx file from multipart form data.
-        user: Authenticated user (data_steward or esg_manager).
+        user: Authenticated user (editor or admin).
         session: Authenticated async DB session with RLS GUCs set.
 
     Returns:

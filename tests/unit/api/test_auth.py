@@ -29,10 +29,10 @@ class TestJWT:
         """Access token round-trips with correct claims."""
         sub = str(uuid.uuid4())
         tenant = str(uuid.uuid4())
-        token = create_access_token(sub=sub, role="data_steward", tenant_id=tenant)
+        token = create_access_token(sub=sub, role="editor", tenant_id=tenant)
         claims = decode_token(token)
         assert claims["sub"] == sub
-        assert claims["role"] == "data_steward"
+        assert claims["role"] == "editor"
         assert claims["tenant_id"] == tenant
         assert claims["token_type"] == "access"
 
@@ -131,7 +131,7 @@ class TestAuthRouter:
         """POST /auth/refresh with an access token (not refresh) returns 401."""
         token = create_access_token(
             sub=str(uuid.uuid4()),
-            role="data_steward",
+            role="editor",
             tenant_id=str(uuid.uuid4()),
         )
         with TestClient(app, raise_server_exceptions=False) as client:
@@ -168,7 +168,7 @@ class TestAuthRouter:
         import uuid as _uuid
         mock_user_row = MagicMock()
         mock_user_row.is_active = True
-        mock_user_row.role_code = "data_steward"
+        mock_user_row.role_code = "editor"
         mock_user_row.tenant_id = _uuid.UUID(tenant)
 
         # Session check result for the old refresh jti: None (legacy token).

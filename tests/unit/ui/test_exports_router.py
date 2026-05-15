@@ -15,7 +15,7 @@ from ghg_tool.api.main import app
 def mock_user() -> MagicMock:
     user = MagicMock()
     user.sub = "test_user_001"
-    user.role = "esg_manager"
+    user.role = "admin"
     user.tenant_id = "aaaaaaaa-0000-0000-0000-000000000001"
     return user
 

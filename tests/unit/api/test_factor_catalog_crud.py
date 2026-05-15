@@ -14,7 +14,7 @@ Test matrix:
 - test_delete_published_returns_422
 - test_delete_unknown_returns_404
 - test_delete_cross_tenant_returns_404
-- test_patch_unauth_role_returns_403 (auditor, esg_manager)
+- test_patch_unauth_role_returns_403 (viewer, admin)
 - test_delete_unauth_role_returns_403
 
 All DB access is mocked via dependency_overrides. No live PostgreSQL
@@ -46,9 +46,9 @@ from ghg_tool.api.main import app
 
 _TENANT_A = str(uuid.uuid4())
 _TENANT_B = str(uuid.uuid4())
-_USER_DS = str(uuid.uuid4())      # data_steward
-_USER_ESG = str(uuid.uuid4())     # esg_manager
-_USER_AU = str(uuid.uuid4())      # auditor
+_USER_DS = str(uuid.uuid4())      # editor
+_USER_ESG = str(uuid.uuid4())     # admin
+_USER_AU = str(uuid.uuid4())      # viewer
 _FACTOR_UUID = uuid.uuid4()
 
 _PATCH_URL = f"/api/v1/factor-catalog/{_FACTOR_UUID}"
@@ -199,7 +199,7 @@ class TestPatchDraft:
         """PATCH with a new value on a draft factor returns 200 with updated row."""
         factor = _make_factor_orm(is_published=False, value=1.23)
         app.dependency_overrides[get_current_user] = _auth_override(
-            "data_steward", user_id=_USER_DS
+            "editor", user_id=_USER_DS
         )
         app.dependency_overrides[get_db] = _db_for_patch(factor)
 
@@ -216,7 +216,7 @@ class TestPatchDraft:
         """PATCH with only applicability_note leaves other fields untouched."""
         factor = _make_factor_orm(is_published=False, value=5.0, unit="kgCO2e/kWh")
         app.dependency_overrides[get_current_user] = _auth_override(
-            "data_steward", user_id=_USER_DS
+            "editor", user_id=_USER_DS
         )
         app.dependency_overrides[get_db] = _db_for_patch(factor)
 
@@ -233,7 +233,7 @@ class TestPatchDraft:
         """PATCH must write an AuditLog row via session.add."""
         factor = _make_factor_orm(is_published=False, value=1.0)
         app.dependency_overrides[get_current_user] = _auth_override(
-            "data_steward", user_id=_USER_DS
+            "editor", user_id=_USER_DS
         )
 
         add_calls: list[Any] = []
@@ -272,7 +272,7 @@ class TestPatchPublished:
     def test_patch_published_returns_422_factor_already_published(self) -> None:
         factor = _make_factor_orm(is_published=True, value=1.5)
         app.dependency_overrides[get_current_user] = _auth_override(
-            "data_steward", user_id=_USER_DS
+            "editor", user_id=_USER_DS
         )
         app.dependency_overrides[get_db] = _db_for_patch(factor)
 
@@ -291,7 +291,7 @@ class TestPatchNotFound:
     def test_patch_cross_tenant_returns_404(self) -> None:
         """Factor owned by tenant_A is invisible to tenant_B -> 404."""
         app.dependency_overrides[get_current_user] = _auth_override(
-            "data_steward", tenant_id=_TENANT_B, user_id=_USER_DS
+            "editor", tenant_id=_TENANT_B, user_id=_USER_DS
         )
         # Repository returns None for the cross-tenant query.
         app.dependency_overrides[get_db] = _db_for_patch(None)
@@ -307,9 +307,9 @@ class TestPatchNotFound:
 class TestPatchAuth:
     """Authentication and authorisation failures for PATCH."""
 
-    @pytest.mark.parametrize("role", ["auditor", "esg_manager"])
+    @pytest.mark.parametrize("role", ["viewer", "admin"])
     def test_patch_unauth_role_returns_403(self, role: str) -> None:
-        """auditor and esg_manager do not have factor_catalog:write -> 403."""
+        """viewer and admin do not have factor_catalog:write -> 403."""
         factor = _make_factor_orm(is_published=False)
         app.dependency_overrides[get_current_user] = _auth_override(role)
         app.dependency_overrides[get_db] = _db_for_patch(factor)
@@ -332,7 +332,7 @@ class TestDeleteDraft:
         """DELETE on a draft factor returns 204 No Content."""
         factor = _make_factor_orm(is_published=False, value=1.23)
         app.dependency_overrides[get_current_user] = _auth_override(
-            "data_steward", user_id=_USER_DS
+            "editor", user_id=_USER_DS
         )
         app.dependency_overrides[get_db] = _db_for_delete(factor)
 
@@ -349,7 +349,7 @@ class TestDeletePublished:
     def test_delete_published_returns_422(self) -> None:
         factor = _make_factor_orm(is_published=True, value=1.5)
         app.dependency_overrides[get_current_user] = _auth_override(
-            "data_steward", user_id=_USER_DS
+            "editor", user_id=_USER_DS
         )
         app.dependency_overrides[get_db] = _db_for_delete(factor)
 
@@ -368,7 +368,7 @@ class TestDeleteNotFound:
     def test_delete_unknown_returns_404(self) -> None:
         """Repository returns None for an unknown UUID -> 404."""
         app.dependency_overrides[get_current_user] = _auth_override(
-            "data_steward", user_id=_USER_DS
+            "editor", user_id=_USER_DS
         )
         app.dependency_overrides[get_db] = _db_for_delete(None)
 
@@ -382,7 +382,7 @@ class TestDeleteNotFound:
     def test_delete_cross_tenant_returns_404(self) -> None:
         """Factor owned by tenant_A is invisible to tenant_B -> 404."""
         app.dependency_overrides[get_current_user] = _auth_override(
-            "data_steward", tenant_id=_TENANT_B, user_id=_USER_DS
+            "editor", tenant_id=_TENANT_B, user_id=_USER_DS
         )
         app.dependency_overrides[get_db] = _db_for_delete(None)
 
@@ -395,9 +395,9 @@ class TestDeleteNotFound:
 class TestDeleteAuth:
     """Authentication and authorisation failures for DELETE."""
 
-    @pytest.mark.parametrize("role", ["auditor", "esg_manager"])
+    @pytest.mark.parametrize("role", ["viewer", "admin"])
     def test_delete_unauth_role_returns_403(self, role: str) -> None:
-        """auditor and esg_manager do not have factor_catalog:write -> 403."""
+        """viewer and admin do not have factor_catalog:write -> 403."""
         factor = _make_factor_orm(is_published=False)
         app.dependency_overrides[get_current_user] = _auth_override(role)
         app.dependency_overrides[get_db] = _db_for_delete(factor)

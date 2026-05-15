@@ -1,15 +1,15 @@
 """Unit tests for POST /api/v1/factor-catalog/{factor_uuid}/publish.
 
 Updated for the two-eyes approval workflow (FR-12, ISAE 3000 §A99).
-The first esg_manager call now returns 202 (approval requested) rather
+The first admin call now returns 202 (approval requested) rather
 than 200 (factor published). Full second-manager approval tests live
 in test_factor_publish_approval.py.
 
 Covers:
 - happy path: first call -> 202 (approval row created, factor NOT published)
 - 401 unauthenticated
-- 403 wrong role (auditor)
-- 403 wrong role (data_steward)
+- 403 wrong role (viewer)
+- 403 wrong role (editor)
 - 404 unknown UUID
 - 404 cross-tenant isolation
 - 409 already published
@@ -45,9 +45,9 @@ from ghg_tool.api.main import app
 
 _TENANT_A = str(uuid.uuid4())
 _TENANT_B = str(uuid.uuid4())
-_USER_DS = str(uuid.uuid4())    # data_steward
-_USER_ESG = str(uuid.uuid4())   # esg_manager
-_USER_AU = str(uuid.uuid4())    # auditor
+_USER_DS = str(uuid.uuid4())    # editor
+_USER_ESG = str(uuid.uuid4())   # admin
+_USER_AU = str(uuid.uuid4())    # viewer
 _FACTOR_UUID = uuid.uuid4()
 
 _BASE_URL = f"/api/v1/factor-catalog/{_FACTOR_UUID}/publish"
@@ -126,7 +126,7 @@ def _db_returning(factor: MagicMock | None) -> Any:
     test_factor_publish_approval.py instead.
 
     ``session.refresh`` is kept for completeness but is only reached on the
-    second esg_manager's call (state 3 in the workflow).
+    second admin's call (state 3 in the workflow).
     """
 
     async def _gen() -> Any:
@@ -142,7 +142,7 @@ def _db_returning(factor: MagicMock | None) -> Any:
         no_approval_result = MagicMock()
         no_approval_result.scalar_one_or_none = MagicMock(return_value=None)
 
-        # Call 3: conditional UPDATE (only reached by the second esg_manager)
+        # Call 3: conditional UPDATE (only reached by the second admin)
         update_result = MagicMock()
         update_result.rowcount = 1
 
@@ -186,16 +186,16 @@ class TestPublishHappyPath:
     """First publish call (no prior approval) creates PENDING approval row -> 202.
 
     Under the two-eyes approval workflow (FR-12, ISAE 3000 §A99) the first
-    esg_manager to call /publish does NOT immediately publish the factor.
+    admin to call /publish does NOT immediately publish the factor.
     Instead, an approval row is created with decision=PENDING and HTTP 202
-    is returned. The factor is published by the second esg_manager's call.
+    is returned. The factor is published by the second admin's call.
     Full second-manager approval tests live in test_factor_publish_approval.py.
     """
 
     def test_happy_path_returns_202_with_approval_id(self) -> None:
         factor = _make_factor_orm(is_published=False, value=1.23)
         app.dependency_overrides[get_current_user] = _auth_override(
-            "esg_manager", user_id=_USER_ESG
+            "admin", user_id=_USER_ESG
         )
         app.dependency_overrides[get_db] = _db_returning(factor)
 
@@ -211,7 +211,7 @@ class TestPublishHappyPath:
         """Factor must remain unpublished; the ORM is_published stays False."""
         factor = _make_factor_orm(is_published=False, value=5.0)
         app.dependency_overrides[get_current_user] = _auth_override(
-            "esg_manager", user_id=_USER_ESG
+            "admin", user_id=_USER_ESG
         )
         app.dependency_overrides[get_db] = _db_returning(factor)
 
@@ -224,7 +224,7 @@ class TestPublishHappyPath:
         """publish_notes is accepted at schema level; reason_code is stored."""
         factor = _make_factor_orm(is_published=False, value=2.5)
         app.dependency_overrides[get_current_user] = _auth_override(
-            "esg_manager", user_id=_USER_ESG
+            "admin", user_id=_USER_ESG
         )
         app.dependency_overrides[get_db] = _db_returning(factor)
 
@@ -247,7 +247,7 @@ class TestPublishHappyPath:
             is_licence_only=True,
         )
         app.dependency_overrides[get_current_user] = _auth_override(
-            "esg_manager", user_id=_USER_ESG
+            "admin", user_id=_USER_ESG
         )
         app.dependency_overrides[get_db] = _db_returning(factor)
 
@@ -270,9 +270,9 @@ class TestPublishAuth:
         assert resp.status_code == 401
 
     def test_403_auditor_role(self) -> None:
-        """auditor may not publish factors."""
+        """viewer may not publish factors."""
         factor = _make_factor_orm(is_published=False)
-        app.dependency_overrides[get_current_user] = _auth_override("auditor")
+        app.dependency_overrides[get_current_user] = _auth_override("viewer")
         app.dependency_overrides[get_db] = _db_returning(factor)
 
         with TestClient(app, raise_server_exceptions=False) as client:
@@ -281,10 +281,10 @@ class TestPublishAuth:
         assert resp.status_code == 403
 
     def test_403_data_steward_role(self) -> None:
-        """data_steward may create drafts but NOT publish."""
+        """editor may create drafts but NOT publish."""
         factor = _make_factor_orm(is_published=False)
         app.dependency_overrides[get_current_user] = _auth_override(
-            "data_steward", user_id=_USER_DS
+            "editor", user_id=_USER_DS
         )
         app.dependency_overrides[get_db] = _db_returning(factor)
 
@@ -299,7 +299,7 @@ class TestPublishNotFound:
 
     def test_404_unknown_uuid(self) -> None:
         """Repository returns None for an unknown UUID -> 404."""
-        app.dependency_overrides[get_current_user] = _auth_override("esg_manager")
+        app.dependency_overrides[get_current_user] = _auth_override("admin")
         app.dependency_overrides[get_db] = _db_returning(None)
 
         with TestClient(app, raise_server_exceptions=False) as client:
@@ -317,7 +317,7 @@ class TestPublishNotFound:
         None (simulating the RLS/WHERE tenant filter) produces a 404.
         """
         app.dependency_overrides[get_current_user] = _auth_override(
-            "esg_manager", tenant_id=_TENANT_B
+            "admin", tenant_id=_TENANT_B
         )
         app.dependency_overrides[get_db] = _db_returning(None)
 
@@ -332,7 +332,7 @@ class TestPublishConflict:
 
     def test_409_already_published(self) -> None:
         factor = _make_factor_orm(is_published=True, value=1.5)
-        app.dependency_overrides[get_current_user] = _auth_override("esg_manager")
+        app.dependency_overrides[get_current_user] = _auth_override("admin")
         app.dependency_overrides[get_db] = _db_returning(factor)
 
         with TestClient(app, raise_server_exceptions=False) as client:
@@ -345,7 +345,7 @@ class TestPublishConflict:
 
     def test_409_body_contains_factor_identity(self) -> None:
         factor = _make_factor_orm(is_published=True, value=1.5)
-        app.dependency_overrides[get_current_user] = _auth_override("esg_manager")
+        app.dependency_overrides[get_current_user] = _auth_override("admin")
         app.dependency_overrides[get_db] = _db_returning(factor)
 
         with TestClient(app, raise_server_exceptions=False) as client:
@@ -363,7 +363,7 @@ class TestPublishValidationErrors:
     def test_422_is_tbc_true(self) -> None:
         """TBC factors cannot be published - their value is not yet pinned."""
         factor = _make_factor_orm(is_published=False, is_tbc=True, value=None)
-        app.dependency_overrides[get_current_user] = _auth_override("esg_manager")
+        app.dependency_overrides[get_current_user] = _auth_override("admin")
         app.dependency_overrides[get_db] = _db_returning(factor)
 
         with TestClient(app, raise_server_exceptions=False) as client:
@@ -382,7 +382,7 @@ class TestPublishValidationErrors:
             is_licence_only=False,
             value=None,
         )
-        app.dependency_overrides[get_current_user] = _auth_override("esg_manager")
+        app.dependency_overrides[get_current_user] = _auth_override("admin")
         app.dependency_overrides[get_db] = _db_returning(factor)
 
         with TestClient(app, raise_server_exceptions=False) as client:
@@ -396,7 +396,7 @@ class TestPublishValidationErrors:
     def test_422_publish_notes_too_long(self) -> None:
         """publish_notes exceeding 2000 chars fails Pydantic validation at the body level."""
         factor = _make_factor_orm(is_published=False, value=1.0)
-        app.dependency_overrides[get_current_user] = _auth_override("esg_manager")
+        app.dependency_overrides[get_current_user] = _auth_override("admin")
         app.dependency_overrides[get_db] = _db_returning(factor)
 
         with TestClient(app, raise_server_exceptions=False) as client:
@@ -415,7 +415,7 @@ class TestPublishAuditLog:
         """First /publish call emits 'factor_approval_requested' log event."""
         factor = _make_factor_orm(is_published=False, value=9.9)
         app.dependency_overrides[get_current_user] = _auth_override(
-            "esg_manager", user_id=_USER_ESG
+            "admin", user_id=_USER_ESG
         )
         app.dependency_overrides[get_db] = _db_returning(factor)
 
@@ -462,7 +462,7 @@ class TestPublishRequestSchemaValidation:
     def test_422_missing_reason_code(self):
         """An empty body now fails Pydantic validation before the handler runs."""
         app.dependency_overrides[get_current_user] = _auth_override(
-            "esg_manager", user_id=_USER_ESG
+            "admin", user_id=_USER_ESG
         )
         app.dependency_overrides[get_db] = _db_returning(
             _make_factor_orm(is_published=False, value=1.0)
@@ -474,7 +474,7 @@ class TestPublishRequestSchemaValidation:
     def test_422_invalid_reason_code(self):
         """Unknown reason_code value rejected by the Literal enum."""
         app.dependency_overrides[get_current_user] = _auth_override(
-            "esg_manager", user_id=_USER_ESG
+            "admin", user_id=_USER_ESG
         )
         app.dependency_overrides[get_db] = _db_returning(
             _make_factor_orm(is_published=False, value=1.0)
@@ -490,7 +490,7 @@ class TestPublishRequestSchemaValidation:
         """publish_notes cap is 2000 chars; valid length -> 202 (not 422)."""
         factor = _make_factor_orm(is_published=False, value=1.0)
         app.dependency_overrides[get_current_user] = _auth_override(
-            "esg_manager", user_id=_USER_ESG
+            "admin", user_id=_USER_ESG
         )
         app.dependency_overrides[get_db] = _db_returning(factor)
         with TestClient(app, raise_server_exceptions=False) as client:

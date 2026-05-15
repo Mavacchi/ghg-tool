@@ -4,7 +4,7 @@ Three endpoints (FR-26 / ESRS 2 BP-2 / CSRD Article 23 restatement):
 
   POST /api/v1/reconciliation/snapshots
       Freeze the current consolidated emissions into a calc.report_snapshots
-      row.  esg_manager only.  Writes a calc.audit_log row in the same
+      row.  admin only.  Writes a calc.audit_log row in the same
       transaction and forwards a SIEM event.
 
   GET  /api/v1/reconciliation/snapshots?anno=YYYY
@@ -196,7 +196,7 @@ async def _fetch_active_emissions(
     "/snapshots",
     response_model=SnapshotCreateResponse,
     status_code=status.HTTP_201_CREATED,
-    summary="Freeze a calc.report_snapshots row (esg_manager only)",
+    summary="Freeze a calc.report_snapshots row (admin only)",
     description=(
         "Captures the current consolidated emissions for the requested year "
         "as an immutable snapshot.  Used as the reference state for CSRD "
@@ -206,13 +206,13 @@ async def _fetch_active_emissions(
     responses={
         201: {"description": "Snapshot created"},
         401: {"description": "Not authenticated"},
-        403: {"description": "esg_manager role required"},
+        403: {"description": "admin role required"},
         422: {"description": "Validation error"},
     },
 )
 async def create_snapshot(
     body: SnapshotCreateRequest,
-    user: CurrentUser = Depends(require_role("esg_manager")),
+    user: CurrentUser = Depends(require_role("admin")),
     session: AsyncSession = Depends(get_db),
 ) -> SnapshotCreateResponse:
     """Freeze the current consolidated emissions into a new snapshot row."""

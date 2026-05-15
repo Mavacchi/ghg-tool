@@ -6,9 +6,9 @@
 
 | Field | Value |
 |---|---|
-| Version | 1.2.3 |
+| Version | 1.2.4 |
 | Date | 2026-05-15 |
-| Author | requirements-agent (v1.0.0); user clarifications (v1.1.0); Phase 2 integration + OI-7/8/10 (v1.2.0); Phase 3 DQ remediation + Phase 1 row-count corrections (v1.2.1); v1.2.2 (skipped in prior patch sequence); v1.2.3 FR-34 dual_run_id FK + reciprocity + frozen-pair AC (requirements-agent, Q1 decision A + Q3 decision, 2026-05-15) |
+| Author | requirements-agent (v1.0.0); user clarifications (v1.1.0); Phase 2 integration + OI-7/8/10 (v1.2.0); Phase 3 DQ remediation + Phase 1 row-count corrections (v1.2.1); v1.2.2 (skipped in prior patch sequence); v1.2.3 FR-34 dual_run_id FK + reciprocity + frozen-pair AC (requirements-agent, Q1 decision A + Q3 decision, 2026-05-15); v1.2.4 role renaming M24: esg_manager->admin, data_steward->editor, auditor->viewer |
 | Review Status | APPROVED — Phase 1 + Phase 2 + Phase 3 closed; v1.2.1 patches: (a) VIANO_GARGOLA GAS_NAT 2024 = 0 reale + 2025 = 11 Sm³ commissioning confirmed (CRIT-01/04/05 closed via ETL zero-row), (b) Cat 3 metadata defaulting rule (CRIT-02 closed via ETL), (c) VIANO 2025 fermo parziale = dati reali, OI-2 closed, (d) SASSUOLO BENZINA 2025 fleet expansion confirmed, (e) row counts corrected: scope1 = 31 native (32 with VIANO_GARGOLA synthesised zero), scope3 = 100 native, Cat 1 2024 = 14 records (not 15), (f) Cat 3 vs Σ Scope 1 delta = 0 (Phase 1 arithmetic error corrected), (g) richer CSV schema documented (Fonte_Dato/Qualità_Dato/Stato_Dato/Note + Strumento_MB) |
 | Task ID | ghg-tool-phase-1 |
 | Base Year | 2024 |
@@ -20,6 +20,10 @@
 ---
 
 ## 2. Scope & Objectives
+
+**Role naming**: from migration M24 the application roles are `admin / editor / viewer`.
+Pre-M24 deployments used `esg_manager / data_steward / auditor` (1:1 mapping).
+Separation-of-duties per ISAE 3000 §A99 is unchanged — only the labels differ.
 
 ### 2.1 What This Tool Does
 
@@ -50,12 +54,12 @@ Primary deliverables for v1:
 
 | Stakeholder | Responsibility | RBAC Role | Output Expected |
 |---|---|---|---|
-| ESG Manager | System owner; validates methodology, approves reports, signs off on CSRD disclosure | `esg_manager` | Dashboard, PDF CSRD report, Excel export |
-| Data Steward | Inputs and validates raw activity data; manages factor catalog updates | `data_steward` | Data ingestion confirmation, DQ gate approval |
-| External Auditor | Read-only review of calculations, audit trail, and factor provenance | `auditor` | Audit trail report, immutability evidence, factor catalog metadata |
-| Executive Sponsor (CFO/CEO) | Receives top-level KPI summary; approves public disclosure | `esg_manager` (read, no write) | Executive summary page of PDF, intensity ratios |
-| IT Operations | Deploys and maintains Docker containers, CI/CD pipeline, backups | `data_steward` (infra scope only) | Deployment runbooks, health metrics |
-| External Assurance Provider (ISAE 3000 Limited) | Independent limited assurance engagement per CSRD requirement (years 2024–2026) | `auditor` | Full data lineage from raw row → consolidated emission, factor sources, GWP documentation |
+| ESG Manager | System owner; validates methodology, approves reports, signs off on CSRD disclosure | `admin` (formerly `esg_manager`) | Dashboard, PDF CSRD report, Excel export |
+| Data Steward | Inputs and validates raw activity data; manages factor catalog updates | `editor` (formerly `data_steward`) | Data ingestion confirmation, DQ gate approval |
+| External Auditor | Read-only review of calculations, audit trail, and factor provenance | `viewer` (formerly `auditor`) | Audit trail report, immutability evidence, factor catalog metadata |
+| Executive Sponsor (CFO/CEO) | Receives top-level KPI summary; approves public disclosure | `admin` (read, no write) | Executive summary page of PDF, intensity ratios |
+| IT Operations | Deploys and maintains Docker containers, CI/CD pipeline, backups | `editor` (infra scope only) | Deployment runbooks, health metrics |
+| External Assurance Provider (ISAE 3000 Limited) | Independent limited assurance engagement per CSRD requirement (years 2024–2026) | `viewer` | Full data lineage from raw row → consolidated emission, factor sources, GWP documentation |
 
 **Note**: IT Operations does not require write access to emissions data; separation of duties must be enforced at DB level (RLS) and application level (RBAC).
 
@@ -231,7 +235,7 @@ Each omission produces an explicit zero-line in every ESRS E1-6 output with reas
 | FR-15 | Scope 3 Cat 7 calculation | Calculate tCO2e for employee commuting (Commuting_Auto distance-based) using DEFRA car factors. FTE count (506 in 2024, 484 in 2025) is the official HR employee headcount (user-confirmed 2026-05-13). km/FTE/year (8,800) remains an estimation input. | Factor = DEFRA average car; FTE from HR (confirmed 2026-05-13); km/FTE estimation basis documented; any change to FTE requires recalculation and new row with superseded_by. | MUST | data-analyst |
 | FR-16 | Scope 3 Cat 9 calculation | Calculate tCO2e for downstream transport (Italia_Strada, Europa_Strada, Export_Nave) using distance-based method and DEFRA freight factors by mode (HGV road, transoceanic sea). | Mode-specific DEFRA factors; tkm source methodology (proxy sectorial, load factor 27t) documented; market share percentages stored as metadata. | MUST | data-analyst |
 | FR-17 | Scope 3 Cat 12 calculation | Calculate tCO2e for end-of-life treatment using mass-based method. Discarica 30% / Riciclo 70% split from proxy sectoral data. Factor source: ecoinvent v3.10. | Split percentages stored as assumptions in metadata; ecoinvent v3.10 factor referenced; zero credit for recycling unless recycled content method explicitly chosen. | MUST | data-analyst |
-| FR-18 | Cat 11 zero-line disclosure | Scope 3 Cat 11 must appear in all ESRS E1-6 outputs as an explicit disclosed line with value 0 and rationale: "Omitted — Immaterial: ceramic tiles are passive products with no operational energy consumption during use phase." | Cat 11 line present in every ESRS E1-6 table; rationale text stored in disclosure_notes field; auditor-visible. | MUST | data-analyst |
+| FR-18 | Cat 11 zero-line disclosure | Scope 3 Cat 11 must appear in all ESRS E1-6 outputs as an explicit disclosed line with value 0 and rationale: "Omitted — Immaterial: ceramic tiles are passive products with no operational energy consumption during use phase." | Cat 11 line present in every ESRS E1-6 table; rationale text stored in disclosure_notes field; `viewer` (auditor)-visible. | MUST | data-analyst |
 | FR-19 | GWP set enforcement | System enforces a single GWP set per report run. AR6 (CH4=27.9, N2O=273) is default for CSRD ESRS E1-6 disclosures. **AR5 (CH4=28, N2O=265, no climate-carbon feedback)** supported as production-ready dual-track for EU ETS reporting (per OI-7 closure, IANO Annex I Activity 17) and for legacy comparison. Mixed GWP sets within a single report are a hard block. AR4 values (CH4=25, N2O=298) NOT used by this tool — historical only. | Run metadata includes gwp_set field; validation rejects mixed sets; AR5 runs produce ETS-fit output clearly labelled "AR5 — EU ETS dual-track or legacy comparison"; AR6 is the primary CSRD output. | MUST | data-engineer |
 | FR-20 | Append-only emission storage | All calculated emissions stored in `emissions_consolidated` table per schema in Section 10. Insert only; UPDATE and DELETE blocked by DB trigger. | Trigger verified by test (attempt UPDATE → exception); DQ checks pass pre-insert; no orphan rows. | MUST | data-engineer |
 | FR-21 | Restatement / correction workflow | Corrections to prior-year data create a new row with updated values; the superseded row receives superseded_by = new row's ID and valid_to = correction timestamp. | Old row accessible in full history; new row identifiable as correction; API endpoint /corrections returns full chain; reason_code is mandatory. | MUST | data-engineer |
@@ -239,13 +243,13 @@ Each omission produces an explicit zero-line in every ESRS E1-6 output with reas
 | FR-23 | Streamlit dashboard — drill-down | Dashboard exposes 5-level drill-down: Scope → Site → Category → Year → Subcategory. All charts are colorblind-safe (Okabe-Ito or equivalent). Tooltips on data points expose: factor_source, factor_version, gwp_set, methodology. | Drill-down navigation functional for all in-scope categories; tooltip data sourced from DB metadata fields; palette verified against WCAG contrast AA aspirational. | MUST | visualization |
 | FR-24 | Dashboard — YoY comparison | Dashboard includes dedicated YoY view comparing 2024 (base year, consolidated) vs 2025 (partial — flagged with data quality warning banner if OI-2 unresolved). | YoY delta (absolute tCO2e and %) shown per scope and category; 2025 VIANO anomaly displayed with DQ warning annotation. | MUST | visualization |
 | FR-25 | Dashboard — intensity metrics | Dashboard displays KPI-09 (tCO2e/t produced), KPI-10 (tCO2e/M€ revenue), KPI-11 (tCO2e/FTE) with reference input fields for production tonnage and revenue. | Intensity ratios update dynamically from reference inputs; FTE sourced from HR reference table; all intensities show both LB and MB Scope 2 variants. | MUST | visualization |
-| FR-26 | Recalculation policy trigger | System detects and flags when a structural change (site acquisition/divestiture) or methodology change causes >5% shift in base-year (2024) Scope 1+2 total tCO2e. Triggers mandatory base-year recalculation workflow. | Automated comparison post-recalculation; if delta > 5% threshold, workflow creates notification to esg_manager and data_steward; reason_code required. | MUST | data-engineer |
-| FR-27 | Excel multi-sheet export | Export workbook with sheets: (1) Emissions by Scope, (2) Emissions by Site × Year, (3) Scope 3 by Category, (4) Audit Trail (raw_row_id, factor, gwp_set per row), (5) Factor Catalog Snapshot, (6) Metadata (run ID, timestamp, gwp_set, version). | Export generated on demand by esg_manager or data_steward; file locked for edit (xlsx protection); all sheets reference same correlation_id. | MUST | visualization |
+| FR-26 | Recalculation policy trigger | System detects and flags when a structural change (site acquisition/divestiture) or methodology change causes >5% shift in base-year (2024) Scope 1+2 total tCO2e. Triggers mandatory base-year recalculation workflow. | Automated comparison post-recalculation; if delta > 5% threshold, workflow creates notification to `admin` (formerly esg_manager) and `editor` (formerly data_steward); reason_code required. | MUST | data-engineer |
+| FR-27 | Excel multi-sheet export | Export workbook with sheets: (1) Emissions by Scope, (2) Emissions by Site × Year, (3) Scope 3 by Category, (4) Audit Trail (raw_row_id, factor, gwp_set per row), (5) Factor Catalog Snapshot, (6) Metadata (run ID, timestamp, gwp_set, version). | Export generated on demand by `admin` or `editor` (formerly esg_manager or data_steward); file locked for edit (xlsx protection); all sheets reference same correlation_id. | MUST | visualization |
 | FR-28 | CSRD-ready PDF report | Generate PDF with ESRS E1-6 tables: §44(a) Scope 1 (combustion + process split), §44(b) Scope 2 LB + MB, §44(c) Scope 3 by category including Cat 11 disclosure, §45 intensity ratios. Document header includes gwp_set, base year, boundary statement, assurance level. | PDF passes visual review by ESG manager; all mandatory ESRS E1-6 data points present; Cat 11 rationale text included; assurance level = "ISAE 3000 Limited" stated. | MUST | visualization |
-| FR-29 | FastAPI — read endpoints | REST API exposes GET endpoints for: /emissions (filterable by scope, site, year, category), /kpis, /audit-trail, /factor-catalog. JWT authentication required on all endpoints. RBAC enforced: auditor = read-only, esg_manager = read + trigger export, data_steward = read + write. | All endpoints return JSON; unauthorized requests return 401; forbidden role requests return 403; API documented via OpenAPI 3.1 spec. | SHOULD | backend |
-| FR-30 | FastAPI — append-only write endpoint | REST API exposes POST /emissions (data_steward role only) for programmatic ingestion from future ERP/CRM systems. Enforces same validation and append-only rules as batch ETL. | POST accepts valid payload, inserts to `emissions_consolidated`, returns row ID and correlation_id; attempt to POST with missing mandatory metadata fields returns 422; no direct DB writes bypassing API validation. | SHOULD | backend |
-| FR-31 | RBAC enforcement | Three roles enforced at application and DB levels: `auditor` (read-only all), `esg_manager` (read + export + approve), `data_steward` (read + ingest + manage factor catalog). PostgreSQL Row-Level Security (RLS) enforces tenant isolation. | Penetration test scenario: auditor attempts to insert emission row → blocked at API (403) and DB (RLS deny); data_steward cannot approve/sign off PDF (esg_manager only). | MUST | backend |
-| FR-32 | Data quality gate execution | DQ gates listed in Section 11 execute as pre-insert validation in the batch ETL pipeline. CRIT-level failures block the pipeline and write to DLQ with structured error payload. WARN-level failures annotate rows but allow processing. | All DQ-CRIT conditions block insertion; DLQ entries include: rule_id, row_id, value, threshold, timestamp; esg_manager and data_steward notified. | MUST | data-engineer |
+| FR-29 | FastAPI — read endpoints | REST API exposes GET endpoints for: /emissions (filterable by scope, site, year, category), /kpis, /audit-trail, /factor-catalog. JWT authentication required on all endpoints. RBAC enforced: `viewer` (auditor) = read-only, `admin` (esg_manager) = read + trigger export, `editor` (data_steward) = read + write. | All endpoints return JSON; unauthorized requests return 401; forbidden role requests return 403; API documented via OpenAPI 3.1 spec. | SHOULD | backend |
+| FR-30 | FastAPI — append-only write endpoint | REST API exposes POST /emissions (`editor` role only; formerly data_steward) for programmatic ingestion from future ERP/CRM systems. Enforces same validation and append-only rules as batch ETL. | POST accepts valid payload, inserts to `emissions_consolidated`, returns row ID and correlation_id; attempt to POST with missing mandatory metadata fields returns 422; no direct DB writes bypassing API validation. | SHOULD | backend |
+| FR-31 | RBAC enforcement | Three roles enforced at application and DB levels: `viewer` (read-only all; formerly auditor), `admin` (read + export + approve; formerly esg_manager), `editor` (read + ingest + manage factor catalog; formerly data_steward). PostgreSQL Row-Level Security (RLS) enforces tenant isolation. | Penetration test scenario: `viewer` attempts to insert emission row → blocked at API (403) and DB (RLS deny); `editor` cannot approve/sign off PDF (`admin` only). | MUST | backend |
+| FR-32 | Data quality gate execution | DQ gates listed in Section 11 execute as pre-insert validation in the batch ETL pipeline. CRIT-level failures block the pipeline and write to DLQ with structured error payload. WARN-level failures annotate rows but allow processing. | All DQ-CRIT conditions block insertion; DLQ entries include: rule_id, row_id, value, threshold, timestamp; `admin` and `editor` (formerly esg_manager and data_steward) notified. | MUST | data-engineer |
 | FR-33 | Internationalization — IT/EN labels | All user-facing labels, report headers, and dashboard text support both Italian and English. Domain-standard Italian terms (Codice_Sito, Sm³, Gasolio, etc.) retained in Italian in both modes. | Language toggle in dashboard; PDF report generated in selected language; EN is default for API responses. | SHOULD | visualization |
 | FR-34 | EU ETS dual-track (AR5) production output | Produce a parallel AR5-based emission output for IANO (and any other Annex I site if added) suitable for internal EU ETS reporting workflows. Output covers Scope 1 combustion + Scope 1 process emissions (decarbonation); CO2 only with AR5 GWPs for incidental CH4/N2O combustion components. Dual-track is data, not format: the MRR XML / verified-report assembly remains out of v1 scope. Each dual-track pair is linked via a `dual_run_id UUID NULL FK` (self-referential) on `ops.calc_runs`: the CSRD run's row carries `dual_run_id` pointing to the EU ETS run's row, and vice versa; this linkage is reciprocal and must be enforced relationally (deferrable self-referential FK on `ops.calc_runs.id`). Re-running a single track after an existing pair has been filed creates a NEW `ops.calc_runs` row and a NEW pair; the prior pair is frozen and immutable per the append-only invariant (methodology §7). | AR5 run reproduces the same input data with `gwp_set=AR5`; output table tagged `regulatory_stream=EU_ETS_PHASE_IV`; results auditable against the AR6 CSRD output (CO2 values must be identical, only CH4/N2O CO2e differ by GWP). Reciprocity AC: both rows of a paired run reference each other via `dual_run_id`; single-track runs have `dual_run_id IS NULL`; a verifier can reconcile the pair with a single self-join query `SELECT a.*, b.* FROM ops.calc_runs a JOIN ops.calc_runs b ON a.dual_run_id = b.id WHERE a.id = :rid` (cross-ref methodology §11.1 snapshot-parity requirement and §7 append-only audit trail). Re-run AC: after a restatement, the prior pair rows retain their original `dual_run_id` values unchanged; the new pair is a distinct row set with new UUIDs. | MUST | data-engineer + data-analyst |
 | FR-35 | Scope 1 Fugitive HFC zero-line | Auto-emit a Scope 1 Fugitive HFC sub-category row with tco2e=0 in every ESRS E1-6 output for all 7 sites. Rationale field populated with: "Closed-loop refrigeration systems; refrigerant top-ups across all 7 sites declared negligible by user 2026-05-13 (OI-10 closed). Zero-line is a disclosure of completeness, not an absence of accounting." | Zero-row present in PDF, Excel, dashboard, API; `disclosure_notes` contains the rationale text; supersedable via FR-21 correction workflow if future inventory data emerges. | MUST | data-analyst |
@@ -270,12 +274,12 @@ Each omission produces an explicit zero-line in every ESRS E1-6 output with reas
 | NFR-10 | Security | TLS 1.2+ on all network interfaces; no plaintext HTTP in production. | TLS enforced in Docker Compose / deployment config; HTTP→HTTPS redirect |
 | NFR-11 | Security | Rate limiting on API endpoints to prevent abuse. | Max 100 req/min per authenticated user; 429 response on breach |
 | NFR-12 | Reliability | ETL pipeline is idempotent; re-running with same input produces identical output without duplicates. | Idempotency key = (Codice_Sito, Anno, Categoria, Combustibile, correlation_id); duplicate detection pre-insert |
-| NFR-13 | Reliability | Dead-letter queue (DLQ) captures all failed rows with structured error payload; failed runs are replayable. | DLQ persisted to DB; replay endpoint available to data_steward; no data loss on partial failure |
+| NFR-13 | Reliability | Dead-letter queue (DLQ) captures all failed rows with structured error payload; failed runs are replayable. | DLQ persisted to DB; replay endpoint available to `editor` (formerly data_steward); no data loss on partial failure |
 | NFR-14 | Reliability | Append-only immutability proven by automated test in CI. | pytest test: attempt UPDATE on emissions_consolidated → assert DB exception raised |
 | NFR-15 | Maintainability | Test coverage thresholds enforced in CI. | Global: ≥ 85%; emission calculation modules: 100% |
 | NFR-16 | Maintainability | Function length and cyclomatic complexity limits. | Max 50 lines per function; max cyclomatic complexity 15 (enforced via flake8-cognitive-complexity or radon) |
 | NFR-17 | Maintainability | Python version constraint. | Python 3.11+ only; pinned in pyproject.toml / Dockerfile |
-| NFR-18 | Traceability | Every row in `emissions_consolidated` links to its source raw row. | raw_row_id FK enforced; orphan rows blocked by DB constraint; verifiable by auditor via /audit-trail endpoint |
+| NFR-18 | Traceability | Every row in `emissions_consolidated` links to its source raw row. | raw_row_id FK enforced; orphan rows blocked by DB constraint; verifiable by `viewer` (auditor) via /audit-trail endpoint |
 | NFR-19 | Retention | Emissions data retained for minimum 10 years per CSRD requirement. | DB backup policy documented; row-level retention metadata; no delete cascade on emission tables |
 | NFR-20 | Compliance | GDPR Art. 30 processing register maintained; DPIA completed where required. | Art. 30 register exists as living document; DPIA triggered if employee PII (FTE, commuting) stored at individual level |
 | NFR-21 | Compliance | Append-only property proven by anti-mutation DB trigger. | Trigger definition in migration; CI test validates trigger behaviour; documented in assurance package |
@@ -323,12 +327,12 @@ This table is the single source of truth for all calculated emissions. It is **a
 ### 10.2 Immutability Enforcement
 
 - A `deny_update_delete` trigger on `emissions_consolidated` raises an exception on any UPDATE or DELETE attempt.
-- The trigger must be created in a DB migration, tested in CI (pytest: assert trigger fires), and documented in the assurance package for the external auditor.
+- The trigger must be created in a DB migration, tested in CI (pytest: assert trigger fires), and documented in the assurance package for the external auditor (`viewer` role).
 - Bitemporal design (valid_from / valid_to) supports point-in-time queries for historical audit without mutation.
 
 ### 10.3 Correction Workflow
 
-1. Data steward identifies error in emission row R1.
+1. `editor` (data steward) identifies error in emission row R1.
 2. New row R2 is inserted with corrected values; all metadata fields required.
 3. R1 is updated with: `valid_to = now(), superseded_by = R2.id, reason_code = <code>`. (This is the only permitted quasi-update, implemented as a single DB function with audit logging, not a general UPDATE permission.)
 4. Correction reason codes: `DATA_ERROR`, `FACTOR_UPDATE`, `BOUNDARY_CHANGE`, `METHODOLOGY_REVISION`, `RESTATEMENT_>5PCT`.
@@ -346,11 +350,11 @@ Gates executed as pre-insert validation in the batch ETL pipeline. CRIT = pipeli
 
 | ID | Level | Rule | Threshold | Trigger |
 |---|---|---|---|---|
-| DQ-CRIT-01 | CRIT | Facility coverage: all 7 sites must have at least one record for each in-scope scope per reporting year. | Coverage < 7/7 sites (< 100% for Scope 1 and Scope 2 per year) | Block pipeline; notify esg_manager |
+| DQ-CRIT-01 | CRIT | Facility coverage: all 7 sites must have at least one record for each in-scope scope per reporting year. | Coverage < 7/7 sites (< 100% for Scope 1 and Scope 2 per year) | Block pipeline; notify `admin` (formerly esg_manager) |
 | DQ-CRIT-02 | CRIT | Missing values: mandatory columns (Quantità, Unità, Codice_Sito, Anno) must not be NULL or empty. | Any NULL in mandatory column | Block row; write to DLQ |
 | DQ-CRIT-03 | CRIT | Negative physical values: Quantità < 0 for any fuel, electricity, or mass quantity. | Quantità < 0 | Block row; write to DLQ |
 | DQ-CRIT-04 | CRIT | Outlier detection. **Hybrid rule** (Phase 5 wave 1 implementation note): with n=7 sites the maximum reachable z-score is (n-1)/√n ≈ 2.27, so a strict \|z\|>4 threshold is unreachable. Implementation uses **\|z\|>2.0 z-score check + complementary ratio test** (YoY ratio < 0.6 or > 1.67 on non-zero series). Either triggers the gate. | \|z\|>2.0 OR YoY ratio < 0.6 / > 1.67 | Block row; write to DLQ with both z-score and ratio_yoy values; flag VIANO_GARGOLA GAS_NAT 2025 = 11 Sm³ as known candidate (now resolved real-commissioning per AC-16) |
-| DQ-CRIT-05 | CRIT | Temporal gap: site is present in 2024 but absent in 2025 (or vice versa) without explicit zero-quantity record. | Site × scope present in year T but missing in year T+1 (no zero record) | Block pipeline; require explicit zero record or DQ waiver by esg_manager |
+| DQ-CRIT-05 | CRIT | Temporal gap: site is present in 2024 but absent in 2025 (or vice versa) without explicit zero-quantity record. | Site × scope present in year T but missing in year T+1 (no zero record) | Block pipeline; require explicit zero record or DQ waiver by `admin` (formerly esg_manager) |
 | DQ-WARN-01 | WARN | VIANO electricity 2025 approximately 50% of 2024 value (3,268,364 vs 6,551,604 kWh). | Ratio VIANO EE 2025 / VIANO EE 2024 < 0.6 | Annotate row; banner warning in dashboard; referenced in OI-2 |
 | DQ-WARN-02 | WARN | Process emission data quality = "E" (Estimated). IANO Processo_Decarb uses internal estimate via LOI 3.5%. | Qualità_Dato = "E" | Annotate row with quality flag; disclose estimation methodology in PDF report |
 | DQ-WARN-03 | WARN | Spend-based Scope 3 subcategories (services, Cat 2, Cat 6) carry higher inherent uncertainty. | Metodo = "Spend-based" | Annotate rows; disclose uncertainty level in ESRS E1-6 |
@@ -396,7 +400,7 @@ Hard gates that must be resolved in design before any production deployment.
 | SG-09 | bandit static analysis runs in CI; HIGH severity findings block merge. | OWASP A03/A05 |
 | SG-10 | Rate limiting: 100 req/min per authenticated user; 429 with Retry-After header. | OWASP A04 |
 | SG-11 | Docker images built from pinned base images; Dependabot or equivalent for dependency CVE scanning. | OWASP A06 |
-| SG-12 | Separation of duties: data_steward cannot approve CSRD PDF; esg_manager cannot ingest raw data files directly. | Internal control principle |
+| SG-12 | Separation of duties: `editor` (formerly data_steward) cannot approve CSRD PDF; `admin` (formerly esg_manager) cannot ingest raw data files directly. | Internal control principle |
 
 ---
 
@@ -413,7 +417,7 @@ The following are explicitly deferred and must not be designed into v1 architect
 7. **Financed emissions (Scope 3 Cat 15)**: excluded unless Phase 2 materiality assessment determines otherwise (OI-3).
 8. **EU Taxonomy alignment scoring**: assessment deferred; placeholder disclosure only in PDF.
 9. **SFDR PAI indicators**: not applicable for this tool in v1.
-10. **Automated regulatory update ingestion**: factor catalog updates are manual, performed by data_steward.
+10. **Automated regulatory update ingestion**: factor catalog updates are manual, performed by `editor` (formerly data_steward).
 
 ---
 
@@ -451,9 +455,9 @@ Before Phase 2 (methodology validation and factor assignment) begins, the user m
 | AC-07 | Annual batch ETL (no streaming) is confirmed as the update frequency model. | Confirmed in brief |
 | AC-08 | The 4-deliverable scope (dashboard, Excel, PDF, API) is confirmed with the relative priorities stated. | Confirmed in brief |
 | AC-09 | Tech stack (Python 3.11+, FastAPI, Streamlit, PostgreSQL, pandera, pytest, Docker, GitHub Actions) is approved by IT Operations. | Pending IT Operations sign-off |
-| AC-10 | Revenue (EUR) and production tonnage reference data for intensity metrics will be provided by the data steward before intensity KPI calculation in Phase 3. | Pending data steward commitment |
+| AC-10 | Revenue (EUR) and production tonnage reference data for intensity metrics will be provided by the `editor` (data steward) before intensity KPI calculation in Phase 3. | Pending data steward commitment |
 | AC-11 | FTE count (506 in 2024, 484 in 2025) is confirmed by user as official HR employee headcount; not proxy-derived. | Confirmed by user 2026-05-13 |
-| AC-12 | OI-4 (GO Quality Criteria) — Phase 2 validated 8 criteria; per-certificate evidence checklist QC1-QC8 (methodology_validation.md §2.4) must be completed by data steward before MB=0 publication. | Methodology APPROVED Phase 2; certificate evidence pending Phase 5 |
+| AC-12 | OI-4 (GO Quality Criteria) — Phase 2 validated 8 criteria; per-certificate evidence checklist QC1-QC8 (methodology_validation.md §2.4) must be completed by `editor` (data steward) before MB=0 publication. | Methodology APPROVED Phase 2; certificate evidence pending Phase 5 |
 | AC-13 | OI-7 — IANO is EU ETS Annex I Activity 17 installation; AR5 dual-track output (FR-34) is required and Phase 5 must deliver production-ready capability. | Confirmed by user 2026-05-13 |
 | AC-14 | OI-8 — no Cat 15 financial-instrument scope exists; Cat 15 OMIT-with-rationale confirmed; FR-36 emits zero-line. | Confirmed by user 2026-05-13 |
 | AC-15 | OI-10 — refrigerant top-ups across all 7 sites negligible; Scope 1 Fugitive HFC zero-line (FR-35) auto-emitted with rationale. | Confirmed by user 2026-05-13 |

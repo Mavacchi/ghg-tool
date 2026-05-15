@@ -4,18 +4,18 @@ All DB access is mocked via ``app.dependency_overrides`` + ``unittest.mock``.
 No live PostgreSQL instance is required.
 
 include_hidden policy under test (documented decision):
-  Only ``esg_manager`` and ``auditor`` may request ``include_hidden=true``.
-  ``data_steward`` always receives only visible annotations regardless of
+  Only ``admin`` and ``viewer`` may request ``include_hidden=true``.
+  ``editor`` always receives only visible annotations regardless of
   the flag value. This matches the module-level docstring of chart_annotations.py.
-  Rationale: data_steward is an operational ingestion role; auditors and
+  Rationale: editor is an operational ingestion role; auditors and
   esg_managers need to inspect hidden entries for ISAE 3000 reviews.
 
 Test cases:
-  1.  POST happy path (data_steward) returns 201 with id.
-  2.  POST as auditor returns 403.
+  1.  POST happy path (editor) returns 201 with id.
+  2.  POST as viewer returns 403.
   3.  GET filtered by chart_key returns only matching rows (mocked).
-  4.  GET as auditor with include_hidden=true returns 200 (allowed).
-  5.  GET as data_steward with include_hidden=true returns 403 (not allowed).
+  4.  GET as viewer with include_hidden=true returns 200 (allowed).
+  5.  GET as editor with include_hidden=true returns 403 (not allowed).
   6.  PATCH visibility flips is_visible; second flip returns the toggled value.
   7.  PATCH acknowledge sets timestamp; second call returns 409.
   8.  PATCH visibility when DB trigger fires returns 409 with error_code
@@ -51,7 +51,7 @@ from ghg_tool.infrastructure.db.models.chart_annotation import ChartAnnotation
 _TENANT = str(uuid.uuid4())
 _DS_USER = str(uuid.uuid4())
 _ESG_USER = str(uuid.uuid4())
-_AUDITOR_USER = str(uuid.uuid4())
+_VIEWER_USER = str(uuid.uuid4())
 _ANN_UUID = uuid.uuid4()
 
 _BASE_URL = "/api/v1/chart-annotations"
@@ -160,12 +160,12 @@ def _make_annotation_orm(
 
 
 # ---------------------------------------------------------------------------
-# Test 1: POST happy path returns 201 with id (data_steward)
+# Test 1: POST happy path returns 201 with id (editor)
 # ---------------------------------------------------------------------------
 
 
 def test_post_annotation_201_data_steward() -> None:
-    """data_steward can create an annotation; response is 201 with an id field."""
+    """editor can create an annotation; response is 201 with an id field."""
     created_row = _make_annotation_orm()
 
     mock_session = AsyncMock()
@@ -193,7 +193,7 @@ def test_post_annotation_201_data_steward() -> None:
     async def _db() -> AsyncGenerator[Any, None]:
         yield mock_session
 
-    app.dependency_overrides[get_current_user] = _auth("data_steward", _DS_USER)
+    app.dependency_overrides[get_current_user] = _auth("editor", _DS_USER)
     app.dependency_overrides[get_db] = _db
     try:
         with TestClient(app, raise_server_exceptions=False) as client:
@@ -209,13 +209,13 @@ def test_post_annotation_201_data_steward() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Test 2: POST as auditor returns 403
+# Test 2: POST as viewer returns 403
 # ---------------------------------------------------------------------------
 
 
 def test_post_annotation_403_auditor() -> None:
     """Auditor lacks write permission; POST returns 403."""
-    app.dependency_overrides[get_current_user] = _auth("auditor", _AUDITOR_USER)
+    app.dependency_overrides[get_current_user] = _auth("viewer", _VIEWER_USER)
     app.dependency_overrides[get_db] = _noop_db()
     try:
         with TestClient(app, raise_server_exceptions=False) as client:
@@ -245,7 +245,7 @@ def test_get_annotations_filtered_by_chart_key() -> None:
     async def _db() -> AsyncGenerator[Any, None]:
         yield mock_session
 
-    app.dependency_overrides[get_current_user] = _auth("auditor", _AUDITOR_USER)
+    app.dependency_overrides[get_current_user] = _auth("viewer", _VIEWER_USER)
     app.dependency_overrides[get_db] = _db
     try:
         with TestClient(app, raise_server_exceptions=False) as client:
@@ -265,7 +265,7 @@ def test_get_annotations_filtered_by_chart_key() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Test 4: GET as auditor with include_hidden=true returns 200
+# Test 4: GET as viewer with include_hidden=true returns 200
 # ---------------------------------------------------------------------------
 
 
@@ -281,7 +281,7 @@ def test_get_annotations_auditor_include_hidden_200() -> None:
     async def _db() -> AsyncGenerator[Any, None]:
         yield mock_session
 
-    app.dependency_overrides[get_current_user] = _auth("auditor", _AUDITOR_USER)
+    app.dependency_overrides[get_current_user] = _auth("viewer", _VIEWER_USER)
     app.dependency_overrides[get_db] = _db
     try:
         with TestClient(app, raise_server_exceptions=False) as client:
@@ -300,16 +300,16 @@ def test_get_annotations_auditor_include_hidden_200() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Test 5: GET as data_steward with include_hidden=true returns 403
+# Test 5: GET as editor with include_hidden=true returns 403
 # ---------------------------------------------------------------------------
 
 
 def test_get_annotations_data_steward_include_hidden_403() -> None:
-    """data_steward requesting include_hidden=true is rejected with 403.
+    """editor requesting include_hidden=true is rejected with 403.
 
-    Policy: only esg_manager and auditor may see hidden annotations.
+    Policy: only admin and viewer may see hidden annotations.
     """
-    app.dependency_overrides[get_current_user] = _auth("data_steward", _DS_USER)
+    app.dependency_overrides[get_current_user] = _auth("editor", _DS_USER)
     app.dependency_overrides[get_db] = _noop_db()
     try:
         with TestClient(app, raise_server_exceptions=False) as client:
@@ -361,7 +361,7 @@ def test_patch_visibility_flip_and_reflip() -> None:
     async def _db1() -> AsyncGenerator[Any, None]:
         yield session1
 
-    app.dependency_overrides[get_current_user] = _auth("data_steward", _DS_USER)
+    app.dependency_overrides[get_current_user] = _auth("editor", _DS_USER)
     app.dependency_overrides[get_db] = _db1
     try:
         with TestClient(app, raise_server_exceptions=False) as client:
@@ -381,7 +381,7 @@ def test_patch_visibility_flip_and_reflip() -> None:
     async def _db2() -> AsyncGenerator[Any, None]:
         yield session2
 
-    app.dependency_overrides[get_current_user] = _auth("data_steward", _DS_USER)
+    app.dependency_overrides[get_current_user] = _auth("editor", _DS_USER)
     app.dependency_overrides[get_db] = _db2
     try:
         with TestClient(app, raise_server_exceptions=False) as client:
@@ -420,7 +420,7 @@ def test_patch_acknowledge_sets_timestamp_and_409_on_second() -> None:
     async def _db() -> AsyncGenerator[Any, None]:
         yield mock_session
 
-    app.dependency_overrides[get_current_user] = _auth("esg_manager", _ESG_USER)
+    app.dependency_overrides[get_current_user] = _auth("admin", _ESG_USER)
     app.dependency_overrides[get_db] = _db
     try:
         with TestClient(app, raise_server_exceptions=False) as client:
@@ -436,7 +436,7 @@ def test_patch_acknowledge_sets_timestamp_and_409_on_second() -> None:
     row.acknowledged_by = _ESG_USER
     row.acknowledged_at = _ack_time
 
-    app.dependency_overrides[get_current_user] = _auth("esg_manager", _ESG_USER)
+    app.dependency_overrides[get_current_user] = _auth("admin", _ESG_USER)
     app.dependency_overrides[get_db] = _db
     try:
         with TestClient(app, raise_server_exceptions=False) as client:
@@ -475,7 +475,7 @@ def test_patch_visibility_db_trigger_raises_409() -> None:
     async def _db() -> AsyncGenerator[Any, None]:
         yield mock_session
 
-    app.dependency_overrides[get_current_user] = _auth("data_steward", _DS_USER)
+    app.dependency_overrides[get_current_user] = _auth("editor", _DS_USER)
     app.dependency_overrides[get_db] = _db
     try:
         with TestClient(app, raise_server_exceptions=False) as client:
@@ -498,7 +498,7 @@ def test_patch_visibility_db_trigger_raises_409() -> None:
 def test_post_invalid_severity_422() -> None:
     """Severity value not in {INFO, WARNING, CRITICAL} fails validation -> 422."""
     bad_body = {**_VALID_POST_BODY, "severity": "DEBUG"}
-    app.dependency_overrides[get_current_user] = _auth("data_steward", _DS_USER)
+    app.dependency_overrides[get_current_user] = _auth("editor", _DS_USER)
     app.dependency_overrides[get_db] = _noop_db()
     try:
         with TestClient(app, raise_server_exceptions=False) as client:
@@ -515,7 +515,7 @@ def test_post_invalid_severity_422() -> None:
 
 def test_get_annotations_missing_chart_key_422() -> None:
     """chart_key is a required query parameter; omitting it returns 422."""
-    app.dependency_overrides[get_current_user] = _auth("auditor", _AUDITOR_USER)
+    app.dependency_overrides[get_current_user] = _auth("viewer", _VIEWER_USER)
     app.dependency_overrides[get_db] = _noop_db()
     try:
         with TestClient(app, raise_server_exceptions=False) as client:

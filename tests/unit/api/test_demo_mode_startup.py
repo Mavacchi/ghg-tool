@@ -6,7 +6,7 @@ Covers:
   - ``_seed_demo_data_if_empty()`` is skipped when real data is present.
   - ``_seed_demo_data_if_empty()`` runs when the DB has only the M0 seed.
   - Seed failures do NOT raise; the lifespan continues.
-  - Demo user is inserted with role=data_steward when seeding runs.
+  - Demo user is inserted with role=editor when seeding runs.
 
 All DB interactions are mocked via ``AsyncMock``; no live PostgreSQL required.
 
@@ -325,7 +325,7 @@ class TestEnsureDemoUser:
         return f
 
     @pytest.mark.asyncio
-    async def test_demo_user_seeded_with_data_steward_role(self) -> None:
+    async def test_demo_user_seeded_with_editor_role(self) -> None:
         """When no demo user exists, INSERT is executed and commit is called."""
         session_mock = self._make_full_session(user_count=0)
         insert_calls: list[str] = []

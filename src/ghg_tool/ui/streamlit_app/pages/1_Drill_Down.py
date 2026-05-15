@@ -48,7 +48,7 @@ apply_brand_chrome()
 require_auth()
 lang = get_lang()
 
-_WRITE_ROLES = {"data_steward", "esg_manager"}
+_WRITE_ROLES = {"editor", "admin"}
 
 
 def _render_annotations_panel(
@@ -450,7 +450,7 @@ else:
                 lang=lang,
                 chart_key="drilldown_scope",
                 anchor_year=selected_year,
-                role=st.session_state.get("role", "auditor"),
+                role=st.session_state.get("role", "viewer"),
             )
 
         with _tab_table:
@@ -490,8 +490,8 @@ else:
             # Roles other than data_steward see no affordance at all (no greyed-
             # out buttons — they are noise for non-write roles).
             # -------------------------------------------------------------------
-            _corr_role = st.session_state.get("role", "auditor")
-            if _corr_role == "data_steward" and "id" in df.columns and not df.empty:
+            _corr_role = st.session_state.get("role", "viewer")
+            if _corr_role == "editor" and "id" in df.columns and not df.empty:
                 _corr_token = get_token() or ""
 
                 # Correction reason codes and their i18n labels
@@ -630,8 +630,8 @@ else:
         # -----------------------------------------------------------------------
         # Emission correction (esg_manager only, FR-21)
         # -----------------------------------------------------------------------
-        role = st.session_state.get("role", "auditor")
-        if role == "esg_manager":
+        role = st.session_state.get("role", "viewer")
+        if role == "admin":
             with st.expander(f"✏️ {_('correction_btn', lang)}", expanded=False):
                 emission_ids = df["id"].tolist() if "id" in df.columns else []
                 if emission_ids:

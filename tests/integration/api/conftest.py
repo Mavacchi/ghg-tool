@@ -41,7 +41,7 @@ from ghg_tool.infrastructure.security.jwt import (
 # Types
 # ---------------------------------------------------------------------------
 
-_Role = Literal["data_steward", "esg_manager", "auditor", "admin"]
+_Role = Literal["editor", "admin", "viewer", "admin"]
 
 
 # ---------------------------------------------------------------------------
@@ -67,7 +67,7 @@ class SessionMinter:
 
     async def mint(
         self,
-        role: _Role = "data_steward",
+        role: _Role = "editor",
         *,
         jwt_tenant_id_override: str | None = None,
     ) -> str:
@@ -207,7 +207,7 @@ async def seeded_auth_session(
     Usage in a test::
 
         async def test_something(self, seeded_auth_session, tenant_id):
-            token = await seeded_auth_session.mint("data_steward")
+            token = await seeded_auth_session.mint("editor")
             async with AsyncClient(app=fastapi_app, base_url="http://testserver") as c:
                 resp = await c.post("/api/v1/emissions/", ...,
                                     headers={"Authorization": f"Bearer {token}"})
@@ -231,7 +231,7 @@ async def seeded_auth_session(
         await session.execute(
             text(
                 "SELECT set_config('app.tenant_id', :tid, false), "
-                "       set_config('app.role_code', 'data_steward', false)"
+                "       set_config('app.role_code', 'editor', false)"
             ),
             {"tid": tenant_id},
         )

@@ -341,9 +341,9 @@ async def seed_tenants(
     code_b = f"TC_B_{tenant_b_id[:8].upper()}"
 
     async with async_engine.begin() as conn:
-        # Look up the esg_manager role id once
+        # Look up the admin role id once (role was renamed from esg_manager in M24)
         role_row = await conn.execute(
-            text("SELECT id::text FROM ref.roles WHERE role_code = 'esg_manager' LIMIT 1")
+            text("SELECT id::text FROM ref.roles WHERE role_code = 'admin' LIMIT 1")
         )
         role_id = role_row.scalar_one()
 

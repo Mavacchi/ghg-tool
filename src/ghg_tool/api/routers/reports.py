@@ -44,16 +44,16 @@ router = APIRouter(prefix="/api/v1/reports", tags=["reports"])
     "/pdf",
     response_model=ReportJobStatus,
     status_code=status.HTTP_202_ACCEPTED,
-    summary="Trigger CSRD ESRS E1-6 PDF report generation (esg_manager only)",
+    summary="Trigger CSRD ESRS E1-6 PDF report generation (admin only)",
     description=(
         "Enqueues an async PDF generation job. Returns a job_id for polling. "
         "Actual PDF rendering (WeasyPrint) is implemented in wave 3. "
-        "esg_manager role only (FR-28)."
+        "admin role only (FR-28)."
     ),
     responses={
         202: {"description": "Job accepted"},
         401: {"description": "Not authenticated"},
-        403: {"description": "Insufficient role — esg_manager required"},
+        403: {"description": "Insufficient role — admin required"},
         422: {"description": "Validation error"},
     },
 )
@@ -65,7 +65,7 @@ async def trigger_pdf(
 
     Args:
         body: ``PdfReportRequest`` with anno, gwp_set, language, stream.
-        user: Authenticated esg_manager user.
+        user: Authenticated admin user.
 
     Returns:
         ``ReportJobStatus`` with ``status='PENDING'`` and the new ``job_id``.
@@ -91,11 +91,11 @@ async def trigger_pdf(
     "/excel",
     response_model=ReportJobStatus,
     status_code=status.HTTP_202_ACCEPTED,
-    summary="Trigger multi-sheet Excel export (data_steward or esg_manager)",
+    summary="Trigger multi-sheet Excel export (editor or admin)",
     description=(
         "Enqueues an async Excel generation job. Returns a job_id for polling. "
         "Actual openpyxl rendering is implemented in wave 3. "
-        "data_steward or esg_manager role required (FR-27)."
+        "editor or admin role required (FR-27)."
     ),
     responses={
         202: {"description": "Job accepted"},

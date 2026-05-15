@@ -8,8 +8,8 @@ Covers all 10 specified test cases:
   - 404 for cross-tenant access
   - 422 for negative tco2e
   - 422 for unknown reason_code
-  - 403 for auditor role
-  - 403 for esg_manager role
+  - 403 for viewer role
+  - 403 for admin role
   - audit_log row written
 """
 
@@ -156,10 +156,10 @@ class TestCorrectEmissionById:
     """Tests for POST /api/v1/emissions/{emission_id}/correct."""
 
     def test_correct_emission_returns_201_with_new_row_id(self) -> None:
-        """Happy path: data_steward gets 201 with new_id in response."""
+        """Happy path: editor gets 201 with new_id in response."""
         mock_repo = _repo_mock_found()
         with patch("ghg_tool.api.routers.emissions.EmissionsRepository", return_value=mock_repo):
-            app.dependency_overrides[get_current_user] = _user_override("data_steward")
+            app.dependency_overrides[get_current_user] = _user_override("editor")
             app.dependency_overrides[get_db] = _empty_session()
             with TestClient(app, raise_server_exceptions=False) as client:
                 resp = client.post(_CORRECTION_URL, json=_VALID_CORRECTION_BODY)
@@ -187,7 +187,7 @@ class TestCorrectEmissionById:
         """
         mock_repo = _repo_mock_found()
         with patch("ghg_tool.api.routers.emissions.EmissionsRepository", return_value=mock_repo):
-            app.dependency_overrides[get_current_user] = _user_override("data_steward")
+            app.dependency_overrides[get_current_user] = _user_override("editor")
             app.dependency_overrides[get_db] = _empty_session()
             with TestClient(app, raise_server_exceptions=False) as client:
                 resp = client.post(_CORRECTION_URL, json=_VALID_CORRECTION_BODY)
@@ -210,7 +210,7 @@ class TestCorrectEmissionById:
         """
         mock_repo = _repo_mock_found()
         with patch("ghg_tool.api.routers.emissions.EmissionsRepository", return_value=mock_repo):
-            app.dependency_overrides[get_current_user] = _user_override("data_steward")
+            app.dependency_overrides[get_current_user] = _user_override("editor")
             app.dependency_overrides[get_db] = _empty_session()
             with TestClient(app, raise_server_exceptions=False) as client:
                 resp = client.post(_CORRECTION_URL, json=_VALID_CORRECTION_BODY)
@@ -230,7 +230,7 @@ class TestCorrectEmissionById:
         """Unknown emission_id returns 404."""
         mock_repo = _repo_mock_not_found()
         with patch("ghg_tool.api.routers.emissions.EmissionsRepository", return_value=mock_repo):
-            app.dependency_overrides[get_current_user] = _user_override("data_steward")
+            app.dependency_overrides[get_current_user] = _user_override("editor")
             app.dependency_overrides[get_db] = _empty_session()
             unknown_id = uuid.uuid4()
             with TestClient(app, raise_server_exceptions=False) as client:
@@ -247,7 +247,7 @@ class TestCorrectEmissionById:
         # Simulate RLS / tenant check by returning None even for a real UUID
         mock_repo = _repo_mock_not_found()
         with patch("ghg_tool.api.routers.emissions.EmissionsRepository", return_value=mock_repo):
-            app.dependency_overrides[get_current_user] = _user_override("data_steward")
+            app.dependency_overrides[get_current_user] = _user_override("editor")
             app.dependency_overrides[get_db] = _empty_session()
             with TestClient(app, raise_server_exceptions=False) as client:
                 resp = client.post(
@@ -261,7 +261,7 @@ class TestCorrectEmissionById:
     def test_correct_emission_422_negative_tco2e(self) -> None:
         """tco2e < 0 is rejected by Pydantic with 422 before the handler runs."""
         bad_body = {**_VALID_CORRECTION_BODY, "tco2e": -5.0}
-        app.dependency_overrides[get_current_user] = _user_override("data_steward")
+        app.dependency_overrides[get_current_user] = _user_override("editor")
         app.dependency_overrides[get_db] = _empty_session()
         with TestClient(app, raise_server_exceptions=False) as client:
             resp = client.post(_CORRECTION_URL, json=bad_body)
@@ -272,7 +272,7 @@ class TestCorrectEmissionById:
     def test_correct_emission_422_unknown_reason_code(self) -> None:
         """reason_code not in the canonical enum is rejected with 422."""
         bad_body = {**_VALID_CORRECTION_BODY, "reason_code": "MANUAL_FIX"}
-        app.dependency_overrides[get_current_user] = _user_override("data_steward")
+        app.dependency_overrides[get_current_user] = _user_override("editor")
         app.dependency_overrides[get_db] = _empty_session()
         with TestClient(app, raise_server_exceptions=False) as client:
             resp = client.post(_CORRECTION_URL, json=bad_body)
@@ -281,8 +281,8 @@ class TestCorrectEmissionById:
         assert resp.status_code == 422, resp.text
 
     def test_correct_emission_403_auditor(self) -> None:
-        """auditor role does not have emissions:write permission → 403."""
-        app.dependency_overrides[get_current_user] = _user_override("auditor")
+        """viewer role does not have emissions:write permission → 403."""
+        app.dependency_overrides[get_current_user] = _user_override("viewer")
         app.dependency_overrides[get_db] = _empty_session()
         with TestClient(app, raise_server_exceptions=False) as client:
             resp = client.post(_CORRECTION_URL, json=_VALID_CORRECTION_BODY)
@@ -291,13 +291,13 @@ class TestCorrectEmissionById:
         assert resp.status_code == 403, resp.text
 
     def test_correct_emission_403_esg_manager(self) -> None:
-        """esg_manager does not have emissions:write permission → 403.
+        """admin does not have emissions:write permission → 403.
 
         The resource-scoped correction endpoint uses ``emissions:write``
-        (data_steward only), which is stricter than the bulk ``/correction``
+        (editor only), which is stricter than the bulk ``/correction``
         endpoint that allows ``emissions:correct``.
         """
-        app.dependency_overrides[get_current_user] = _user_override("esg_manager")
+        app.dependency_overrides[get_current_user] = _user_override("admin")
         app.dependency_overrides[get_db] = _empty_session()
         with TestClient(app, raise_server_exceptions=False) as client:
             resp = client.post(_CORRECTION_URL, json=_VALID_CORRECTION_BODY)
@@ -322,7 +322,7 @@ class TestCorrectEmissionById:
             yield session
 
         with patch("ghg_tool.api.routers.emissions.EmissionsRepository", return_value=mock_repo):
-            app.dependency_overrides[get_current_user] = _user_override("data_steward")
+            app.dependency_overrides[get_current_user] = _user_override("editor")
             app.dependency_overrides[get_db] = _fake_session_gen
             with TestClient(app, raise_server_exceptions=False) as client:
                 resp = client.post(_CORRECTION_URL, json=_VALID_CORRECTION_BODY)

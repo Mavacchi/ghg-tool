@@ -37,13 +37,13 @@ TEST_TENANT = str(uuid.uuid4())
 TEST_USER = str(uuid.uuid4())
 
 
-def _make_user(role: str = "esg_manager") -> CurrentUser:
+def _make_user(role: str = "admin") -> CurrentUser:
     return CurrentUser(
         sub=TEST_USER, role=role, tenant_id=TEST_TENANT, jti=str(uuid.uuid4())  # type: ignore[arg-type]
     )
 
 
-def _auth_override(role: str = "esg_manager"):
+def _auth_override(role: str = "admin"):
     user = _make_user(role)
 
     async def _dep() -> CurrentUser:
@@ -225,7 +225,7 @@ class TestLoginTOTPFlow:
         """
         partial = create_access_token(
             sub=TEST_USER,
-            role="esg_manager",
+            role="admin",
             tenant_id=TEST_TENANT,
             extra_claims={"pre_2fa": True},
             ttl_seconds=300,
@@ -245,7 +245,7 @@ class TestLoginTOTPFlow:
 
         partial = create_access_token(
             sub=TEST_USER,
-            role="esg_manager",
+            role="admin",
             tenant_id=TEST_TENANT,
             extra_claims={"pre_2fa": True},
             ttl_seconds=300,
@@ -269,7 +269,7 @@ class TestTOTPChallenge:
 
         partial = create_access_token(
             sub=TEST_USER,
-            role="esg_manager",
+            role="admin",
             tenant_id=TEST_TENANT,
             extra_claims={"pre_2fa": True},
             ttl_seconds=300,
@@ -297,7 +297,7 @@ class TestTOTPChallenge:
         secret = pyotp.random_base32()
         partial = create_access_token(
             sub=TEST_USER,
-            role="esg_manager",
+            role="admin",
             tenant_id=TEST_TENANT,
             extra_claims={"pre_2fa": True},
             ttl_seconds=300,
@@ -317,7 +317,7 @@ class TestTOTPChallenge:
     def test_challenge_with_non_partial_token_returns_401(self) -> None:
         """Passing a full access token (no pre_2fa) to challenge returns 401."""
         full_token = create_access_token(
-            sub=TEST_USER, role="esg_manager", tenant_id=TEST_TENANT
+            sub=TEST_USER, role="admin", tenant_id=TEST_TENANT
         )
         secret = pyotp.random_base32()
         row = _user_row(totp_secret=secret, totp_enabled=True)

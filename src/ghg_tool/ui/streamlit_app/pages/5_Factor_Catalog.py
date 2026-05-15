@@ -46,7 +46,7 @@ apply_brand_chrome()
 require_auth()
 lang = get_lang()
 
-_role = st.session_state.get("role", "auditor")
+_role = st.session_state.get("role", "viewer")
 _token = get_token() or ""
 
 st.title(_("nav_factor_catalog", lang))
@@ -162,7 +162,7 @@ _REASON_CODES = (
     "CORRECTION_REPLACEMENT",
 )
 
-if _role == "esg_manager":
+if _role == "admin":
     with st.expander(_("publication_queue_title", lang), expanded=False):
         st.caption(_("publication_queue_caption", lang))
         all_factors = raw or []
@@ -250,7 +250,7 @@ if _role == "esg_manager":
 # The read-only fallback (auditor, esg_manager) hides ALL action buttons
 # entirely — greyed-out buttons are noise for roles that cannot act.
 # ---------------------------------------------------------------------------
-if _role == "data_steward" and raw:
+if _role == "editor" and raw:
     all_factors_for_crud = raw
 
     # Partition into drafts vs published for clear UX

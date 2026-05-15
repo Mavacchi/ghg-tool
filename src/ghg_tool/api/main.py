@@ -100,7 +100,7 @@ async def _ensure_demo_user() -> None:
     The demo user is created with:
       - username:  demo
       - password:  bcrypt("demo")
-      - role:      data_steward
+      - role:      editor (formerly data_steward, renamed in M24)
       - is_active: TRUE
       - tenant:    the launch tenant (GRESMALT, falling back to CERAMIC_TILE_CO)
       - email:     demo@demo.local (synthetic; never used for real mail)
@@ -150,17 +150,17 @@ async def _ensure_demo_user() -> None:
                 return
             tenant_id = str(tenant_row[0])
 
-            # Resolve role_id for data_steward.
+            # Resolve role_id for editor (formerly data_steward, renamed in M24).
             role_result = await session.execute(
                 text(
-                    "SELECT id FROM ref.roles WHERE role_code = 'data_steward'"
+                    "SELECT id FROM ref.roles WHERE role_code = 'editor'"
                 )
             )
             role_row = role_result.fetchone()
             if role_row is None:
                 logger.warning(
                     "demo_user_seed_skipped",
-                    reason="data_steward_role_not_found",
+                    reason="editor_role_not_found",
                 )
                 return
             role_id = str(role_row[0])
@@ -191,7 +191,7 @@ async def _ensure_demo_user() -> None:
             "demo_user_seeded",
             username="demo",
             password="demo (CHANGE BEFORE PRODUCTION)",  # noqa: S106 — demo cred, not real secret
-            role="data_steward",
+            role="editor",
         )
     except Exception as exc:  # noqa: BLE001
         logger.warning(

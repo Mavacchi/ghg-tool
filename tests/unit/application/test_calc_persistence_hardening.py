@@ -241,7 +241,7 @@ class TestSetSessionGucsCalledBeforeInsert:
     """_persist_emissions must call set_session_gucs before any INSERT."""
 
     def test_set_session_gucs_called_with_correct_args(self) -> None:
-        """set_session_gucs is awaited with tenant_id and role_code=esg_manager."""
+        """set_session_gucs is awaited with tenant_id and role_code=admin."""
         from ghg_tool.application.services.calc_persistence import _persist_emissions
 
         factory, calls_log = _make_async_session_factory()
@@ -268,7 +268,7 @@ class TestSetSessionGucsCalledBeforeInsert:
         mock_gucs.assert_awaited_once()
         _, kwargs = mock_gucs.await_args
         assert kwargs["tenant_id"] == str(_TENANT_ID)
-        assert kwargs["role_code"] == "esg_manager"
+        assert kwargs["role_code"] == "admin"
 
     def test_set_session_gucs_called_before_insert_exec(self) -> None:
         """set_session_gucs must be the very first awaited call in the transaction."""
@@ -435,7 +435,7 @@ class TestCalcTriggerEndpoint:
         fake_user = MagicMock()
         fake_user.sub = "user-sub-001"
         fake_user.tenant_id = str(_TENANT_ID)
-        fake_user.role = "esg_manager"
+        fake_user.role = "admin"
 
 
         with patch(
@@ -479,7 +479,7 @@ class TestCalcTriggerEndpoint:
         fake_user = MagicMock()
         fake_user.sub = "user-sub-002"
         fake_user.tenant_id = str(_TENANT_ID)
-        fake_user.role = "esg_manager"
+        fake_user.role = "admin"
 
         from ghg_tool.api.dependencies.auth import get_current_user
 
@@ -526,9 +526,9 @@ class TestCalcStatusEndpoint:
         app.include_router(calc_router)
 
         fake_user = MagicMock()
-        fake_user.sub = "user-auditor"
+        fake_user.sub = "user-viewer"
         fake_user.tenant_id = str(_TENANT_ID)
-        fake_user.role = "auditor"
+        fake_user.role = "viewer"
 
         async def _fake_db() -> Any:
             session = AsyncMock()
