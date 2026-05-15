@@ -51,7 +51,7 @@ _GHG_ENVIRONMENT: Final[str] = os.getenv("GHG_ENVIRONMENT", "development").lower
 _DEMO_MODE_REQUESTED: Final[bool] = (
     os.getenv("GHG_DEMO_MODE", "").lower() in ("1", "true", "yes")
 )
-_DEMO_ALLOWED_ENVS: Final[frozenset[str]] = frozenset({"development", "test"})
+_DEMO_ALLOWED_ENVS: Final[frozenset[str]] = frozenset({"development", "test", "demo"})
 
 if _DEMO_MODE_REQUESTED and _GHG_ENVIRONMENT not in _DEMO_ALLOWED_ENVS:
     # Refuse demo mode outside development/test.  Import-time logging uses the
