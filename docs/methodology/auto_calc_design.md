@@ -433,20 +433,24 @@ Errors: same set as preview, plus 409 Conflict if `ux_emissions_active_natural_k
 
 ## §12 Open Questions for the Customer
 
-### Risolte (2026-05-15)
+### Risolte (2026-05-15, first round)
 
 - **Scope 1 Combustion categories**: ridotte alle 3 reali (`Gas_Naturale`, `Gasolio_Auto`, `Benzina_Auto`). La 4ª del CSV (`Processo_Decarb`) è Scope 1 Process, separato.
 - **Scope 1 Process input mode**: default è **direct tCO2** (l'utente ha il dato già calcolato). Mode B (massa CaCO3 con stoichiometric factor 0.4397) resta disponibile come toggle.
 - **Scope 3 v1 coverage**: tutte le categorie (Cat 1, 3, 4, 5, 6, 7, 9, 12) devono accettare quantità × fattore nella v1. Principio generale dell'utente: «voglio sempre poter inserire una quantità e moltiplicarla per un fattore di conversione».
 
-### Ancora aperte
+### Risolte (2026-05-15, second round)
 
-1. **Direct-entry raw row**: should a new `raw.direct_entry` staging table back the auto-calc path so that `raw_row_id` is non-NULL (preserving FR-22 universal traceability), or is the `correlation_id` plus the audit-log row sufficient for ISAE 3000? Recommendation: introduce `raw.direct_entry` in a follow-up wave; persist `raw_row_id` for parity with bulk path.
-2. **Multi-country sites**: the LB lookup currently hard-maps all 7 sites to `IT`. If the operational boundary expands abroad, who maintains the `site -> country -> LB factor` map? Recommendation: add `country` column on `ref.sites` and resolve at lookup time.
-3. **NCV catalog policy**: should we publish dual-unit factor variants for every fuel (e.g. `COMB_GAS_NAT_CO2_DEFRA_2025_PER_SM3` and `_PER_KWH`) to allow either invoice form? Recommendation: yes — publish both where DEFRA / ISPRA publish both.
-4. **AR4 historical baselines**: are there any pre-2024 baselines requiring AR4 GWPs? Current policy (`methodology.md §3`) says no; confirm.
-5. **Cat 3 WTT linkage on direct entry**: if a user enters a Scope 1 row, should the system auto-cascade and offer to create the matching Cat 3 WTT row? Recommendation: explicit second action, not automatic, to preserve user intent.
-6. **Idempotency key TTL**: how long to retain idempotency keys to dedupe network retries? Recommendation: 24h.
-7. **Process emissions for non-IANO sites**: should the UI hide `Processo_Decarb` for sites other than IANO, or expose it greyed with a tooltip? Recommendation: hide (less error surface).
-8. **Bulk-from-UI**: should the same single-row preview endpoint accept an array for "paste from spreadsheet"? Out of v1; recommend follow-up wave.
-9. **Versioning of this design**: when ESRS E1 amendments land, this doc updates BEFORE the implementation. Document owner = SustainabilityExpertAgent.
+1. **Direct-entry raw row** → **DECISIONE: SÌ, in wave successiva**. Introdurre tabella `raw.direct_entry` (stesso pattern di `raw.bulk_load`) per preservare FR-22 universal traceability: ogni riga in `emissions_consolidated` deve avere `raw_row_id` non-NULL. Migration Alembic prevista; backfill delle righe inserite con auto-calc tra deploy e cutover ammesso con UUID sentinel + nota in audit log.
+2. **Multi-country sites** → **DECISIONE: SÌ**. Aggiungere colonna `country` (CHAR(2) ISO 3166-1 alpha-2) su `ref.sites`. Lookup Scope 2 LB risolve `site.country → LB factor` al posto del hardcode IT. Default `IT` per i 7 siti attuali. Owner della mappa = data steward.
+3. **NCV catalog dual-unit** → **DECISIONE: SÌ**. Per ogni fuel pubblicare entrambe le varianti factor dove la fonte autorevole le pubblica (DEFRA pubblica per kWh, ISPRA per Sm³; per gasolio/benzina entrambe sono in litri come unità autorevole). Selezione runtime sull'`unita` user-provided.
+4. **AR4 historical baselines** → **DECISIONE: NO**. Nessuna baseline pre-2024 richiede GWP AR4. Policy `methodology.md §3` (AR6 di default, AR5 per EU ETS Phase IV) confermata.
+5. **Cat 3 WTT auto-cascade da Scope 1** → **DECISIONE: NO auto**. L'utente inserisce manualmente la riga Cat 3 WTT quando vuole. Eventuale "Replica come WTT" come bottone esplicito secondario in wave successiva.
+6. **Idempotency key TTL** → **DECISIONE: 24h**. Header `Idempotency-Key` accettato su `/calc/insert`; chiavi tenute 24h per dedup retry rete.
+7. **Site type discrimination** → **NUOVA DECISIONE (più strutturata della raccomandazione)**: aggiungere enum `site_type` su `ref.sites` con valori `STABILIMENTO_PRODUTTIVO`, `UFFICIO`, `MAGAZZINO`. La categoria `Processo_Decarb` (Scope 1 Process) è ammessa **solo per `STABILIMENTO_PRODUTTIVO`**. UI nasconde la voce per uffici/magazzini; backend rifiuta 422 con messaggio "Process emissions allowed only for STABILIMENTO_PRODUTTIVO sites". Migration Alembic + popolamento iniziale dei 7 siti (IANO = STABILIMENTO_PRODUTTIVO; gli altri da classificare con il customer). Use case ESG: gli uffici non hanno cottura/decarbonatazione, eventuali emissioni di processo lì sarebbero un data quality error.
+8. **Bulk-from-UI paste** → **DECISIONE: fuori v1**. Endpoint `/calc/preview` resta singola riga in v1.
+9. **Versioning del design doc** → **DECISIONE: confermata**. Owner = SustainabilityExpertAgent. Quando arrivano emendamenti ESRS E1 / aggiornamenti GHG Protocol questo doc si aggiorna PRIMA dell'implementazione, con changelog in fondo + bump versione.
+
+### Implementazione delle decisioni risolte
+
+Le decisioni #1, #2, #6, #7 hanno impatto su schema DB e richiedono migration Alembic + backend work. Le decisioni #3, #4, #5, #8, #9 sono policy / catalog updates senza schema change. Ordine consigliato di rollout: **#7 (site_type) → #2 (country) → #1 (raw.direct_entry) → #3 (NCV catalog) → #6 (idempotency key)**.
