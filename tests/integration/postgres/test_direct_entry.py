@@ -94,40 +94,37 @@ async def _truncate_test_rows(
         tenant_id: UUID string of the tenant to clean up.
     """
     async with engine.begin() as conn:
-        # audit_log first (FK from emissions_consolidated)
-        await conn.execute(
+        # Disable FK-trigger enforcement for this transaction so we can DELETE
+        # in any order without worrying about transitive FK dependencies
+        # (emissions_consolidated -> raw.direct_entry, etc.). Postgres-native;
+        # the testcontainer DB user is superuser. Scope is LOCAL = current tx.
+        await conn.execute(text("SET LOCAL session_replication_role = 'replica'"))
+
+        # Discover every table with a FK -> ref.tenants and delete its rows for
+        # this tenant_id. Avoids hand-maintained lists that miss new tables
+        # (e.g. chart_annotations, users, audit_log, emissions_consolidated,
+        # raw.direct_entry, cache.idempotency_keys, sites, ...).
+        child_tables = await conn.execute(
             text(
-                "DELETE FROM calc.audit_log "
-                "WHERE tenant_id = CAST(:tid AS uuid)"
-            ),
-            {"tid": tenant_id},
+                "SELECT n.nspname || '.' || c.relname AS qualified, "
+                "       a.attname AS col "
+                "FROM pg_constraint con "
+                "JOIN pg_class      c ON c.oid = con.conrelid "
+                "JOIN pg_namespace  n ON n.oid = c.relnamespace "
+                "JOIN pg_attribute  a ON a.attrelid = c.oid "
+                "                     AND a.attnum = ANY(con.conkey) "
+                "WHERE con.confrelid = 'ref.tenants'::regclass "
+                "  AND con.contype = 'f'"
+            )
         )
-        # emissions_consolidated references raw.direct_entry via raw_row_id
-        await conn.execute(
-            text(
-                "DELETE FROM calc.emissions_consolidated "
-                "WHERE tenant_id = CAST(:tid AS uuid)"
-            ),
-            {"tid": tenant_id},
-        )
-        # raw.direct_entry
-        await conn.execute(
-            text(
-                "DELETE FROM raw.direct_entry "
-                "WHERE tenant_id = CAST(:tid AS uuid)"
-            ),
-            {"tid": tenant_id},
-        )
-        # sites and tenant
-        await conn.execute(
-            text("DELETE FROM ref.sites WHERE tenant_id = CAST(:tid AS uuid)"),
-            {"tid": tenant_id},
-        )
-        # users reference the tenant via FK; must be removed before DELETE tenants
-        await conn.execute(
-            text("DELETE FROM ref.users WHERE tenant_id = CAST(:tid AS uuid)"),
-            {"tid": tenant_id},
-        )
+        for qualified, col in child_tables.fetchall():
+            await conn.execute(
+                text(
+                    f'DELETE FROM {qualified} '
+                    f'WHERE "{col}" = CAST(:tid AS uuid)'
+                ),
+                {"tid": tenant_id},
+            )
         await conn.execute(
             text("DELETE FROM ref.tenants WHERE id = CAST(:tid AS uuid)"),
             {"tid": tenant_id},
