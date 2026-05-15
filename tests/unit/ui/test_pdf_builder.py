@@ -114,19 +114,26 @@ class TestPDFBuilderFallback:
         )
 
     def test_template_declares_company_name(self) -> None:
-        """ESRS E1 main template must declare the reporting entity.
+        """ESRS E1 main template must declare a reporting-entity placeholder.
 
         Bytes-level search on the PDF output is unreliable because
         WeasyPrint/pydyf compress text streams (FlateDecode). We verify
-        the company name is present in the template source instead.
+        the template source itself instead.
+
+        The brand was previously hardcoded ('Saturnia'); the rebrand wave
+        replaced the literal with a Jinja ``{{ company_name }}`` placeholder
+        injected at render time from ``GHG_COMPANY_NAME``. The invariant
+        we now enforce is that the placeholder exists.
         """
         from pathlib import Path
 
         template = Path(
             "src/ghg_tool/ui/pdf/templates/esrs_e1.html"
         ).read_text(encoding="utf-8")
-        assert "Saturnia" in template, (
-            "Reporting entity 'Saturnia' must appear in esrs_e1.html"
+        assert "{{ company_name }}" in template, (
+            "Reporting entity placeholder '{{ company_name }}' must appear "
+            "in esrs_e1.html (rebrand: hardcoded names removed in favour "
+            "of GHG_COMPANY_NAME-injected placeholder)."
         )
 
 
