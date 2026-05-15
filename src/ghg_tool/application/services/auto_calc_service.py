@@ -31,6 +31,14 @@ M6 additions (auto_calc_design.md §12 second round):
     hardcoding 'IT'.
   Task D: on compute_and_insert, also insert into raw.direct_entry and link
     raw_row_id on the emissions_consolidated row.
+
+Wave4 additions (2026-05-15 customer decision):
+  S3 corporate decoupling: Scope 3 is corporate-level (entire group), not
+  per-site. All S3 sub-handlers (_preview_s3_cat*) do NOT fetch site metadata
+  and do NOT guard on site_type. The codice_sito field is enforced to be None
+  at the schema layer (CalcInputRequest validator) and stored as NULL in
+  emissions_consolidated. The _fetch_site_meta call in compute_preview is
+  naturally skipped because request.codice_sito is None for all S3 requests.
 """
 
 from __future__ import annotations
