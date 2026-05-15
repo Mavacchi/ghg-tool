@@ -72,6 +72,7 @@ def _sample_row(
     is_licence_only: bool = False,
 ) -> dict:
     return {
+        "id": str(uuid.uuid4()),
         "factor_id": factor_id,
         "version": "2025",
         "value": "0.27",
