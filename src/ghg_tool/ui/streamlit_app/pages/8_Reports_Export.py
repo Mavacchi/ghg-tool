@@ -33,6 +33,7 @@ from ghg_tool.ui.streamlit_app.lib.api_client import (  # noqa: E402
     trigger_pdf_report,
     trigger_excel_report,
     fetch_job_status,
+    download_report,
     fetch_kpis,
     fetch_emissions,
     fetch_dq_findings,
@@ -380,6 +381,31 @@ with col_xls_status:
             download_url = status_data.get("download_url")
             if download_url and _is_safe_download_url(download_url):
                 st.link_button(_("download_excel", lang), download_url)
+            else:
+                # download_url is absent (in-process render stores bytes
+                # server-side, not as a pre-signed URL).  Fetch the raw
+                # bytes via GET /api/v1/exports/jobs/{job_id}/download and
+                # offer a real st.download_button so the browser triggers
+                # a file-save dialog.
+                xlsx_bytes = download_report(job_id_xlsx)
+                if xlsx_bytes:
+                    st.download_button(
+                        label=_("download_excel", lang),
+                        data=xlsx_bytes,
+                        file_name=f"ghg_report_{job_id_xlsx}.xlsx",
+                        mime=(
+                            "application/vnd.openxmlformats-officedocument"
+                            ".spreadsheetml.sheet"
+                        ),
+                        key=f"dl_xlsx_{job_id_xlsx}",
+                    )
+                else:
+                    st.warning(
+                        "Report completato ma file non disponibile. "
+                        "Riprovare tra qualche secondo."
+                    )
+        elif status == "FAILED":
+            st.error(status_data.get("error_message", "Errore sconosciuto"))
 
 # ---------------------------------------------------------------------------
 # Footer
