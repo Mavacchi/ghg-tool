@@ -499,6 +499,43 @@ def download_report(job_id: str) -> bytes | None:
         return None
 
 
+def fetch_excel_template(*, token: str | None = None) -> bytes | None:
+    """Scarica il template Excel vuoto da GET /api/v1/raw/excel/template.
+
+    Chiama l'endpoint che genera il workbook .xlsx con i 3 fogli scope +
+    il foglio _README con istruzioni. Il file restituito può essere
+    passato direttamente a ``st.download_button``.
+
+    Args:
+        token: Bearer JWT per la sessione corrente. Se None usa il token
+            da ``st.session_state`` (o il token demo se in modalità demo).
+
+    Returns:
+        Bytes del file .xlsx, oppure None in caso di errore di rete o auth.
+    """
+    from ghg_tool.ui.streamlit_app.lib.auth import _DEMO_MODE, _DEMO_TOKEN  # noqa: PLC0415
+
+    if not token:
+        token = st.session_state.get("token")
+    if not token:
+        token = _DEMO_TOKEN if _DEMO_MODE else None
+
+    headers: dict[str, str] = {}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+
+    try:
+        resp = httpx.get(
+            f"{_get_base_url()}/api/v1/raw/excel/template",
+            headers=headers,
+            timeout=_TIMEOUT,
+        )
+        resp.raise_for_status()
+        return resp.content
+    except (httpx.HTTPStatusError, httpx.RequestError):
+        return None
+
+
 def import_excel(file_bytes: bytes) -> dict[str, Any]:
     """POST an Excel workbook to /api/v1/raw/excel/import.
 

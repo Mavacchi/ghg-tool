@@ -49,6 +49,7 @@ from ghg_tool.ui.streamlit_app.lib.api_client import (  # noqa: E402
     create_emission,
     create_factor,
     fetch_emissions,
+    fetch_excel_template,
     fetch_factor_catalog,
     import_excel,
     post_correction,
@@ -643,6 +644,36 @@ with tab_excel:
             icon="🔒",
         )
     else:
+        # --- Modello vuoto scaricabile ---
+        st.markdown("**Modello Excel**")
+        if lang == "en":
+            st.caption(
+                "Download the empty template, fill in your data, then upload it below."
+            )
+        else:
+            st.caption(
+                "Scarica il modello vuoto, compila i tuoi dati, poi caricalo qui sotto."
+            )
+
+        template_bytes = fetch_excel_template()
+        st.download_button(
+            label="Scarica modello Excel" if lang != "en" else "Download Excel template",
+            data=template_bytes or b"",
+            file_name="carbontrace_template.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            disabled=template_bytes is None,
+            key="download_excel_template",
+            help=(
+                "Scarica il file .xlsx con le colonne corrette per ogni scope. "
+                "Compilalo e caricalo qui sotto per importare i tuoi dati."
+                if lang != "en"
+                else "Download the .xlsx file with the correct columns for each scope. "
+                "Fill it in and upload it below to import your data."
+            ),
+        )
+
+        st.divider()
+
         uploaded = st.file_uploader(
             "File Excel (.xlsx)",
             type=["xlsx"],
