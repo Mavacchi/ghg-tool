@@ -164,6 +164,10 @@ module = [
     "ghg_tool.etl.readers.excel_reader",
     "ghg_tool.ui.pdf.exec_dashboard",
     "ghg_tool.infrastructure.scheduling.calc_scheduler",
+    "ghg_tool.ui.streamlit_app.lib.filters",
+    "ghg_tool.ui.streamlit_app.lib.brand",
+    "ghg_tool.ui.streamlit_app.lib.auth",
+    "ghg_tool.ui.streamlit_app.lib.api_client",
 ]
 ignore_errors = true
 
