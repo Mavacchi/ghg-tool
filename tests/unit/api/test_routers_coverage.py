@@ -395,6 +395,7 @@ def _factor_mock(**kwargs: Any) -> MagicMock:
         "applicability_note": None,
         "pdf_source_uri": None,
         "biogenic_co2_kg_per_unit": None,
+        "created_at": datetime.now(tz=UTC),
         "published_at": datetime.now(tz=UTC),
         "published_by": "test-user",
         "is_published": True,
