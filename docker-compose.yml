@@ -67,6 +67,10 @@ services:
     environment:
       SQLALCHEMY_URL: "postgresql+asyncpg://ghg_app:${POSTGRES_PASSWORD:-changeme}@db:5432/ghg_tool"
       GHG_LOG_LEVEL: "${GHG_LOG_LEVEL:-INFO}"
+      # Production-safe defaults: no demo seed, no /docs Swagger UI.
+      # Override with docker-compose.quickstart.yml for the
+      # demo onboarding flow (preloaded data + demo/demo login).
+      GHG_ENVIRONMENT: "${GHG_ENVIRONMENT:-production}"
     ports:
       - "8000:8000"
     restart: unless-stopped
