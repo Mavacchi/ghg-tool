@@ -70,8 +70,8 @@ dev = [
     "pandas-stubs>=2.2,<2.3",
     # Integration test tier (wave-4 item #11): real PostgreSQL via testcontainers
     "testcontainers[postgres]>=4.0,<5.0",
-    # import-linter -- wave 2 wiring: enforce src/ghg_tool import-direction rules
-    # "import-linter>=2.0,<2.1",  # uncomment at wave 2 after all modules wired
+    # import-linter -- wave 5 wiring: enforce hexagonal architecture contracts
+    "import-linter>=2.1",  # enabled wave 5; see .importlinter for contracts
 ]
 
 [tool.hatch.build.targets.wheel]

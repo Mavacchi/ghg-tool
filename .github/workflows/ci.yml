@@ -42,6 +42,17 @@ jobs:
       - name: Run mypy (strict)
         run: python -m mypy src/ghg_tool
 
+      - name: import-linter (architecture contracts)
+        # Enforces hexagonal contracts defined in .importlinter.
+        # Known violations (wave5, tracked for REFACTOR cluster):
+        #   - application -> api (auth_service, auto_calc_service schema/middleware imports)
+        #   - application -> ui  (export_service/export_tasks -> ui.pdf/excel builders)
+        #   - infrastructure -> application (calc_scheduler -> application.services)
+        # These fail the step intentionally so violations are visible in CI;
+        # fix them in the REFACTOR cluster, not here.
+        run: PYTHONPATH=src lint-imports
+        continue-on-error: true  # TODO wave6-refactor: set false once all violations resolved
+
   unit:
     name: Unit tests (coverage ≥ 85 %)
     runs-on: ubuntu-22.04
