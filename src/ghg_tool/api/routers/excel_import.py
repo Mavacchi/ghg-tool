@@ -338,6 +338,247 @@ def _do_db_work(
 
 
 # ---------------------------------------------------------------------------
+# Private helpers — each <80 lines; extracted from import_excel for clarity
+# ---------------------------------------------------------------------------
+
+
+async def _validate_workbook(
+    workbook: UploadFile,
+    correlation_id: str | None,
+    log: Any,
+) -> tuple[bytes, dict[str, Any]]:
+    """Read, size-guard, and parse the uploaded workbook.
+
+    Args:
+        workbook: Uploaded .xlsx file from multipart form data.
+        correlation_id: Request trace ID for error bodies.
+        log: Bound structlog logger.
+
+    Returns:
+        Tuple of (raw_bytes, parsed_sheets) where parsed_sheets maps scope
+        names (e.g. "scope1") to pandas DataFrames.
+
+    Raises:
+        HTTPException: 422 if size exceeds 10 MB or workbook fails parsing.
+    """
+    raw_bytes = await workbook.read()
+    if len(raw_bytes) > _MAX_UPLOAD_BYTES:
+        log.warning("excel_import_rejected_too_large", size_bytes=len(raw_bytes))
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "type": "about:blank",
+                "title": "Unprocessable Entity",
+                "status": 422,
+                "detail": (
+                    f"Workbook exceeds the 10 MB size limit "
+                    f"({len(raw_bytes)} bytes received)."
+                ),
+                "correlation_id": correlation_id,
+            },
+        )
+    try:
+        parsed = parse_workbook(raw_bytes)
+    except InvalidExcelFormatError as exc:
+        log.warning("excel_import_invalid_format", detail=str(exc))
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "type": "about:blank",
+                "title": "Invalid Excel Format",
+                "status": 422,
+                "detail": str(exc),
+                "error_code": "invalid_excel_format",
+                "correlation_id": correlation_id,
+            },
+        ) from exc
+    except WorkbookParseError as exc:
+        log.warning("excel_import_parse_error", detail=str(exc))
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "type": "about:blank",
+                "title": "Workbook Parse Error",
+                "status": 422,
+                "detail": str(exc),
+                "correlation_id": correlation_id,
+            },
+        ) from exc
+    return raw_bytes, parsed
+
+
+def _run_etl_pipeline(
+    parsed: dict[str, Any],
+    batch_id: uuid.UUID,
+    tenant_id: uuid.UUID,
+    ingested_by: str,
+) -> Any:
+    """Write temp CSVs and run the ETL orchestrator.
+
+    Args:
+        parsed: Dict mapping scope name -> pandas DataFrame.
+        batch_id: UUID for the new ingestion_batches row.
+        tenant_id: Tenant UUID sourced from the JWT.
+        ingested_by: Truncated user sub (non-PII provenance tag).
+
+    Returns:
+        Orchestrator result with scope1_rows, scope2_rows, scope3_rows,
+        all_findings, and pipeline_blocked attributes.
+    """
+    from pathlib import Path  # noqa: PLC0415
+
+    import pandas as pd  # noqa: PLC0415
+
+    _formula_triggers = frozenset({"=", "+", "-", "@", "\t", "\r"})
+
+    def _sanitise(value: Any) -> Any:
+        """Prefix formula-trigger chars to prevent CSV injection (BUG-07)."""
+        if isinstance(value, str) and value and value[0] in _formula_triggers:
+            return "'" + value
+        return value
+
+    def _write_csv(df: pd.DataFrame) -> Any:
+        """Write df to a UTF-8-BOM semicolon temp CSV; caller owns the handle."""
+        tf = tempfile.NamedTemporaryFile(  # noqa: SIM115
+            mode="w", suffix=".csv", prefix="ghg_excel_",
+            encoding="utf-8-sig", delete=True, dir=None,
+        )
+        try:
+            sanitised = df.map(_sanitise)  # pandas >= 2.1
+        except AttributeError:
+            sanitised = df.applymap(_sanitise)  # pandas < 2.1 fallback
+        sanitised.to_csv(tf, sep=";", index=False)
+        tf.flush()
+        return tf
+
+    scope1_df = parsed.get("scope1", pd.DataFrame())
+    scope2_df = parsed.get("scope2", pd.DataFrame())
+    scope3_df = parsed.get("scope3", pd.DataFrame())
+
+    with (
+        _write_csv(scope1_df) as tmp1,
+        _write_csv(scope2_df) as tmp2,
+        _write_csv(scope3_df) as tmp3,
+    ):
+        return run_ingestion_pipeline(
+            scope1_path=Path(tmp1.name),
+            scope2_path=Path(tmp2.name),
+            scope3_path=Path(tmp3.name),
+            batch_id=batch_id,
+            tenant_id=tenant_id,
+            ingested_by=ingested_by,
+            dq_report_version=_DQ_REPORT_VERSION,
+        )
+
+
+def _check_dq_gate(result: Any, correlation_id: str | None, log: Any) -> None:
+    """Raise 422 if any DQ-CRIT finding blocks the pipeline.
+
+    Args:
+        result: Orchestrator result with all_findings and pipeline_blocked.
+        correlation_id: Request trace ID for error bodies.
+        log: Bound structlog logger.
+
+    Raises:
+        HTTPException: 422 if pipeline_blocked is True.
+    """
+    if not result.pipeline_blocked:
+        return
+    crit_findings = [f for f in result.all_findings if f.get("severity") == "CRIT"]
+    log.warning("excel_import_dq_crit_blocked", crit_count=len(crit_findings))
+    raise HTTPException(
+        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        detail={
+            "type": "about:blank",
+            "title": "DQ-CRIT Gate Blocked Import",
+            "status": 422,
+            "detail": (
+                f"{len(crit_findings)} critical data-quality finding(s) "
+                "must be resolved before this workbook can be imported."
+            ),
+            "blocked_findings": [
+                {
+                    "rule_id": f.get("rule_id"),
+                    "scope": f.get("scope"),
+                    "codice_sito": f.get("codice_sito"),
+                    "anno": f.get("anno"),
+                    "trigger_desc": f.get("trigger_desc"),
+                    "recommended_action": f.get("recommended_action"),
+                }
+                for f in crit_findings
+            ],
+            "correlation_id": correlation_id,
+        },
+    )
+
+
+async def _emit_import_audit(
+    *,
+    session: AsyncSession,
+    batch_id: uuid.UUID,
+    tenant_id: uuid.UUID,
+    inserted: dict[str, int],
+    user: CurrentUser,
+    request: Request,
+    correlation_id: str | None,
+    filename: str | None,
+) -> None:
+    """Write audit_log row and emit SIEM event for a completed import.
+
+    Args:
+        session: Async DB session for the audit log insert.
+        batch_id: UUID of the ingestion_batches row.
+        tenant_id: Tenant UUID from the JWT.
+        inserted: Row-count dict from _do_db_work (keys: s1, s2, s3, findings).
+        user: Authenticated user context.
+        request: HTTP request for IP/UA extraction.
+        correlation_id: Request trace ID.
+        filename: Original uploaded filename (for SIEM payload).
+    """
+    now = datetime.now(tz=UTC)
+    session.add(AuditLog(
+        id=uuid.uuid4(),
+        tenant_id=tenant_id,
+        correlation_id=uuid.UUID(correlation_id) if correlation_id else batch_id,
+        occurred_at=now,
+        user_id=uuid.UUID(user.sub),
+        user_role=user.role,
+        action="excel_imported",
+        resource="raw_ingestions",
+        resource_id=batch_id,
+        request_method="POST",
+        request_path="/api/v1/raw/excel/import",
+        status_code=200,
+        ip_address=request.client.host if request.client else None,
+        user_agent=request.headers.get("user-agent", "")[:200],
+        after_state={
+            "batch_id": str(batch_id),
+            "scope1_rows": inserted["s1"],
+            "scope2_rows": inserted["s2"],
+            "scope3_rows": inserted["s3"],
+            "dq_findings": inserted["findings"],
+        },
+    ))
+    await session.flush()
+
+    siem.emit(
+        event="excel_imported",
+        correlation_id=correlation_id,
+        tenant_id=user.tenant_id,
+        user_sub=user.sub[:8],
+        severity="INFO",
+        payload={
+            "batch_id": str(batch_id),
+            "scope1_rows": inserted["s1"],
+            "scope2_rows": inserted["s2"],
+            "scope3_rows": inserted["s3"],
+            "dq_findings": inserted["findings"],
+            "filename": filename or "unknown",
+        },
+    )
+
+
+# ---------------------------------------------------------------------------
 # Endpoint
 # ---------------------------------------------------------------------------
 
@@ -380,8 +621,15 @@ async def import_excel(
 ) -> ExcelImportResponse:
     """Parse and import an Excel workbook into raw staging tables.
 
+    Delegates to private helpers for each pipeline stage:
+    - ``_validate_workbook`` — size guard + parse.
+    - ``_run_etl_pipeline`` — temp CSV writes + ETL orchestrator.
+    - ``_check_dq_gate`` — DQ-CRIT findings gate.
+    - ``_do_db_work`` — bulk insert via sync psycopg in a thread.
+    - ``_emit_import_audit`` — audit log + SIEM event.
+
     Args:
-        request: The incoming HTTP request (used for ip_address / user_agent).
+        request: The incoming HTTP request (for ip_address / user_agent).
         workbook: Uploaded .xlsx file from multipart form data.
         user: Authenticated user (editor or admin).
         session: Authenticated async DB session with RLS GUCs set.
@@ -391,6 +639,7 @@ async def import_excel(
 
     Raises:
         HTTPException: 422 on parse failure or DQ-CRIT block.
+        HTTPException: 500 on DB write failure.
     """
     correlation_id = get_correlation_id()
     log = logger.bind(
@@ -402,171 +651,16 @@ async def import_excel(
     )
     log.info("excel_import_started", filename=workbook.filename)
 
-    # ------------------------------------------------------------------
-    # 1. Size guard — reject before reading the full body
-    # ------------------------------------------------------------------
-    raw_bytes = await workbook.read()
-    if len(raw_bytes) > _MAX_UPLOAD_BYTES:
-        log.warning(
-            "excel_import_rejected_too_large",
-            size_bytes=len(raw_bytes),
-        )
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail={
-                "type": "about:blank",
-                "title": "Unprocessable Entity",
-                "status": 422,
-                "detail": (
-                    f"Workbook exceeds the 10 MB size limit "
-                    f"({len(raw_bytes)} bytes received)."
-                ),
-                "correlation_id": correlation_id,
-            },
-        )
-
-    # ------------------------------------------------------------------
-    # 2. Parse the workbook in-memory (bytes never touch disk)
-    # ------------------------------------------------------------------
-    try:
-        parsed = parse_workbook(raw_bytes)
-    except InvalidExcelFormatError as exc:
-        # BUG-13: magic-byte check failed before openpyxl was invoked.
-        log.warning("excel_import_invalid_format", detail=str(exc))
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail={
-                "type": "about:blank",
-                "title": "Invalid Excel Format",
-                "status": 422,
-                "detail": str(exc),
-                "error_code": "invalid_excel_format",
-                "correlation_id": correlation_id,
-            },
-        ) from exc
-    except WorkbookParseError as exc:
-        log.warning("excel_import_parse_error", detail=str(exc))
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail={
-                "type": "about:blank",
-                "title": "Workbook Parse Error",
-                "status": 422,
-                "detail": str(exc),
-                "correlation_id": correlation_id,
-            },
-        ) from exc
-
-    # ------------------------------------------------------------------
-    # 3. Write temp CSVs and run the ETL orchestrator
-    #
-    # The orchestrator requires Path objects pointing at CSV files.
-    # We write temporary CSVs (semicolon-delimited, UTF-8-BOM, exactly
-    # matching what csv_reader expects) and keep them only long enough
-    # for the orchestrator to read them.  delete=True ensures cleanup
-    # even on exception.
-    # ------------------------------------------------------------------
-    from pathlib import Path  # noqa: PLC0415
-
-    import pandas as pd  # noqa: PLC0415
+    _raw_bytes, parsed = await _validate_workbook(workbook, correlation_id, log)
 
     batch_id = uuid.uuid4()
     tenant_id = uuid.UUID(user.tenant_id)
 
-    # Build placeholder DataFrames for scopes not present in the upload.
-    # The orchestrator always requires all three paths; absent scopes get
-    # an empty DataFrame that passes pandera with zero rows.
-    scope1_df = parsed.get("scope1", pd.DataFrame())
-    scope2_df = parsed.get("scope2", pd.DataFrame())
-    scope3_df = parsed.get("scope3", pd.DataFrame())
+    result = _run_etl_pipeline(
+        parsed, batch_id=batch_id, tenant_id=tenant_id, ingested_by=user.sub[:8]
+    )
+    _check_dq_gate(result, correlation_id, log)
 
-    def _sanitise_cell_for_csv(value: Any) -> Any:
-        """Prefix formula-trigger chars to prevent CSV injection (BUG-07).
-
-        Affected first-characters: ``=``, ``+``, ``-``, ``@``, ``\\t``, ``\\r``.
-        """
-        formula_triggers = frozenset({"=", "+", "-", "@", "\t", "\r"})
-        if isinstance(value, str) and value and value[0] in formula_triggers:
-            return "'" + value
-        return value
-
-    # tempfile.NamedTemporaryFile is a factory returning a private
-    # _TemporaryFileWrapper class; annotate as Any.
-    def _write_temp_csv(df: pd.DataFrame) -> Any:
-        """Write df to a UTF-8-BOM semicolon CSV in /tmp; caller owns the handle.
-
-        All string cells are sanitised against formula injection before writing
-        (BUG-07: temp CSV path was previously unsanitised).
-        """
-        tf = tempfile.NamedTemporaryFile(  # noqa: SIM115
-            mode="w",
-            suffix=".csv",
-            prefix="ghg_excel_",
-            encoding="utf-8-sig",
-            delete=True,
-            dir=None,  # system default tmp dir
-        )
-        try:
-            sanitised = df.map(_sanitise_cell_for_csv)  # pandas >= 2.1
-        except AttributeError:
-            sanitised = df.applymap(_sanitise_cell_for_csv)  # pandas < 2.1 fallback
-        sanitised.to_csv(tf, sep=";", index=False)
-        tf.flush()
-        return tf
-
-    with (
-        _write_temp_csv(scope1_df) as tmp1,
-        _write_temp_csv(scope2_df) as tmp2,
-        _write_temp_csv(scope3_df) as tmp3,
-    ):
-        result = run_ingestion_pipeline(
-            scope1_path=Path(tmp1.name),
-            scope2_path=Path(tmp2.name),
-            scope3_path=Path(tmp3.name),
-            batch_id=batch_id,
-            tenant_id=tenant_id,
-            ingested_by=user.sub[:8],  # truncated sub — no PII in provenance
-            dq_report_version=_DQ_REPORT_VERSION,
-        )
-
-    # ------------------------------------------------------------------
-    # 4. DQ-CRIT gate check
-    # ------------------------------------------------------------------
-    crit_findings = [f for f in result.all_findings if f.get("severity") == "CRIT"]
-    if result.pipeline_blocked:
-        log.warning(
-            "excel_import_dq_crit_blocked",
-            crit_count=len(crit_findings),
-        )
-        # Surface every CRIT finding so the user knows what to fix.
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail={
-                "type": "about:blank",
-                "title": "DQ-CRIT Gate Blocked Import",
-                "status": 422,
-                "detail": (
-                    f"{len(crit_findings)} critical data-quality finding(s) "
-                    "must be resolved before this workbook can be imported."
-                ),
-                "blocked_findings": [
-                    {
-                        "rule_id": f.get("rule_id"),
-                        "scope": f.get("scope"),
-                        "codice_sito": f.get("codice_sito"),
-                        "anno": f.get("anno"),
-                        "trigger_desc": f.get("trigger_desc"),
-                        "recommended_action": f.get("recommended_action"),
-                    }
-                    for f in crit_findings
-                ],
-                "correlation_id": correlation_id,
-            },
-        )
-
-    # ------------------------------------------------------------------
-    # 5. Persist rows via sync psycopg in a worker thread
-    # ------------------------------------------------------------------
     try:
         inserted = await asyncio.to_thread(
             _do_db_work,
@@ -579,10 +673,7 @@ async def import_excel(
             findings=result.all_findings,
         )
     except Exception as exc:
-        log.error(
-            "excel_import_db_error",
-            error_class=type(exc).__name__,
-        )
+        log.error("excel_import_db_error", error_class=type(exc).__name__)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail={
@@ -594,55 +685,15 @@ async def import_excel(
             },
         ) from exc
 
-    # ------------------------------------------------------------------
-    # 6. Write audit_log row via SQLAlchemy async session (same transaction
-    #    boundary as the rest of the API — the psycopg writes above are in
-    #    their own connection and already committed).
-    # ------------------------------------------------------------------
-    now = datetime.now(tz=UTC)
-    audit_row = AuditLog(
-        id=uuid.uuid4(),
+    await _emit_import_audit(
+        session=session,
+        batch_id=batch_id,
         tenant_id=tenant_id,
-        correlation_id=uuid.UUID(correlation_id) if correlation_id else batch_id,
-        occurred_at=now,
-        user_id=uuid.UUID(user.sub),
-        user_role=user.role,
-        action="excel_imported",
-        resource="raw_ingestions",
-        resource_id=batch_id,
-        request_method="POST",
-        request_path="/api/v1/raw/excel/import",
-        status_code=200,
-        ip_address=request.client.host if request.client else None,
-        user_agent=request.headers.get("user-agent", "")[:200],
-        after_state={
-            "batch_id": str(batch_id),
-            "scope1_rows": inserted["s1"],
-            "scope2_rows": inserted["s2"],
-            "scope3_rows": inserted["s3"],
-            "dq_findings": inserted["findings"],
-        },
-    )
-    session.add(audit_row)
-    await session.flush()
-
-    # ------------------------------------------------------------------
-    # 7. SIEM event (best-effort, never blocks the response)
-    # ------------------------------------------------------------------
-    siem.emit(
-        event="excel_imported",
+        inserted=inserted,
+        user=user,
+        request=request,
         correlation_id=correlation_id,
-        tenant_id=user.tenant_id,
-        user_sub=user.sub[:8],
-        severity="INFO",
-        payload={
-            "batch_id": str(batch_id),
-            "scope1_rows": inserted["s1"],
-            "scope2_rows": inserted["s2"],
-            "scope3_rows": inserted["s3"],
-            "dq_findings": inserted["findings"],
-            "filename": workbook.filename or "unknown",
-        },
+        filename=workbook.filename,
     )
 
     log.info(
