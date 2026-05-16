@@ -100,7 +100,7 @@ REM secret casuale + una password Postgres di default.  L'utente puo
 REM cambiare i valori a posteriori modificando il file.
 if not exist ".env" (
     echo [INFO] Primo avvio: genero un file .env con un GHG_JWT_SECRET casuale.
-    powershell -NoProfile -ExecutionPolicy Bypass -Command "$s = -join ((48..57 + 65..90 + 97..122) | Get-Random -Count 48 | ForEach-Object {[char]$_}); \"GHG_JWT_SECRET=$s`r`nPOSTGRES_PASSWORD=changeme\" | Out-File -Encoding ASCII -FilePath .env -NoNewline"
+    powershell -NoProfile -ExecutionPolicy Bypass -Command "$s = -join ((48..57 + 65..90 + 97..122) | Get-Random -Count 48 | ForEach-Object {[char]$_}); \"GHG_JWT_SECRET=$s`r`nPOSTGRES_PASSWORD=changeme`r`n\" | Out-File -Encoding ASCII -FilePath .env -NoNewline"
     if errorlevel 1 (
         echo [ERRORE] Non sono riuscito a generare il file .env.
         echo Creane uno a mano con questo contenuto ^(sostituisci ^<secret^> con
@@ -113,6 +113,23 @@ if not exist ".env" (
     )
     echo [OK] File .env creato. Custodiscilo: contiene il secret JWT.
     echo.
+) else (
+    REM .env esiste: verifica che non sia il file rotto generato da una versione
+    REM precedente di questo script (caratteri di escape PowerShell letterali,
+    REM variabili tipo ${X} che Docker Compose proverebbe a espandere).
+    findstr /R /C:"^GHG_JWT_SECRET=[A-Za-z0-9]" .env >nul 2>&1
+    if errorlevel 1 (
+        echo [ERRORE] Il file .env esiste ma non contiene una riga valida
+        echo          GHG_JWT_SECRET=^<alfanumerici^>.  Probabilmente e' rotto
+        echo          (generato da una versione precedente di start.bat con
+        echo          il bug PowerShell delle escape '^').
+        echo.
+        echo Soluzione: cancella il file .env e rilancia start.bat.
+        echo Lo script ne creera' uno nuovo con un secret casuale.
+        echo.
+        echo Comando per cancellarlo:  del .env
+        exit /b 1
+    )
 )
 
 echo Avvio dei container ^(db + migrate + api + dashboard^)...
