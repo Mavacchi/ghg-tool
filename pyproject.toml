@@ -34,13 +34,10 @@ dependencies = [
     # SEC-P1-004: migrated from python-jose (CVE-2024-33664) to PyJWT 2.8+.
     "pyjwt[crypto]>=2.8,<3.0",
     "passlib[bcrypt]>=1.7,<1.8",
-<<<<<<< HEAD
-    # SEC-CVE-2024-24762: bump python-multipart to >=0.0.18 to pick up the
-    # ReDoS fix in the multipart parser.
-    "python-multipart>=0.0.18,<0.1.0",
-=======
-    "python-multipart>=0.0.27,<0.0.29",  # CVE-2024-53981/CVE-2026-24486/CVE-2026-40347/CVE-2026-42561 fixed in 0.0.27
->>>>>>> a9687d5 (ci(security): add pip-audit dependency vulnerability scan (security-rec))
+    # Security pins (CVE coverage):
+    #   - CVE-2024-24762: ReDoS in multipart parser, fixed in 0.0.18
+    #   - CVE-2024-53981 / CVE-2026-24486 / CVE-2026-40347 / CVE-2026-42561: fixed in 0.0.27
+    "python-multipart>=0.0.27,<0.0.29",
     # Rate limiting
     "slowapi>=0.1,<0.2",
     # TOTP 2FA
