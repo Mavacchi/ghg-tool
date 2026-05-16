@@ -34,7 +34,8 @@ os.environ.setdefault("GHG_JWT_ALGORITHM", "HS256")
 os.environ.setdefault("GHG_JWT_SECRET", "test-secret-key-for-unit-tests-only")
 os.environ.setdefault("GHG_ENVIRONMENT", "development")
 
-import jose.jwt as jose_jwt  # noqa: E402
+# SEC-P1-004: migrated from python-jose to PyJWT.
+import jwt as jose_jwt  # noqa: E402 -- alias retained for diff minimality
 
 from ghg_tool.api.schemas.auth_schemas import TokenResponse  # noqa: E402
 from ghg_tool.application.services.auth_service import (  # noqa: E402

@@ -3,6 +3,10 @@
 Combines the wave 1 ``get_db_session`` factory with the decoded JWT claims
 from the auth dependency to inject ``app.tenant_id`` and ``app.role_code``
 GUCs for PostgreSQL RLS (AD-008, SG-02/03).
+
+Wave4 Task B: after GUC injection, calls ``get_or_provision_user`` so that
+SSO-origin JWT users are lazily inserted into ``ref.users`` before any FK
+constraint on ``audit_log.user_id`` can fire.
 """
 
 from __future__ import annotations
@@ -10,14 +14,19 @@ from __future__ import annotations
 from collections.abc import AsyncGenerator
 from typing import Any
 
-from fastapi import Depends
+from fastapi import Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ghg_tool.api.dependencies.auth import CurrentUser, get_current_user
+from ghg_tool.api.dependencies.auth import (
+    CurrentUser,
+    get_current_user,
+    get_or_provision_user,
+)
 from ghg_tool.infrastructure.db.session import AsyncSessionFactory, set_session_gucs
 
 
 async def get_db(
+    request: Request,
     user: CurrentUser = Depends(get_current_user),
 ) -> AsyncGenerator[AsyncSession, None]:
     """FastAPI dependency: authenticated async DB session with RLS GUCs set.
@@ -26,7 +35,14 @@ async def get_db(
     ``app.user_id`` injected via ``SET LOCAL`` so that all PostgreSQL RLS
     policies fire correctly for the authenticated user.
 
+    Wave4 Task B: after GUC injection, lazily provisions a ``ref.users`` row
+    for JWT-verified users who arrived from an external SSO and are not yet
+    in the local users table.  This prevents FK violations on
+    ``audit_log.user_id``.  The provisioning is idempotent and best-effort;
+    a failure does not abort the request.
+
     Args:
+        request: The incoming HTTP request (used to retrieve stashed JWT claims).
         user: The decoded current user from the auth dependency.
 
     Yields:
@@ -39,6 +55,14 @@ async def get_db(
             role_code=user.role,
             user_id=user.sub,
         )
+        # Task B: lazy user provisioning — idempotent, best-effort.
+        jwt_claims: dict[str, Any] = getattr(request.state, "jwt_claims", {})
+        if jwt_claims:
+            await get_or_provision_user(
+                session,
+                jwt_payload=jwt_claims,
+                tenant_id=user.tenant_id,
+            )
         yield session
 
 

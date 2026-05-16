@@ -13,6 +13,26 @@ import pytest
 os.environ.setdefault("GHG_JWT_ALGORITHM", "HS256")
 os.environ.setdefault("GHG_JWT_SECRET", "test-secret-key-for-unit-tests-only")
 os.environ.setdefault("GHG_ENVIRONMENT", "development")
+# SEC-P1-007: force the in-memory Redis fallback for all unit tests so the
+# suite never reaches out to a live server.  Production behaviour is
+# unchanged -- the fallback is only honoured when this env var is set.
+os.environ.setdefault("GHG_REDIS_DISABLED", "1")
+
+
+@pytest.fixture(autouse=True)
+def _reset_redis_state() -> None:
+    """Drop the Redis singleton + blacklist between every unit test.
+
+    SEC-P1-007: the in-memory fallback is process-wide; without this
+    reset a previous test's blacklisted jti would carry over and a
+    later test that happens to mint a token with the same uuid would
+    spuriously be rejected.  ``reset_for_testing`` flushes the shim and
+    drops the cached client so the next ``get_redis_client()`` call
+    re-evaluates env (still GHG_REDIS_DISABLED=1).
+    """
+    from ghg_tool.infrastructure import redis_client
+
+    redis_client.reset_for_testing()
 
 
 @pytest.fixture(autouse=True)

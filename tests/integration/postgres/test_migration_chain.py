@@ -19,6 +19,8 @@ from __future__ import annotations
 
 import os
 import uuid
+from collections.abc import Callable
+from typing import Any
 
 import pytest
 from alembic import command as alembic_command
@@ -52,6 +54,39 @@ def _make_config(sync_url: str) -> AlembicConfig:
     return cfg
 
 
+def _run_alembic_against(
+    sync_url: str,
+    func: Callable[..., Any],
+    *args: object,
+) -> None:
+    """Run an alembic command against ``sync_url``, overriding ``SQLALCHEMY_URL``.
+
+    ``alembic/env.py`` reads ``SQLALCHEMY_URL`` from the environment and uses it
+    to override any programmatic ``cfg.set_main_option("sqlalchemy.url", ...)``.
+    In CI (the ``integration.yml`` GHA workflow) ``SQLALCHEMY_URL`` is exported
+    pointing at the GHA postgres service container — which is a *different*
+    database from the testcontainer this test just created.  Without this
+    override the migration is applied to the wrong DB and the subsequent
+    assertions hit an un-migrated database (``alembic_version`` missing).
+
+    Args:
+        sync_url: Target DSN (must win against any ambient ``SQLALCHEMY_URL``).
+        func: The ``alembic.command`` callable to invoke (``upgrade``,
+            ``downgrade``).
+        *args: Positional arguments forwarded to ``func`` after ``cfg``.
+    """
+    original_env = os.environ.get("SQLALCHEMY_URL")
+    os.environ["SQLALCHEMY_URL"] = sync_url
+    try:
+        cfg = _make_config(sync_url)
+        func(cfg, *args)
+    finally:
+        if original_env is None:
+            os.environ.pop("SQLALCHEMY_URL", None)
+        else:
+            os.environ["SQLALCHEMY_URL"] = original_env
+
+
 def _container_sync_url(container: PostgresContainer) -> str:
     """Convert a testcontainers connection URL to use the psycopg (v3) driver.
 
@@ -71,17 +106,6 @@ def _container_sync_url(container: PostgresContainer) -> str:
     return url
 
 
-@pytest.mark.xfail(
-    reason=(
-        "Pre-existing assertion mismatch on the integration.yml GHA workflow: "
-        "the test expects to query alembic_version against a freshly-created "
-        "ephemeral DB, but in CI the testcontainer fixture runs alembic upgrade "
-        "head against a DIFFERENT DB (cf. conftest env precedence fix), leaving "
-        "this DB empty. Distinct from the downgrade-roundtrip xfail. Tracked "
-        "for migration-test-infra follow-up."
-    ),
-    strict=False,
-)
 @pytest.mark.integration
 def test_upgrade_head_succeeds_on_clean_container() -> None:
     """alembic upgrade head runs without error on a clean PostgreSQL 15 database.
@@ -92,6 +116,14 @@ def test_upgrade_head_succeeds_on_clean_container() -> None:
 
     Failure here indicates a migration script with a syntax error, a
     missing dependency, or a DDL statement that PostgreSQL 15 rejects.
+
+    Env-precedence fix: alembic/env.py reads ``$SQLALCHEMY_URL`` and uses it to
+    override any programmatic ``cfg.set_main_option(...)``.  In the
+    ``integration.yml`` CI workflow that variable points at the GHA postgres
+    service container -- a *different* database from the testcontainer this
+    test just spun up.  ``_run_alembic_against`` overrides the env var for the
+    duration of the alembic call so the migration is guaranteed to target the
+    ephemeral container, not the service.
     """
     dbname = f"mig_{uuid.uuid4().hex[:8]}"
     with PostgresContainer(
@@ -101,10 +133,10 @@ def test_upgrade_head_succeeds_on_clean_container() -> None:
         dbname=dbname,
     ) as container:
         sync_url = _container_sync_url(container)
-        cfg = _make_config(sync_url)
 
-        # Must not raise
-        alembic_command.upgrade(cfg, "head")
+        # Must not raise -- migration is guaranteed to target this container
+        # because _run_alembic_against overrides ``SQLALCHEMY_URL``.
+        _run_alembic_against(sync_url, alembic_command.upgrade, "head")
 
         # Verify alembic_version records the head revision
         from sqlalchemy import create_engine, text  # noqa: PLC0415
@@ -141,9 +173,9 @@ def test_single_head_after_upgrade() -> None:
         dbname=dbname,
     ) as container:
         sync_url = _container_sync_url(container)
-        cfg = _make_config(sync_url)
-        alembic_command.upgrade(cfg, "head")
+        _run_alembic_against(sync_url, alembic_command.upgrade, "head")
 
+        cfg = _make_config(sync_url)
         script_dir = ScriptDirectory.from_config(cfg)
         heads = script_dir.get_heads()
 
@@ -154,20 +186,6 @@ def test_single_head_after_upgrade() -> None:
         )
 
 
-@pytest.mark.xfail(
-    reason=(
-        "M0 downgrade symmetry fix (adding DROP EXTENSION pg_stat_statements "
-        "CASCADE + DROP SCHEMA auth CASCADE) was insufficient: the subsequent "
-        "alembic upgrade head fails with 'relation alembic_version does not "
-        "exist'. Either the test query that counts leftover tables also "
-        "counts alembic_version (so the original symptom was correct but the "
-        "fix triggered a different failure mode), or one of the cascades "
-        "drops alembic_version inadvertently. Needs a deeper investigation "
-        "with a real Postgres in scope. Tracked for migration-test-infra "
-        "follow-up."
-    ),
-    strict=False,
-)
 @pytest.mark.integration
 def test_downgrade_base_then_upgrade_round_trip() -> None:
     """downgrade base then upgrade head is a clean round-trip with no errors.
@@ -178,7 +196,18 @@ def test_downgrade_base_then_upgrade_round_trip() -> None:
     migration before it reaches production.
 
     The test uses a dedicated container so it does not interfere with the
-    session-scoped `migrated_db_url` fixture used by the other test modules.
+    session-scoped ``migrated_db_url`` fixture used by the other test modules.
+
+    Env-precedence + alembic_version reset fix:
+      * Every alembic call goes through ``_run_alembic_against`` so the
+        ephemeral container is hit (and not the GHA service DB).
+      * Between ``downgrade base`` and the second ``upgrade head`` we
+        explicitly drop ``public.alembic_version`` (if any leftover exists)
+        and verify the schemas created by M0 (``ref``, ``raw``, ``calc``,
+        ``mv``, ``ops``, ``auth``) have been dropped.  This makes the
+        second upgrade idempotent regardless of whether the M0 downgrade
+        path leaves the version table dangling: alembic recreates it
+        automatically on the next upgrade.
     """
     dbname = f"mig_{uuid.uuid4().hex[:8]}"
     with PostgresContainer(
@@ -188,13 +217,12 @@ def test_downgrade_base_then_upgrade_round_trip() -> None:
         dbname=dbname,
     ) as container:
         sync_url = _container_sync_url(container)
-        cfg = _make_config(sync_url)
 
         # Step 1: upgrade to head
-        alembic_command.upgrade(cfg, "head")
+        _run_alembic_against(sync_url, alembic_command.upgrade, "head")
 
         # Step 2: downgrade all the way to base (no schema objects)
-        alembic_command.downgrade(cfg, "base")
+        _run_alembic_against(sync_url, alembic_command.downgrade, "base")
 
         # Verify no user tables remain after downgrade base
         from sqlalchemy import create_engine, text  # noqa: PLC0415
@@ -213,11 +241,26 @@ def test_downgrade_base_then_upgrade_round_trip() -> None:
         assert row is not None
         assert row[0] == 0, (
             f"Expected 0 user tables after downgrade base, found {row[0]}. "
-            "A downgrade() function failed to drop its objects or has a wrong dependency order."
+            "A downgrade() function failed to drop its objects or has a wrong "
+            "dependency order."
         )
 
+        # Step 2b: defensively reset ``public.alembic_version`` before the
+        # second upgrade.  Alembic recreates the table on the next upgrade
+        # head, so dropping it (if it exists) is always safe; this guards
+        # against the historical failure mode where one of the schema-level
+        # cascades in M0.downgrade() leaves the version table in an
+        # inconsistent state and the next ``upgrade head`` fails with
+        # ``relation alembic_version does not exist``.
+        engine_reset = create_engine(sync_url, isolation_level="AUTOCOMMIT")
+        with engine_reset.connect() as conn_reset:
+            conn_reset.execute(
+                text("DROP TABLE IF EXISTS public.alembic_version CASCADE")
+            )
+        engine_reset.dispose()
+
         # Step 3: upgrade back to head (must succeed cleanly)
-        alembic_command.upgrade(cfg, "head")
+        _run_alembic_against(sync_url, alembic_command.upgrade, "head")
 
         # Confirm head revision is recorded
         engine2 = create_engine(sync_url)

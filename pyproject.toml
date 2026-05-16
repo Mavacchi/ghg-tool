@@ -31,7 +31,8 @@ dependencies = [
     # Logging / observability
     "structlog>=24.1,<24.2",
     # Security / auth
-    "python-jose[cryptography]>=3.3,<3.4",
+    # SEC-P1-004: migrated from python-jose (CVE-2024-33664) to PyJWT 2.8+.
+    "pyjwt[crypto]>=2.8,<3.0",
     "passlib[bcrypt]>=1.7,<1.8",
     "python-multipart>=0.0.9,<0.0.10",
     # Rate limiting
@@ -47,6 +48,9 @@ dependencies = [
     "plotly>=5.22,<5.23",
     # Utilities
     "python-dotenv>=1.0,<1.1",
+    # Async task queue (REV-WAVE3-007)
+    "celery>=5.4,<5.5",
+    "redis>=5.0,<6.0",
 ]
 
 [project.optional-dependencies]
@@ -141,6 +145,7 @@ module = [
     "pandera.*", "weasyprint.*", "streamlit.*", "plotly.*", "slowapi.*",
     "openpyxl.*", "jinja2.*", "httpx.*",
     "matplotlib.*", "apscheduler.*",
+    "celery.*", "kombu.*",
 ]
 ignore_missing_imports = true
 

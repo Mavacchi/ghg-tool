@@ -1,0 +1,6 @@
+material_id,source,value_kgCO2e_per_kg,gwp_set,vintage,methodology,applicability_note
+ECOINV_CLAY_V3_10,ecoinvent,0.041200,AR6,n/a,cut-off,"Clay at mine; Scope 3 Cat 1 mass-based; value: sample/anonymised for testing — replace with licensed ecoinvent v3.10 export"
+ECOINV_FELDSPAR_V3_10,ecoinvent,0.032500,AR6,n/a,cut-off,"Feldspar at plant; Scope 3 Cat 1; value: sample/anonymised"
+ECOINV_SILICA_V3_10,ecoinvent,0.038100,AR6,n/a,cut-off,"Silica sand at plant; Scope 3 Cat 1; value: sample/anonymised"
+ECOINV_FRIT_V3_10,ecoinvent,0.581000,AR6,n/a,cut-off,"Frit/enamel; Scope 3 Cat 1; high uncertainty DQ-WARN-03; value: sample/anonymised"
+ECOINV_PIGMENT_V3_10,ecoinvent,1.240000,AR6,n/a,cut-off,"Inorganic pigment; Scope 3 Cat 1; high specific impact; value: sample/anonymised"

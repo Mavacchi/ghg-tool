@@ -14,7 +14,10 @@ Validators enforce:
                      if mode='direct_tco2' then unita must be 'tCO2'
     - S2 MB/LB:      codice_sito required
     - S2 MB:         strumento_mb required
-    - S3:            sottocategoria + metodo required
+    - S3:            sottocategoria + metodo required; codice_sito MUST be None
+                     (Scope 3 is corporate-level, not per-site)
+                     Decision 2026-05-15: "S3 è corporate, di tutto il gruppo,
+                     non per una specifica sede".
 """
 
 from __future__ import annotations
@@ -60,7 +63,11 @@ class CalcInputRequest(BaseModel):
     anno: int = Field(ge=2000, le=2100, description="Reporting year")
     codice_sito: str | None = Field(
         default=None,
-        description="Site code (required for S1 + S2; optional for S3)",
+        description=(
+            "Site code. Required for Scope 1 and Scope 2. "
+            "MUST be null/omitted for Scope 3 (corporate-level, not per-site). "
+            "Decision 2026-05-15: Scope 3 is corporate-level across the whole group."
+        ),
     )
     quantita: Decimal = Field(gt=0, description="Activity quantity (must be > 0)")
     unita: str = Field(
@@ -149,6 +156,12 @@ class CalcInputRequest(BaseModel):
         Raises:
             ValueError: When a required conditional field is absent or
                 an implicit constraint (e.g. unita='tCO2' for Mode A) is violated.
+
+        Scope 3 codice_sito rule (decision 2026-05-15):
+            "S1 e S2 riusciamo a dettagliarli per ogni sito, S3 è corporate, di
+            tutto il gruppo, non per una specifica sede."
+            - Scope 3: codice_sito MUST be None → 422 if present.
+            - Scope 1/2: codice_sito is REQUIRED → 422 if absent.
         """
         errors: list[str] = []
 
@@ -156,12 +169,14 @@ class CalcInputRequest(BaseModel):
             if self.combustibile is None:
                 errors.append("combustibile is required for scope=1 sub_scope='combustion'")
             if self.codice_sito is None:
-                errors.append("codice_sito is required for scope=1 sub_scope='combustion'")
+                errors.append(
+                    "codice_sito required for Scope 1 sub_scope='combustion'"
+                )
 
         if self.scope == 1 and self.sub_scope == "process":
             if self.codice_sito is None:
                 errors.append(
-                    "codice_sito is required for scope=1 sub_scope='process' (must be 'IANO')"
+                    "codice_sito required for Scope 1 sub_scope='process' (must be 'IANO')"
                 )
             # Validate unit constraint for Mode A (default when process_mode is None)
             effective_mode = self.process_mode or "direct_tco2"
@@ -185,6 +200,11 @@ class CalcInputRequest(BaseModel):
                 errors.append("sottocategoria is required for scope=3")
             if self.metodo is None:
                 errors.append("metodo is required for scope=3")
+            # Decision 2026-05-15: Scope 3 is corporate-level; codice_sito must be null.
+            if self.codice_sito is not None:
+                errors.append(
+                    "Scope 3 is corporate-level, codice_sito must be null"
+                )
 
         if errors:
             raise ValueError("; ".join(errors))

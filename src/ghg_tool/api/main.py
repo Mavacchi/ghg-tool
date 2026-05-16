@@ -40,6 +40,8 @@ from ghg_tool.api.middleware.rate_limit import RateLimitMiddleware
 from ghg_tool.api.middleware.security_headers import SecurityHeadersMiddleware
 from ghg_tool.api.middleware.session_check import SessionCheckMiddleware
 from ghg_tool.api.routers import (
+    admin_tenants,
+    analysis,
     audit_trail,
     auth,
     calc,
@@ -637,6 +639,10 @@ def _create_app() -> FastAPI:
     app.include_router(sbti.router)
     app.include_router(chart_annotations.router)
     app.include_router(sites.router)
+    # Wave4 Task C: Scope 3 hot-spot analysis endpoint
+    app.include_router(analysis.router)
+    # Wave4 Task 4 (cluster E): admin tenant management
+    app.include_router(admin_tenants.router)
 
     return app
 

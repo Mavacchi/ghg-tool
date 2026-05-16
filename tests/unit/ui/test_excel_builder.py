@@ -195,3 +195,153 @@ class TestXlsxBuilder:
         wb = openpyxl.load_workbook(io.BytesIO(result))
         ws = wb["Audit Trail"]
         assert ws.max_row >= 2
+
+
+# ---------------------------------------------------------------------------
+# Task 5 — REV-WAVE3-010: dynamic factor source strings
+# ---------------------------------------------------------------------------
+
+class TestBuildFactorSourceLabel:
+    """Tests for the ``_build_factor_source_label`` helper (REV-WAVE3-010)."""
+
+    def test_empty_factors_returns_fallback(self) -> None:
+        from ghg_tool.ui.excel.sheets import _build_factor_source_label
+        label = _build_factor_source_label([])
+        assert label == "Vedi catalogo fattori"
+
+    def test_single_factor_with_published_at(self) -> None:
+        from ghg_tool.ui.excel.sheets import _build_factor_source_label
+        factors = [
+            {
+                "source": "DEFRA",
+                "version": "2024.1",
+                "published_at": "2024-01-15T00:00:00Z",
+            }
+        ]
+        label = _build_factor_source_label(factors)
+        assert "DEFRA" in label
+        assert "2024.1" in label
+        assert "2024-01-15" in label
+        assert "pubblicato" in label
+
+    def test_single_factor_without_published_at(self) -> None:
+        from ghg_tool.ui.excel.sheets import _build_factor_source_label
+        factors = [
+            {
+                "source": "ISPRA",
+                "version": "2023",
+                "published_at": None,
+            }
+        ]
+        label = _build_factor_source_label(factors)
+        assert "ISPRA" in label
+        assert "2023" in label
+        # Without published_at, should still return a non-fallback string
+        assert label != "Vedi catalogo fattori"
+
+    def test_multiple_factors_joined_with_semicolon(self) -> None:
+        from ghg_tool.ui.excel.sheets import _build_factor_source_label
+        factors = [
+            {"source": "DEFRA", "version": "2024", "published_at": "2024-01-01"},
+            {"source": "ISPRA", "version": "2023", "published_at": "2023-06-01"},
+        ]
+        label = _build_factor_source_label(factors)
+        assert ";" in label
+        assert "DEFRA" in label
+        assert "ISPRA" in label
+
+    def test_duplicate_factors_deduplicated(self) -> None:
+        from ghg_tool.ui.excel.sheets import _build_factor_source_label
+        factors = [
+            {"source": "DEFRA", "version": "2024", "published_at": "2024-01-01"},
+            {"source": "DEFRA", "version": "2024", "published_at": "2024-01-01"},
+        ]
+        label = _build_factor_source_label(factors)
+        # Deduplicated: DEFRA 2024 should appear only once
+        assert label.count("DEFRA 2024") == 1
+
+    def test_valid_from_used_when_published_at_absent(self) -> None:
+        from ghg_tool.ui.excel.sheets import _build_factor_source_label
+        factors = [
+            {
+                "source": "IEA",
+                "version": "2024",
+                "published_at": None,
+                "valid_from": "2024-01-01",
+            }
+        ]
+        label = _build_factor_source_label(factors)
+        assert "IEA" in label
+        assert "2024" in label
+
+
+class TestSummarySheetDynamicFactorSources:
+    """Integration test: Summary sheet should contain dynamic factor source info."""
+
+    def test_summary_contains_dynamic_source_not_hardcoded(self) -> None:
+        """Summary sheet must use factor data from report_data, not hardcoded strings."""
+        import io
+
+        import openpyxl
+
+        from ghg_tool.ui.excel.builder import XlsxBuilder
+
+        report_data = {
+            "anno": 2025,
+            "gwp_set": "AR6",
+            "emissions": [
+                {
+                    "scope": 1, "sub_scope": "combustion", "codice_sito": "IANO",
+                    "anno": 2025, "tco2e": 100.0,
+                    "factor_source": "TEST_SOURCE", "factor_version": "v99",
+                    "gwp_set": "AR6", "methodology": "activity-based",
+                }
+            ],
+            "biogenic": [],
+            "factors": [
+                {
+                    "factor_id": "TEST_ID",
+                    "source": "UNIQUE_SOURCE_XYZ",
+                    "version": "99.9",
+                    "published_at": "2025-03-01",
+                }
+            ],
+            "dq_findings": [],
+            "audit_trail": [],
+        }
+        builder = XlsxBuilder()
+        result = builder.build(report_data)
+        wb = openpyxl.load_workbook(io.BytesIO(result))
+        ws = wb["Summary"]
+        sheet_text = " ".join(
+            str(cell.value or "") for row in ws.iter_rows() for cell in row
+        )
+        # The dynamic source should appear somewhere in the sheet
+        assert "UNIQUE_SOURCE_XYZ" in sheet_text, (
+            "Dynamic factor source not found in Summary sheet. "
+            "REV-WAVE3-010 refactor may be incomplete."
+        )
+
+    def test_summary_contains_methodology_caption(self) -> None:
+        """Summary sheet must contain the methodology/factor_sources caption (REV-WAVE3-010)."""
+        import io
+
+        import openpyxl
+
+        from ghg_tool.ui.excel.builder import XlsxBuilder
+
+        report_data = {
+            "anno": 2025, "gwp_set": "AR6",
+            "emissions": [], "biogenic": [], "factors": [],
+            "dq_findings": [], "audit_trail": [],
+        }
+        builder = XlsxBuilder()
+        result = builder.build(report_data)
+        wb = openpyxl.load_workbook(io.BytesIO(result))
+        ws = wb["Summary"]
+        sheet_text = " ".join(
+            str(cell.value or "") for row in ws.iter_rows() for cell in row
+        )
+        assert "factor_sources.md" in sheet_text, (
+            "Caption pointing to factor_sources.md not found in Summary sheet."
+        )

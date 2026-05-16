@@ -127,3 +127,155 @@ class TestExportService:
         stored_user = status["created_by"]
         assert stored_user != full_user  # Must be truncated
         assert len(stored_user) <= 8
+
+
+# ---------------------------------------------------------------------------
+# Task 6 — poll_export_job adapter (unit tests, mocked Streamlit)
+# ---------------------------------------------------------------------------
+
+class TestPollExportJob:
+    """Tests for the ``poll_export_job`` adapter in exports.py."""
+
+    def _run_poll(
+        self,
+        job_id: str,
+        statuses: list[dict],
+        file_bytes: bytes | None = None,
+        file_ext: str = "pdf",
+    ) -> list[str]:
+        """Run ``poll_export_job`` with mocked API calls and return the
+        list of Streamlit calls that were made (success, error, warning)."""
+        from unittest.mock import MagicMock, patch
+
+        calls: list[str] = []
+        mock_st = MagicMock()
+        mock_st.spinner = MagicMock(
+            return_value=MagicMock(__enter__=MagicMock(return_value=None),
+                                   __exit__=MagicMock(return_value=False))
+        )
+
+        status_iter = iter(statuses)
+
+        def _fake_fetch_job_status(_jid: str) -> dict:  # type: ignore[type-arg]
+            try:
+                return next(status_iter)
+            except StopIteration:
+                return {"status": "COMPLETED"}
+
+        def _fake_download_report(_jid: str) -> bytes | None:
+            return file_bytes
+
+        from ghg_tool.ui.streamlit_app.lib import exports as exp_module
+
+        with (
+            patch("ghg_tool.ui.streamlit_app.lib.exports.st", mock_st),
+            patch(
+                "ghg_tool.ui.streamlit_app.lib.exports.time.sleep",
+                return_value=None,
+            ),
+            patch(
+                "ghg_tool.ui.streamlit_app.lib.api_client.fetch_job_status",
+                side_effect=_fake_fetch_job_status,
+            ),
+            patch(
+                "ghg_tool.ui.streamlit_app.lib.api_client.download_report",
+                side_effect=_fake_download_report,
+            ),
+        ):
+            exp_module.poll_export_job(
+                job_id,
+                file_basename="test_report",
+                file_ext=file_ext,
+                lang="it",
+                key_suffix="_test",
+            )
+
+        # Collect which top-level st methods were called
+        if mock_st.download_button.called:
+            calls.append("download_button")
+        if mock_st.error.called:
+            calls.append("error")
+        if mock_st.warning.called:
+            calls.append("warning")
+        return calls
+
+    def test_completed_job_offers_download(self) -> None:
+        """COMPLETED status + bytes → st.download_button is rendered."""
+        calls = self._run_poll(
+            "test-job-id",
+            statuses=[{"status": "COMPLETED"}],
+            file_bytes=b"PK\x03\x04fake_xlsx_content",
+            file_ext="xlsx",
+        )
+        assert "download_button" in calls
+
+    def test_failed_job_shows_error(self) -> None:
+        """FAILED status → st.error is rendered."""
+        calls = self._run_poll(
+            "test-job-id",
+            statuses=[{"status": "FAILED", "error_message": "WeasyPrint crashed"}],
+            file_bytes=None,
+        )
+        assert "error" in calls
+
+    def test_empty_job_id_is_noop(self) -> None:
+        """Calling with empty job_id must not crash or render anything."""
+        from unittest.mock import MagicMock, patch
+
+        from ghg_tool.ui.streamlit_app.lib import exports as exp_module
+
+        mock_st = MagicMock()
+        with patch("ghg_tool.ui.streamlit_app.lib.exports.st", mock_st):
+            exp_module.poll_export_job("")
+        mock_st.error.assert_not_called()
+        mock_st.download_button.assert_not_called()
+
+    def test_timeout_shows_warning(self) -> None:
+        """If polling exceeds max time, a warning is shown."""
+        from unittest.mock import MagicMock, patch
+
+        from ghg_tool.ui.streamlit_app.lib import exports as exp_module
+
+        mock_st = MagicMock()
+        mock_st.spinner = MagicMock(
+            return_value=MagicMock(__enter__=MagicMock(return_value=None),
+                                   __exit__=MagicMock(return_value=False))
+        )
+
+        # Always return RUNNING so we timeout
+        def _always_running(jid: str) -> dict:  # type: ignore[type-arg]
+            return {"status": "RUNNING"}
+
+        # Patch _POLL_MAX_S to 0 so the loop exits immediately
+        with (
+            patch("ghg_tool.ui.streamlit_app.lib.exports.st", mock_st),
+            patch("ghg_tool.ui.streamlit_app.lib.exports._POLL_MAX_S", 0.0),
+            patch("ghg_tool.ui.streamlit_app.lib.exports.time.sleep", return_value=None),
+            patch(
+                "ghg_tool.ui.streamlit_app.lib.api_client.fetch_job_status",
+                side_effect=_always_running,
+            ),
+            patch(
+                "ghg_tool.ui.streamlit_app.lib.api_client.download_report",
+                return_value=None,
+            ),
+        ):
+            exp_module.poll_export_job(
+                "test-job-timeout",
+                file_basename="report",
+                file_ext="pdf",
+                lang="it",
+                key_suffix="_timeout_test",
+            )
+
+        mock_st.warning.assert_called_once()
+
+    def test_poll_interval_constant_is_two_seconds(self) -> None:
+        """The polling interval must be 2 seconds per task specification."""
+        from ghg_tool.ui.streamlit_app.lib.exports import _POLL_INTERVAL_S
+        assert _POLL_INTERVAL_S == 2.0
+
+    def test_max_poll_time_is_sixty_seconds(self) -> None:
+        """The maximum polling time must be 60 seconds per task specification."""
+        from ghg_tool.ui.streamlit_app.lib.exports import _POLL_MAX_S
+        assert _POLL_MAX_S == 60.0

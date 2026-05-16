@@ -1322,3 +1322,97 @@ def test_idempotency_key_absent_inserts_normally(
     app.dependency_overrides.clear()
 
     assert resp.status_code == 201, resp.text
+
+
+# ===========================================================================
+# Wave4 Task A — S3 corporate decoupling (codice_sito NULL per Scope 3)
+# Decision 2026-05-15: Scope 3 is corporate-level; codice_sito must be null.
+# ===========================================================================
+
+def test_s3_cat1_without_codice_sito_returns_200(
+    client_editor: TestClient,
+) -> None:
+    """Task A: S3 Cat1 without codice_sito (None) → 200 OK.
+
+    Scope 3 is corporate-level (decision 2026-05-15): the site code must be
+    absent.  Absence (None) is the only valid state for S3 requests.
+    """
+    resp = client_editor.post(
+        "/api/v1/calc/preview",
+        json={
+            "scope": 3,
+            "sub_scope": "cat1_purchased_goods",
+            "anno": 2024,
+            "quantita": "100",
+            "unita": "kg",
+            "gwp_set": "AR6",
+            "sottocategoria": "imballaggi cartone",
+            "metodo": "mass-based",
+            # codice_sito intentionally absent → None
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert Decimal(data["tco2e"]) == Decimal("0.120000")
+
+
+def test_s3_cat6_with_codice_sito_returns_422_corporate_level(
+    client_editor: TestClient,
+) -> None:
+    """Task A: S3 Cat6 with codice_sito present → 422 validation error.
+
+    Decision 2026-05-15: Scope 3 is corporate-level, not per-site.  Providing
+    a site code must be rejected with HTTP 422.  The body-level message is
+    sanitised by the RFC 7807 error handler (value_error → 'Field failed
+    validation') but the status code and type must be unprocessable-entity.
+    """
+    resp = client_editor.post(
+        "/api/v1/calc/preview",
+        json={
+            "scope": 3,
+            "sub_scope": "cat6_business_travel",
+            "anno": 2024,
+            "codice_sito": "IANO",  # must be rejected for S3
+            "quantita": "500",
+            "unita": "EUR",
+            "gwp_set": "AR6",
+            "sottocategoria": "voli",
+            "metodo": "spend-based",
+        },
+    )
+    assert resp.status_code == 422, resp.text
+    body = resp.json()
+    # The RFC 7807 error handler sanitises message content (NFR-08).
+    # Verify the response is a well-formed 422 Pydantic validation error.
+    assert body.get("status") == 422
+    assert "errors" in body or "detail" in body
+
+
+def test_s1_combustion_without_codice_sito_returns_422(
+    client_editor: TestClient,
+) -> None:
+    """Task A: S1 combustion without codice_sito → 422 validation error.
+
+    Scope 1 and Scope 2 still require codice_sito for per-site attribution.
+    Omitting it must return HTTP 422.  The RFC 7807 error handler sanitises
+    the message body (value_error → 'Field failed validation'), but the
+    status code must be 422.
+    """
+    resp = client_editor.post(
+        "/api/v1/calc/preview",
+        json={
+            "scope": 1,
+            "sub_scope": "combustion",
+            "anno": 2024,
+            # codice_sito intentionally absent
+            "quantita": "1000",
+            "unita": "Sm3",
+            "gwp_set": "AR6",
+            "combustibile": "GAS_NAT",
+        },
+    )
+    assert resp.status_code == 422, resp.text
+    body = resp.json()
+    # The RFC 7807 error handler sanitises message content (NFR-08).
+    assert body.get("status") == 422
+    assert "errors" in body or "detail" in body

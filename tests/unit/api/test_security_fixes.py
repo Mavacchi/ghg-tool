@@ -634,18 +634,33 @@ class TestSecP1005LoginWired:
 
         return _gen
 
-    @pytest.mark.xfail(
-        reason=(
-            "Switching to new=AsyncMock(return_value=None) was not sufficient — "
-            "the router still returns 500 in CI. The crash is downstream of "
-            "authenticate_user (likely login_limiter rate-check, the "
-            "session_check middleware, or insert_auth_session). The mock "
-            "needs to cover the full login flow, not just authenticate_user. "
-            "Tracked for SEC-test-infra follow-up; the production endpoint "
-            "behaves correctly per integration tests."
-        ),
-        strict=False,
-    )
+    @staticmethod
+    def _make_db_dep(rows: list[Any]) -> Any:
+        """Return a get_db_no_auth override yielding a session whose execute()
+        returns a result with fetchall() -> ``rows``.
+
+        ``AsyncMock`` alone is not sufficient: ``session.execute()`` must be a
+        coroutine returning a *synchronous* result object whose ``fetchall()``
+        returns a real list (the route does ``result.fetchall()`` without
+        ``await``).  An AsyncMock would return a coroutine for ``fetchall()``,
+        which trips ``len(rows)`` in the ``_lookup`` helper with
+        ``TypeError: object of type 'coroutine' has no len()``.
+        """
+        def _make_result() -> MagicMock:
+            result = MagicMock()
+            result.fetchall = MagicMock(return_value=list(rows))
+            result.fetchone = MagicMock(return_value=rows[0] if rows else None)
+            return result
+
+        async def _gen() -> AsyncGenerator[Any, None]:
+            session = AsyncMock()
+            # execute() is awaited; return a sync MagicMock as the result.
+            session.execute = AsyncMock(side_effect=lambda *a, **kw: _make_result())
+            session.flush = AsyncMock(return_value=None)
+            yield session
+
+        return _gen
+
     def test_login_returns_401_on_bad_credentials(self) -> None:
         """POST /auth/login with invalid credentials returns 401 (not 503).
 
@@ -653,8 +668,15 @@ class TestSecP1005LoginWired:
         failure.  The previous stub returned 503.
         """
         from ghg_tool.api.dependencies.db import get_db_no_auth
+        from ghg_tool.api.middleware.rate_limit import login_limiter
 
-        app.dependency_overrides[get_db_no_auth] = self._noop_db()
+        # Reset the in-memory login limiter so cross-test ordering cannot
+        # exhaust the 5/min bucket and produce a spurious 429.
+        login_limiter.reset()
+
+        # Empty fetchall() -> no user row -> authenticate_user (mocked) returns
+        # None -> route raises 401.
+        app.dependency_overrides[get_db_no_auth] = self._make_db_dep(rows=[])
         with (
             patch(
                 "ghg_tool.api.routers.auth.authenticate_user",
@@ -673,36 +695,46 @@ class TestSecP1005LoginWired:
             "If 503, the endpoint is still a stub."
         )
 
-    @pytest.mark.xfail(
-        reason=(
-            "Same root cause as test_login_returns_401_on_bad_credentials: "
-            "mocking only authenticate_user is not sufficient — the route "
-            "has downstream dependencies (rate limiter, session_check, "
-            "insert_auth_session) that fail with the simplified unit mocks. "
-            "Tracked for SEC-test-infra follow-up."
-        ),
-        strict=False,
-    )
     def test_login_returns_200_on_valid_credentials(self) -> None:
         """POST /auth/login with valid credentials returns 200 + token pair."""
         from ghg_tool.api.dependencies.db import get_db_no_auth
+        from ghg_tool.api.middleware.rate_limit import login_limiter
         from ghg_tool.api.schemas.auth_schemas import TokenResponse
+
+        login_limiter.reset()
+
+        user_uuid = str(uuid.uuid4())
+        tenant_uuid = str(uuid.uuid4())
 
         fake_response = TokenResponse(
             access_token=create_access_token(
-                sub=str(uuid.uuid4()),
+                sub=user_uuid,
                 role="editor",
-                tenant_id=str(uuid.uuid4()),
+                tenant_id=tenant_uuid,
             ),
             refresh_token=create_refresh_token(
-                sub=str(uuid.uuid4()),
-                tenant_id=str(uuid.uuid4()),
+                sub=user_uuid,
+                tenant_id=tenant_uuid,
             ),
             expires_in=3600,
             token_type="bearer",
         )
 
-        app.dependency_overrides[get_db_no_auth] = self._noop_db()
+        # Build a row-like object that supports both attribute access (used
+        # by the router via ``user_row.totp_enabled``) and tuple-style
+        # indexing.  ``totp_enabled`` is False so the route follows the no-
+        # TOTP path and reaches ``insert_auth_session`` (which calls
+        # ``session.execute`` on the INSERT — also covered by the mock).
+        user_row = MagicMock()
+        user_row.id = user_uuid
+        user_row.username = "validuser"
+        user_row.password_hash = "$2b$12$placeholder"
+        user_row.is_active = True
+        user_row.role_code = "editor"
+        user_row.tenant_id = tenant_uuid
+        user_row.totp_enabled = False
+
+        app.dependency_overrides[get_db_no_auth] = self._make_db_dep(rows=[user_row])
         with (
             patch(
                 "ghg_tool.api.routers.auth.authenticate_user",

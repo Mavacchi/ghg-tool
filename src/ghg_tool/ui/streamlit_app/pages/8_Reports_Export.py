@@ -38,6 +38,7 @@ from ghg_tool.ui.streamlit_app.lib.api_client import (  # noqa: E402
     fetch_emissions,
     fetch_dq_findings,
 )
+from ghg_tool.ui.streamlit_app.lib.exports import poll_export_job  # noqa: E402
 
 apply_brand_chrome()
 require_auth()
@@ -295,10 +296,20 @@ with col_pdf:
             job_id = result.get("job_id", "")
             st.session_state["pdf_job_id"] = job_id
             st.success(f"{_('job_started', lang)} {job_id}")
+            # Task 6: trigger polling immediately so the user sees the spinner
+            # without having to re-click.  The adapter handles the full
+            # PENDING → COMPLETED / FAILED lifecycle.
+            poll_export_job(
+                job_id,
+                file_basename=f"ghg_esrs_e1_{anno}_{gwp_set}",
+                file_ext="pdf",
+                lang=lang,
+                key_suffix="_pdf_trigger",
+            )
 
 with col_pdf_status:
     job_id_pdf = st.session_state.get("pdf_job_id", "")
-    if job_id_pdf:
+    if job_id_pdf and not st.session_state.get("_pdf_just_triggered"):
         st.caption(f"Job ID: `{job_id_pdf}`")
         status_data = fetch_job_status(job_id_pdf)
         status = status_data.get("status", "UNKNOWN")
@@ -317,7 +328,14 @@ with col_pdf_status:
             if download_url and _is_safe_download_url(download_url):
                 st.link_button("Scarica PDF", download_url)
             else:
-                _generate_inline_pdf(anno, gwp_set, report_lang)
+                # Use polling adapter for the re-poll path as well.
+                poll_export_job(
+                    job_id_pdf,
+                    file_basename=f"ghg_esrs_e1_{anno}_{gwp_set}",
+                    file_ext="pdf",
+                    lang=lang,
+                    key_suffix="_pdf_status",
+                )
         elif status == "FAILED":
             st.error(status_data.get("error_message", "Errore sconosciuto"))
 
@@ -340,6 +358,14 @@ with col_xls:
             job_id = result.get("job_id", "")
             st.session_state["xlsx_job_id"] = job_id
             st.success(f"{_('job_started', lang)} {job_id}")
+            # Task 6: start polling immediately via adapter.
+            poll_export_job(
+                job_id,
+                file_basename=f"ghg_report_{anno}_{gwp_set}",
+                file_ext="xlsx",
+                lang=lang,
+                key_suffix="_xlsx_trigger",
+            )
 
     if st.button(_("excel_inline_btn", lang), key="btn_excel_inline"):
         from ghg_tool.ui.excel.builder import XlsxBuilder  # noqa: PLC0415
@@ -378,32 +404,14 @@ with col_xls_status:
 
         st.write(f"{_('status_label', lang)} **{status_label}**")
         if status == "COMPLETED":
-            download_url = status_data.get("download_url")
-            if download_url and _is_safe_download_url(download_url):
-                st.link_button(_("download_excel", lang), download_url)
-            else:
-                # download_url is absent (in-process render stores bytes
-                # server-side, not as a pre-signed URL).  Fetch the raw
-                # bytes via GET /api/v1/exports/jobs/{job_id}/download and
-                # offer a real st.download_button so the browser triggers
-                # a file-save dialog.
-                xlsx_bytes = download_report(job_id_xlsx)
-                if xlsx_bytes:
-                    st.download_button(
-                        label=_("download_excel", lang),
-                        data=xlsx_bytes,
-                        file_name=f"ghg_report_{job_id_xlsx}.xlsx",
-                        mime=(
-                            "application/vnd.openxmlformats-officedocument"
-                            ".spreadsheetml.sheet"
-                        ),
-                        key=f"dl_xlsx_{job_id_xlsx}",
-                    )
-                else:
-                    st.warning(
-                        "Report completato ma file non disponibile. "
-                        "Riprovare tra qualche secondo."
-                    )
+            # Task 6: use the polling adapter for the re-poll (status-column) path.
+            poll_export_job(
+                job_id_xlsx,
+                file_basename=f"ghg_report_{anno}_{gwp_set}",
+                file_ext="xlsx",
+                lang=lang,
+                key_suffix="_xlsx_status",
+            )
         elif status == "FAILED":
             st.error(status_data.get("error_message", "Errore sconosciuto"))
 

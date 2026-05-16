@@ -20,8 +20,11 @@ from typing import Any, Final, Protocol
 
 import bcrypt
 import structlog
-from jose import JWTError  # type: ignore[import-untyped]
-from jose.exceptions import ExpiredSignatureError  # type: ignore[import-untyped]
+
+# SEC-P1-004: jose -> PyJWT migration. Exception names re-aliased so the
+# rest of this module reads identically (JWTError == PyJWTError).
+from jwt import ExpiredSignatureError
+from jwt import PyJWTError as JWTError
 
 from ghg_tool.api.schemas.auth_schemas import TokenResponse
 from ghg_tool.infrastructure.security import jwt as jwt_module
