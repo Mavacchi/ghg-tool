@@ -72,7 +72,7 @@ SELECT t.id,
     {value}, FALSE, FALSE, NULL,
     {unit!r}, {gwp_set!r}, {vintage!r}, {valid_from!r}, {note!r},
     'system_seed', now(), TRUE
-FROM ref.tenants t WHERE t.code = 'CERAMIC_TILE_CO';
+FROM ref.tenants t WHERE t.code = 'GRESMALT';
 """
 
 

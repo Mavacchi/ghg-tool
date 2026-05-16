@@ -132,20 +132,25 @@ async def test_migration_succeeds_regardless_of_pgcron(
     fixture error.  This test makes the intent explicit and gives a clear test
     name in the report.
 
-    We verify by checking that migration 0027_M7 appears in alembic_version.
+    We verify by checking that ``alembic_version`` holds a revision at or
+    after 0027_M7.  Alembic stores only the current head (linear chain), so
+    after Wave 4 the head is 0028_M8 (which has 0027_M7 as its down_revision).
+    The presence of either id proves the 0027_M7 step ran without raising.
     """
+    expected_revisions = {"0027_M7", "0028_M8"}
     async with async_engine.connect() as conn:
         result = await conn.execute(
-            text(
-                "SELECT version_num FROM alembic_version "
-                "WHERE version_num = '0027_M7'"
-            )
+            text("SELECT version_num FROM alembic_version")
         )
         row = result.fetchone()
 
     assert row is not None, (
-        "alembic_version must contain '0027_M7' after upgrade head — "
-        "migration 0027_M7_wave4_foundation.py did not apply"
+        "alembic_version is empty — alembic upgrade head did not run"
+    )
+    assert row[0] in expected_revisions, (
+        f"alembic_version = {row[0]!r}; expected one of {expected_revisions} "
+        "after Wave 4 upgrade head — migration 0027_M7_wave4_foundation.py "
+        "did not apply (head should be at or after 0027_M7)"
     )
 
 
@@ -461,8 +466,21 @@ def test_upgrade_downgrade_roundtrip(
     )
     cfg.set_main_option("sqlalchemy.url", migrated_db_url)
 
-    # --- downgrade to the previous revision ---------------------------------
-    alembic_command.downgrade(cfg, "0026_M6")
+    # alembic/env.py reads SQLALCHEMY_URL from the environment and overrides
+    # cfg.set_main_option(). In integration.yml CI that env var points at the
+    # GHA service container, NOT the testcontainer we want to mutate. We
+    # mirror migrated_db_url's pattern: override for the duration of the
+    # alembic call, then restore.
+    original_env = os.environ.get("SQLALCHEMY_URL")
+    os.environ["SQLALCHEMY_URL"] = migrated_db_url
+    try:
+        # --- downgrade to the previous revision -----------------------------
+        alembic_command.downgrade(cfg, "0026_M6")
+    finally:
+        if original_env is None:
+            os.environ.pop("SQLALCHEMY_URL", None)
+        else:
+            os.environ["SQLALCHEMY_URL"] = original_env
 
     # Verify we are at 0026_M6 after downgrade.
     from sqlalchemy import create_engine  # noqa: PLC0415
@@ -483,7 +501,16 @@ def test_upgrade_downgrade_roundtrip(
     )
 
     # --- re-upgrade to head (0027_M7) ---------------------------------------
-    alembic_command.upgrade(cfg, "0027_M7")
+    # Same env-var override pattern as the downgrade call above.
+    original_env = os.environ.get("SQLALCHEMY_URL")
+    os.environ["SQLALCHEMY_URL"] = migrated_db_url
+    try:
+        alembic_command.upgrade(cfg, "0027_M7")
+    finally:
+        if original_env is None:
+            os.environ.pop("SQLALCHEMY_URL", None)
+        else:
+            os.environ["SQLALCHEMY_URL"] = original_env
 
     engine2 = create_engine(migrated_db_url, future=True)
     try:
