@@ -1,0 +1,40 @@
+---
+# GHG Tool — Local-developer override (production-data + dev env).
+#
+# Usage (Windows): double-click start.bat
+# Usage (manual):
+#   docker compose -f docker-compose.yml \
+#                  -f docker-compose.local.yml \
+#                  --profile app up -d --build
+#
+# Purpose
+# =======
+# The base docker-compose.yml is tuned for production deploys (GHG_ENVIRONMENT
+# defaults to "production"), which since wave 5 means several fail-closed
+# security gates are armed — most relevantly the CORS guard that refuses to
+# start when any configured origin is not HTTPS.  That's correct for a real
+# production deploy but wrong for a developer running on localhost, where the
+# only reachable origin is http://localhost:8501.
+#
+# This override flips GHG_ENVIRONMENT to "development" on the `app` and
+# `streamlit` services, which:
+#   - disables the HTTPS-only CORS guard (origin can stay http://localhost...)
+#   - leaves DEMO mode OFF (this is what differentiates start.bat from
+#     start-demo.bat — no demo seed, no demo/demo login, no DEMO banner)
+#   - keeps every other production-safe default intact (no /docs Swagger UI,
+#     etc.)
+#
+# DO NOT use this file in production.  See docs/deployment.md for the
+# production runbook with real secrets, TLS, real CORS origins, and Redis.
+#
+# For the demo flow (preloaded data + demo/demo login), use
+# docker-compose.quickstart.yml instead — same idea, plus demo bits ON.
+
+services:
+  app:
+    environment:
+      GHG_ENVIRONMENT: "development"
+
+  streamlit:
+    environment:
+      GHG_ENVIRONMENT: "development"
