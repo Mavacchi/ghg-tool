@@ -164,7 +164,9 @@ serve l'intervento di uno sviluppatore.
 
 ## Domande?
 
-Vedi `README.md` per il panorama completo, oppure i singoli documenti in
-`docs/`. Il branch corrente è `claude/ghg-emissions-calculator-NFJZW`,
-status: Security APPROVED + Compliance APPROVED, 540 test pass,
-coverage ≥ 95% (vedi commit `f578832`).
+Vedi `README.md` per il panorama completo, `CHANGELOG.md` per la storia
+delle wave, e `docs/audit-trail.md` per il log per-finding (BLOCK / REQUIRED).
+Status post wave-5 (2026-05-16): **1306 unit test + integration suite
+passing, coverage 93.25% globale (calc/* e domain/* al 100%), Alembic chain
+a `0032_M12` (32 migrazioni)**. Ultimo audit cycle: 13/13 BLOCK + 45/50
+REQUIRED risolti (5 deferiti a wave 6 con motivazione esplicita).

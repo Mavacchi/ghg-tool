@@ -1,5 +1,27 @@
 # WIP_QUESTIONS — outstanding methodology / scope questions
 
+> **⚠️ HISTORICAL — all questions RESOLVED in wave 5 (2026-05-16)**
+>
+> Q1, Q2, Q3, Q4 below were normative decisions left open by the
+> Decimal-precision + ESG-methodology fixes WIP. The
+> sustainability-expert-agent and data-engineer agents reviewed them during
+> waves 1 + 5 and the decisions are now documented in:
+>
+> - [`docs/methodology.md`](../methodology.md) §11.1 — `dual_run_id` design,
+>   `regulatory_stream` FK, AR4/AR5/AR6 reciprocity, frozen-pair acceptance
+>   criterion
+> - [`docs/requirements.md`](../requirements.md) FR-34 v1.2.3 — formal
+>   functional requirement
+> - [`docs/audit-trail.md`](../audit-trail.md) wave 1 + wave 5 —
+>   `CALC-Decimal` and `RECALC-dual-run` findings (status: RESOLVED)
+>
+> This file is retained for git-archaeology traceability; do not act on it
+> as if the questions were still open.
+
+---
+
+**Original WIP context** (preserved verbatim):
+
 Open questions left by the agent completing the partial Decimal precision +
 ESG methodology fixes WIP (parent commit `654868d`). The orchestrator should
 route these to sustainability-expert-agent and/or the platform/data team.

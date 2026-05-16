@@ -50,11 +50,12 @@ deployment is blocked until a DPA is in place per CG-01.
 
 ## Categories of Data Subjects
 
-**System users**: Internal employees holding one of three RBAC roles:
+**System users**: Internal employees holding one of three RBAC roles
+(roles were renamed in wave 3; legacy names retained for traceability):
 
-- ESG Manager (`esg_manager`) — validates methodology, approves CSRD reports
-- Data Steward (`data_steward`) — inputs and validates raw activity data, manages factor catalog
-- Auditor (`auditor`) — read-only review of calculations and audit trail
+- ESG Manager — `admin` (formerly `esg_manager`) — validates methodology, approves CSRD reports
+- Data Steward — `editor` (formerly `data_steward`) — inputs and validates raw activity data, manages factor catalog
+- Auditor — `viewer` (formerly `auditor`) — read-only review of calculations and audit trail
 
 **Explicit statement**: Emission records stored in `calc.emissions_consolidated` contain
 **no data subject personal data**. Records represent tonnes of CO2-equivalent attributed

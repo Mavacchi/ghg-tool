@@ -189,11 +189,14 @@ ledger.
 - [ ] `GHG_DEMO_MODE` is unset or `false`.
 - [ ] `GHG_CORS_ORIGINS` is set to one or more HTTPS origins and does NOT
   contain `*`.
-- [ ] All 10 Alembic migrations (M0 through M9) applied. Run
+- [ ] All 32 Alembic migrations applied (head `0032_M12`, internal nicknames
+  M0 through M13 — see `alembic/versions/` for the chain). Run
   `alembic current` inside the container and confirm the output ends with
   `(head)`.
-- [ ] At least one user with role `esg_manager` seeded via
-  `scripts/create_user.py` (see Step 4 in Section 6).
+- [ ] At least one user with role `admin` seeded via
+  `scripts/create_admin.py` (see Step 4 in Section 6). Note: roles were
+  renamed from `esg_manager / data_steward / auditor` to
+  `admin / editor / viewer` in wave 3.
 - [ ] Backup schedule active and last backup verified (see
   `docs/disaster_recovery.md`).
 - [ ] Log aggregation wired: container stdout/stderr reaching off-host store

@@ -127,7 +127,7 @@ For every GO covering site × period × MWh volume in `scope2_elettricita.csv` r
 | `qc7_exclusivity_passed` | BOOL | Criterion 7 |
 | `qc8_residual_mix_disclosed` | BOOL | Criterion 8 |
 | `pdf_evidence_uri` | TEXT | Object-store path to certificate PDFs |
-| `validated_by` | VARCHAR | data_steward username |
+| `validated_by` | VARCHAR | `editor` username (formerly `data_steward`) |
 | `validated_at` | TIMESTAMPTZ | Validation timestamp |
 
 **Decision rule**: MB factor = 0 tCO2e/MWh is assigned to a (site, year, volume) tuple **if and only if** all 8 QC fields are TRUE. Otherwise the volume is reassigned to the residual-mix factor for that year. The decision and assignment are logged in `emissions_consolidated` via `factor_id` + `factor_version` + a non-null `disclosure_notes` field referencing the GO ID.
