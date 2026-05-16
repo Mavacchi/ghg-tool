@@ -70,7 +70,6 @@ Create Date : 2026-05-15
 from __future__ import annotations
 
 from alembic import op
-from sqlalchemy import text
 
 # ---------------------------------------------------------------------------
 revision: str = "0027_M7"
@@ -131,12 +130,13 @@ BEGIN
             -- instead of aborting the entire upgrade chain.
             --
             -- Important: this NOTICE intentionally uses no format placeholders
-            -- (no ``%`` characters and no SQLSTATE/SQLERRM args).  ``%`` in the
-            -- statement text is interpreted as a bind-parameter marker by
-            -- SQLAlchemy's pyformat compiler (psycopg2 dialect) and triggers
-            -- ObjectNotExecutableError (sqlalche.me/e/20/f405) before the SQL
-            -- ever reaches the server.  Diagnostic SQLSTATE/SQLERRM logging
-            -- can be added back via a server-side function if needed.
+            -- (no percent-sign characters and no SQLSTATE/SQLERRM args).
+            -- A percent in the statement text is interpreted as a bind-
+            -- parameter marker by SQLAlchemy's pyformat compiler (psycopg
+            -- dialect) and triggers ObjectNotExecutableError
+            -- (sqlalche.me/e/20/f405) before the SQL ever reaches the
+            -- server.  Diagnostic SQLSTATE/SQLERRM logging can be added
+            -- back via a server-side function if needed.
             _cron_available := FALSE;
             RAISE NOTICE
                 '[0027_M7] CREATE EXTENSION pg_cron failed with unmapped error; '
@@ -221,7 +221,11 @@ def upgrade() -> None:
 
     No changes are made to ref.roles — see Decision C in the module docstring.
     """
-    op.execute(text(_PGCRON_SETUP_BLOCK))
+    # Use exec_driver_sql to bypass SQLAlchemy's pyformat compiler entirely.
+    # This sends the SQL string straight to the DBAPI cursor.execute() with
+    # no parameter substitution, which is the only reliable way to ship a
+    # multi-statement PL/pgSQL DO block across psycopg2, psycopg3 and asyncpg.
+    op.get_bind().exec_driver_sql(_PGCRON_SETUP_BLOCK)
 
 
 # ---------------------------------------------------------------------------
@@ -240,4 +244,4 @@ def downgrade() -> None:
 
     Only the specific job registered by this migration is removed.
     """
-    op.execute(text(_PGCRON_TEARDOWN_BLOCK))
+    op.get_bind().exec_driver_sql(_PGCRON_TEARDOWN_BLOCK)
