@@ -15,23 +15,27 @@ Revises: 0002_M1
 from __future__ import annotations
 
 from alembic import op
+from sqlalchemy import text as _sa_text
 
 revision: str = "0003_M2"
 down_revision: str = "0002_M1"
 branch_labels: str | None = None
 depends_on: str | None = None
 
-# SQL template for inserting a factor row via subquery tenant join
-_INSERT_FACTOR = """
+# SQL template for inserting a factor row via subquery tenant join.
+# Parameterised via sa.text bindparams to avoid SQL injection through
+# Python repr-based interpolation (CWE-89): ``!r`` is *not* SQL-safe for
+# strings containing backslashes, Unicode, or unusual quoting.
+_INSERT_FACTOR_SQL = """
 INSERT INTO ref.factor_catalog
     (tenant_id, factor_id, version, substance, scope, category, source,
      value, is_licence_only, is_tbc, biogenic_co2_kg_per_unit,
      unit, gwp_set, vintage, valid_from, applicability_note,
      published_by, is_published)
 SELECT t.id,
-    {factor_id!r}, {version!r}, {substance!r}, {scope}, {category!r}, {source!r},
-    {value}, {is_licence_only}, {is_tbc}, {biogenic},
-    {unit!r}, {gwp_set!r}, {vintage!r}, {valid_from!r}, {note!r},
+    :factor_id, :version, :substance, :scope, :category, :source,
+    :value, :is_licence_only, :is_tbc, :biogenic,
+    :unit, :gwp_set, :vintage, CAST(:valid_from AS date), :note,
     'system_seed', FALSE
 FROM ref.tenants t WHERE t.code = 'CERAMIC_TILE_CO';
 """
@@ -72,20 +76,18 @@ def _insert(
         biogenic: Biogenic CO2 companion field (kg CO2 biogenic per unit);
                   None for TBC or non-applicable factors.
     """
-    val_sql = "NULL" if value is None else str(value)
-    bio_sql = "NULL" if biogenic is None else str(biogenic)
     op.execute(
-        _INSERT_FACTOR.format(
+        _sa_text(_INSERT_FACTOR_SQL).bindparams(
             factor_id=factor_id,
             version=version,
             substance=substance,
             scope=scope,
             category=category,
             source=source,
-            value=val_sql,
-            is_licence_only=str(is_licence_only).upper(),
-            is_tbc=str(is_tbc).upper(),
-            biogenic=bio_sql,
+            value=value,
+            is_licence_only=bool(is_licence_only),
+            is_tbc=bool(is_tbc),
+            biogenic=biogenic,
             unit=unit,
             gwp_set=gwp_set,
             vintage=vintage,

@@ -34,7 +34,10 @@ dependencies = [
     # SEC-P1-004: migrated from python-jose (CVE-2024-33664) to PyJWT 2.8+.
     "pyjwt[crypto]>=2.8,<3.0",
     "passlib[bcrypt]>=1.7,<1.8",
-    "python-multipart>=0.0.9,<0.0.10",
+    # Security pins (CVE coverage):
+    #   - CVE-2024-24762: ReDoS in multipart parser, fixed in 0.0.18
+    #   - CVE-2024-53981 / CVE-2026-24486 / CVE-2026-40347 / CVE-2026-42561: fixed in 0.0.27
+    "python-multipart>=0.0.27,<0.0.29",
     # Rate limiting
     "slowapi>=0.1,<0.2",
     # TOTP 2FA
@@ -47,7 +50,7 @@ dependencies = [
     "streamlit>=1.35,<1.36",
     "plotly>=5.22,<5.23",
     # Utilities
-    "python-dotenv>=1.0,<1.1",
+    "python-dotenv>=1.1,<1.3",  # CVE-2026-28684 fixed in 1.2.2
     # Async task queue (REV-WAVE3-007)
     "celery>=5.4,<5.5",
     "redis>=5.0,<6.0",
@@ -68,8 +71,10 @@ dev = [
     "pandas-stubs>=2.2,<2.3",
     # Integration test tier (wave-4 item #11): real PostgreSQL via testcontainers
     "testcontainers[postgres]>=4.0,<5.0",
-    # import-linter -- wave 2 wiring: enforce src/ghg_tool import-direction rules
-    # "import-linter>=2.0,<2.1",  # uncomment at wave 2 after all modules wired
+    # import-linter -- wave 5 wiring: enforce hexagonal architecture contracts
+    "import-linter>=2.1",  # enabled wave 5; see .importlinter for contracts
+    # pip-audit -- wave 5 security: CVE scan of project dependencies in CI
+    "pip-audit>=2.7",  # enabled wave 5; run via: python -m pip_audit .
 ]
 
 [tool.hatch.build.targets.wheel]
@@ -149,30 +154,43 @@ module = [
 ]
 ignore_missing_imports = true
 
-# Pre-existing strict-mypy violations (SQLAlchemy Result.rowcount typing,
-# tempfile.NamedTemporaryFile factory typing, Liskov on Starlette middleware,
-# pandas Series typing). Unrelated to calc / dual-track work on this branch.
-# Tracked for future cleanup as a separate code-health initiative.
+# Pre-existing strict-mypy violations. Wave 5 analysis: all 18 modules still
+# have genuine mypy errors under full-package context (individual file runs
+# passed because stubs load differently in isolation). Errors are categorized
+# below; tracked for wave 6 resolution.
 [[tool.mypy.overrides]]
 module = [
-    "ghg_tool.api.routers.users",
-    "ghg_tool.api.routers.sessions",
-    "ghg_tool.api.routers.sbti",
-    "ghg_tool.api.routers.factor_catalog",
+    # TODO wave6: SQLAlchemy 2.0 — Result[Any].rowcount only valid on CursorResult;
+    # annotate session.execute() return type explicitly as CursorResult.
+    "ghg_tool.api.routers.users",       # rowcount + missing dict type params
+    "ghg_tool.api.routers.sessions",    # rowcount + unused type: ignore
+    "ghg_tool.api.routers.sbti",        # rowcount
+    "ghg_tool.api.routers.factor_catalog",  # rowcount
+    # TODO wave6: pandas-stubs incompatibility — Series[Any] not callable, Index[str] mismatch
     "ghg_tool.api.routers.excel_import",
+    "ghg_tool.etl.readers.excel_reader",
+    # TODO wave6: Starlette BaseHTTPMiddleware.dispatch signature mismatch (Liskov violation)
     "ghg_tool.api.middleware.session_check",
+    # TODO wave6: unused type: ignore comments (warn_unused_ignores=true catches stale suppression)
     "ghg_tool.api.middleware.rate_limit",
     "ghg_tool.api.dependencies.pagination",
+    # TODO wave6: FastAPI lifecycle — scheduler.shutdown type not resolvable on `object`
     "ghg_tool.api.main",
+    # TODO wave6: SQLAlchemy rowcount + unused type: ignore
     "ghg_tool.application.services.session_service",
+    # TODO wave6: bare generic tuple (tuple → tuple[X, Y]) + unused type: ignore
     "ghg_tool.application.services.reconciliation_service",
-    "ghg_tool.etl.readers.excel_reader",
-    "ghg_tool.ui.pdf.exec_dashboard",
+    # TODO wave6: no-any-return — Celery task return typed as object | None, returns Any
     "ghg_tool.infrastructure.scheduling.calc_scheduler",
+    # TODO wave6: Streamlit st.selectbox/text_input return T|None, signatures say int/str
     "ghg_tool.ui.streamlit_app.lib.filters",
+    # TODO wave6: Streamlit Any propagation from st.* calls
     "ghg_tool.ui.streamlit_app.lib.brand",
     "ghg_tool.ui.streamlit_app.lib.auth",
+    # TODO wave6: httpx Any + unused type: ignore
     "ghg_tool.ui.streamlit_app.lib.api_client",
+    # TODO wave6: openpyxl no stubs; weasyprint PDF API Any propagation
+    "ghg_tool.ui.pdf.exec_dashboard",
 ]
 ignore_errors = true
 

@@ -79,18 +79,43 @@ _CORS_ORIGINS: Final[list[str]] = [
     o.strip() for o in _CORS_ORIGINS_RAW.split(",") if o.strip()
 ]
 
+# SEC-P1-001 (REQUIRED 1): in production/staging every configured CORS origin
+# MUST be HTTPS — refuse to start when a plaintext origin is configured for
+# a production-like environment.  Empty list is allowed (no CORS).
+_HTTPS_REQUIRED_ENVS: Final[frozenset[str]] = frozenset({"production", "staging"})
+if _ENVIRONMENT in _HTTPS_REQUIRED_ENVS:
+    _bad_origins = [o for o in _CORS_ORIGINS if not o.startswith("https://")]
+    if _bad_origins:
+        raise RuntimeError(
+            "GHG_CORS_ORIGINS contains non-HTTPS entries in "
+            f"environment={_ENVIRONMENT!r}: {_bad_origins!r}. "
+            "Refusing to start — fix the env var to only list https:// origins."
+        )
+
+# SEC-P1-008: explicit allow-list of raw ingestion tables we ever count
+# during demo seeding.  This is the *only* SQL spot in this module where a
+# table name is interpolated (psycopg cannot bind an Identifier as a
+# parameter); the assertion below makes the interpolation provably safe.
+_RAW_INGESTION_TABLES: Final[frozenset[str]] = frozenset({
+    "scope1_ingestions",
+    "scope2_ingestions",
+    "scope3_ingestions",
+})
+
 
 def _demo_mode_enabled() -> bool:
     """Return True when demo mode is appropriate for the current environment.
 
     Rules (defense-in-depth):
-    - ``ENV=production`` -> ALWAYS False, even if GHG_DEMO_MODE is set.
-      Production must never run with hardcoded demo credentials.
+    - ``ENV in {'production', 'staging'}`` -> ALWAYS False, even if
+      GHG_DEMO_MODE is set.  Staging mirrors production trust boundaries
+      for CSRD reporting (real factor data, real audit trail); hardcoded
+      demo credentials are not acceptable there.
     - ``ENV in ('development', 'demo')`` -> True automatically (no flag needed).
-    - Any other environment (staging, test, …) -> only True when
-      GHG_DEMO_MODE is explicitly set to a truthy value.
+    - Any other environment (test, …) -> only True when GHG_DEMO_MODE is
+      explicitly set to a truthy value.
     """
-    if _ENVIRONMENT == "production":
+    if _ENVIRONMENT in ("production", "staging"):
         return False
     if _ENVIRONMENT in ("development", "demo"):
         return True
@@ -336,8 +361,11 @@ async def _seed_demo_data_if_empty() -> None:
     Failures are logged but never abort startup — the API remains reachable
     even when seeding partially fails.
     """
-    if _ENVIRONMENT == "production":
-        logger.info("demo_seed_skipped_production_environment")
+    if _ENVIRONMENT in ("production", "staging"):
+        logger.info(
+            "demo_seed_skipped_production_like_environment",
+            env=_ENVIRONMENT,
+        )
         return
     if not _demo_mode_enabled():
         return
@@ -428,8 +456,16 @@ async def _seed_demo_data_if_empty() -> None:
         async with AsyncSessionFactory() as session:
             counts: dict[str, int] = {}
             for tbl in ("scope1_ingestions", "scope2_ingestions", "scope3_ingestions"):
+                # Provably safe interpolation: ``tbl`` is one of three hard-coded
+                # literals and is re-checked against the module-level allow-list
+                # before being placed into the SQL string.  A psycopg bind
+                # parameter cannot stand in for a SQL Identifier, so an
+                # allow-listed f-string is the canonical safe pattern here.
+                assert tbl in _RAW_INGESTION_TABLES, (
+                    f"raw ingestion table {tbl!r} not in allow-list"
+                )
                 res = await session.execute(
-                    text(f"SELECT COUNT(*) FROM raw.{tbl}")  # noqa: S608
+                    text(f"SELECT COUNT(*) FROM raw.{tbl}")
                 )
                 counts[tbl] = int(res.scalar_one())
 

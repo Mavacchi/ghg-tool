@@ -32,6 +32,16 @@ from ghg_tool.infrastructure.redis_client import get_redis_client
 
 _log = structlog.get_logger(__name__)
 
+
+class JWTUnavailableError(RuntimeError):
+    """Raised when the JWT blacklist backend cannot be reached.
+
+    Callers MUST translate this into HTTP 503 (Service Unavailable) rather
+    than allowing the request to proceed: when Redis is unreachable we have
+    no way to tell whether a previously-revoked ``jti`` is still in force,
+    so the only safe action is to fail closed (REQUIRED-2 / SEC-P1-007).
+    """
+
 _KEY_PREFIX: Final[str] = "jwt:blacklist:"
 # Minimum TTL we will accept when adding to the blacklist.  Tokens whose
 # ``exp`` is in the past are effectively already invalid -- but we still
@@ -127,17 +137,39 @@ def revoke_from_claims(claims: dict[str, object], *, reason: str = "revoked") ->
 def is_revoked(jti: str) -> bool:
     """Return True if ``jti`` is on the blacklist.
 
+    Fail-closed semantics (REQUIRED-2 / SEC-P1-007): when the Redis backend
+    is unreachable we cannot trust an absence-of-evidence answer, so we
+    raise :class:`JWTUnavailableError` instead of returning False.  The
+    auth dependency translates this into HTTP 503.
+
     Args:
         jti: The JWT ID to look up.
 
     Returns:
         True if the key exists in Redis (i.e. the token is revoked),
         False if the key is absent or ``jti`` is empty.
+
+    Raises:
+        JWTUnavailableError: If the blacklist backend raises a
+            ConnectionError / TimeoutError / OSError-style failure.
     """
     if not jti:
         return False
     client = get_redis_client()
-    return bool(client.exists(_make_key(jti)))
+    try:
+        return bool(client.exists(_make_key(jti)))
+    except Exception as exc:  # noqa: BLE001
+        # Translate any backend failure into a typed exception so the API
+        # layer can map it to 503 without leaking Redis internals.  We do
+        # NOT log the raw exception message (may contain DSN fragments).
+        _log.error(
+            "jwt_blacklist_backend_unavailable",
+            exc_type=type(exc).__name__,
+            jti_prefix=jti[:8],
+        )
+        raise JWTUnavailableError(
+            "JWT blacklist backend is unavailable; refusing to authorise."
+        ) from exc
 
 
 def clear_for_testing(jti: str) -> None:

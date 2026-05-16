@@ -2,6 +2,9 @@
 
 Generates random ``EmissionRecord`` rows with mixed gwp_set values and
 asserts that ``assert_single_gwp_set`` raises ``MixedGWPSetError``.
+
+Also verifies that AR4 (and any unsupported set) is rejected by the domain
+value object registry (get_gwp_values).
 """
 
 from __future__ import annotations
@@ -10,6 +13,7 @@ import uuid
 from datetime import UTC, datetime
 from decimal import Decimal
 
+import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
@@ -58,3 +62,36 @@ def test_uniform_gwp_set_passes(n: int, code: str) -> None:
     """Uniform AR6 or AR5 always passes."""
     rows = [_make_em(code) for _ in range(n)]
     assert assert_single_gwp_set([r.gwp_set for r in rows]) == code
+
+
+# ---------------------------------------------------------------------------
+# REQUIRED: AR4 rejected at domain policy level
+# ---------------------------------------------------------------------------
+
+@given(
+    code=st.sampled_from(["AR4", "AR6", "AR5"]),
+)
+def test_ar4_rejected_by_gwp_registry(code: str) -> None:
+    """AR4 is not a supported GWP set; get_gwp_values raises KeyError for it.
+
+    AR6 and AR5 must be accepted; AR4 must be rejected.
+    This is the GWPEnforcementPolicy.assert_supported_set domain invariant:
+    only the codes registered in _REGISTRY are valid.
+    """
+    from ghg_tool.domain.value_objects.gwp_set import get_gwp_values
+
+    if code == "AR4":
+        with pytest.raises(KeyError):
+            get_gwp_values(code)  # type: ignore[arg-type]
+    else:
+        result = get_gwp_values(code)  # type: ignore[arg-type]
+        assert result.code == code
+
+
+@pytest.mark.parametrize("unsupported", ["AR4", "AR3", "AR2", "AR1", "", "none", "ar6"])
+def test_unsupported_gwp_codes_raise_key_error(unsupported: str) -> None:
+    """Any code not in {'AR6', 'AR5'} must be rejected by get_gwp_values."""
+    from ghg_tool.domain.value_objects.gwp_set import get_gwp_values
+
+    with pytest.raises(KeyError):
+        get_gwp_values(unsupported)  # type: ignore[arg-type]

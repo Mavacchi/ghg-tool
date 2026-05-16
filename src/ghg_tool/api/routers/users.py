@@ -24,12 +24,14 @@ from pydantic import BaseModel, ConfigDict, EmailStr, Field
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ghg_tool.api.dependencies import handle_unique_violation
 from ghg_tool.api.dependencies.auth import CurrentUser
 from ghg_tool.api.dependencies.db import get_db
 from ghg_tool.api.middleware.correlation_id import get_correlation_id
 from ghg_tool.api.middleware.rbac import require_permission
 from ghg_tool.api.schemas.user_schemas import (
     UserActivePatchRequest,
+    UserErasureResponse,
     UserPasswordResetRequest,
     UserPasswordResetResponse,
     UserRolePatchRequest,
@@ -107,7 +109,8 @@ async def _fetch_user_in_tenant(
     """
     result = await session.execute(
         text(
-            "SELECT u.id, u.username, u.email, r.role_code, u.role_id, u.is_active "
+            "SELECT u.id, u.username, u.email, r.role_code, u.role_id, "
+            "       u.is_active, u.password_hash "
             "FROM ref.users u JOIN ref.roles r ON r.id = u.role_id "
             "WHERE u.id = CAST(:uid AS uuid) "
             "  AND u.tenant_id = CAST(:tenant AS uuid)"
@@ -124,6 +127,7 @@ async def _fetch_user_in_tenant(
         "role_code": row.role_code,
         "role_id": row.role_id,
         "is_active": row.is_active,
+        "password_hash": row.password_hash,
     }
 
 
@@ -327,7 +331,10 @@ async def create_user(
 
     pwd_hash = hash_password(body.password)
     new_id = uuid.uuid4()
-    try:
+    with handle_unique_violation(
+        "A user with that username or email already exists in this tenant.",
+        correlation_id,
+    ):
         await session.execute(
             text(
                 "INSERT INTO ref.users "
@@ -343,26 +350,6 @@ async def create_user(
                 "rid": role.id,
             },
         )
-    except Exception as exc:  # noqa: BLE001 - we translate DB errors uniformly
-        # A UNIQUE violation on (tenant_id, username) or (tenant_id, email)
-        # is the only realistic path. Other failures are surfaced as 500
-        # by the global error handler.
-        if "duplicate key" in str(exc).lower() or "unique" in str(exc).lower():
-            log.warning("create_user_duplicate", error_class=type(exc).__name__)
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail={
-                    "type": "about:blank",
-                    "title": "Conflict",
-                    "status": 409,
-                    "error_code": "duplicate_user",
-                    "detail": (
-                        "A user with that username or email already exists in this tenant."
-                    ),
-                    "correlation_id": correlation_id,
-                },
-            ) from exc
-        raise
 
     # Audit row in the same transaction.
     session.add(
@@ -906,3 +893,200 @@ async def reset_user_password(
     )
 
     return UserPasswordResetResponse(new_password=new_plain)
+
+
+# ---------------------------------------------------------------------------
+# DELETE /{user_uuid}  — GDPR Art. 17 right to erasure (pseudonymisation)
+# ---------------------------------------------------------------------------
+
+
+@router.delete(
+    "/{user_uuid}",
+    response_model=UserErasureResponse,
+    status_code=status.HTTP_200_OK,
+    summary="GDPR Art. 17 erasure: pseudonymise user (admin only)",
+    description=(
+        "Pseudonymises a user row so that no PII is accessible via the system "
+        "while retaining the UUID FK in audit_log (CSRD Art. 23(2) requirement). "
+        "The user row is NOT deleted: username, email, and password_hash are "
+        "overwritten with deterministic sentinel values derived from the user UUID. "
+        "The erased user cannot log in (password_hash='!erased', is_active=FALSE). "
+        "All emission records linked to this user_id remain intact. "
+        "An audit_log entry records the erasure event (event='user.erased'). "
+        "``admin`` role required."
+    ),
+    responses={
+        200: {"description": "User pseudonymised; PII fields replaced with sentinel"},
+        401: {"description": "Not authenticated"},
+        403: {"description": "Insufficient role — admin only"},
+        404: {"description": "User not found or belongs to a different tenant"},
+        409: {"description": "User has already been erased"},
+    },
+)
+async def erase_user(
+    user_uuid: uuid.UUID,
+    request: Request,
+    caller: CurrentUser = Depends(require_permission("users", "write")),
+    session: AsyncSession = Depends(get_db),
+) -> UserErasureResponse:
+    """Pseudonymise a user (GDPR Art. 17 right to erasure with audit-trail retention).
+
+    The user row is NOT deleted (audit retention) but its PII fields are replaced
+    with a pseudonymised sentinel:
+      - username    -> erased_<sha256(user_id)[:16]>
+      - email       -> erased_<sha256(user_id)[:16]>@erased.invalid
+      - password_hash -> '!erased'  (no login possible)
+      - is_active   -> FALSE
+      - erased_at   -> now()
+
+    All emission records linked to this user_id remain intact (CSRD requirement).
+    Audit log entries referencing this user_id FK are not modified; the pseudonym
+    sentinel on the user row is sufficient for GDPR Art. 17 compliance while
+    preserving audit-trail integrity.
+    An audit log entry is written with the erasure event.
+
+    Args:
+        user_uuid: Target user UUID from the URL path.
+        request: HTTP request (for audit metadata and client IP).
+        caller: Authenticated admin from JWT (requires ``users.write`` permission).
+        session: Async DB session (auto-committed by the get_db dependency).
+
+    Returns:
+        ``UserErasureResponse`` with the user_id, pseudonym, and erased_at timestamp.
+
+    Raises:
+        HTTPException: 404 if not found or belongs to a different tenant.
+        HTTPException: 409 if the user is already erased (password_hash == '!erased').
+    """
+    import hashlib  # noqa: PLC0415
+    from datetime import UTC, datetime  # noqa: PLC0415
+
+    correlation_id = get_correlation_id()
+    client_ip = request.client.host if request.client else None
+    user_agent = request.headers.get("user-agent")
+    log = logger.bind(
+        correlation_id=correlation_id,
+        tenant_id=caller.tenant_id,
+        user=caller.sub[:8],
+        ip_address=client_ip,
+        user_agent=user_agent,
+        target_user=str(user_uuid)[:8],
+    )
+
+    # Verify the target user exists within the caller's tenant.
+    target = await _fetch_user_in_tenant(session, user_uuid, caller.tenant_id)
+    if target is None:
+        log.warning("erase_user_not_found")
+        raise _problem(
+            status.HTTP_404_NOT_FOUND,
+            "Not Found",
+            f"User {user_uuid} not found.",
+            "user_not_found",
+            correlation_id,
+        )
+
+    # Guard: refuse to erase an already-erased user (idempotency guard).
+    if target.get("password_hash", "") == "!erased":
+        log.warning("erase_user_already_erased")
+        raise _problem(
+            status.HTTP_409_CONFLICT,
+            "Conflict",
+            f"User {user_uuid} has already been erased.",
+            "user_already_erased",
+            correlation_id,
+        )
+
+    # Derive the pseudonym deterministically from the user UUID.
+    # sha256(user_id_string)[:16] gives a stable, reproducible token that
+    # a DPA can verify given the original UUID — without storing the UUID
+    # in any human-readable field.
+    sha = hashlib.sha256(str(user_uuid).encode()).hexdigest()[:16]
+    pseudonym = f"erased_{sha}"
+    pseudonym_email = f"{pseudonym}@erased.invalid"
+
+    await session.execute(
+        text(
+            """
+            UPDATE ref.users
+            SET username      = :pseu,
+                email         = :pseu_email,
+                password_hash = '!erased',
+                is_active     = FALSE,
+                erased_at     = now()
+            WHERE id = CAST(:user_id AS uuid)
+              AND tenant_id = CAST(:tenant AS uuid)
+            """
+        ),
+        {
+            "pseu": pseudonym,
+            "pseu_email": pseudonym_email,
+            "user_id": str(user_uuid),
+            "tenant": caller.tenant_id,
+        },
+    )
+
+    # Also revoke all active sessions for the erased user so that any
+    # concurrent sessions become invalid immediately (defence-in-depth;
+    # the erased password_hash already prevents re-login).
+    await session.execute(
+        text(
+            "UPDATE auth.sessions SET revoked_at = now() "
+            "WHERE user_id = CAST(:uid AS uuid) "
+            "  AND revoked_at IS NULL"
+        ),
+        {"uid": str(user_uuid)},
+    )
+
+    erased_at = datetime.now(tz=UTC)
+
+    # Write audit log entry.  The ``after_state`` records only the pseudonym
+    # and the reason code — never the original PII fields.
+    session.add(
+        AuditLog(
+            tenant_id=uuid.UUID(caller.tenant_id),
+            correlation_id=uuid.UUID(correlation_id) if correlation_id else uuid.uuid4(),
+            user_role=caller.role,
+            action="user.erased",
+            resource="users",
+            resource_id=user_uuid,
+            request_method="DELETE",
+            request_path=f"/api/v1/users/{user_uuid}",
+            status_code=200,
+            ip_address=client_ip,
+            user_agent=user_agent,
+            after_state={
+                "pseudonym": pseudonym,
+                "reason_code": "GDPR_ART17",
+                "erased_at": erased_at.isoformat(),
+                # Retain actor UUID for forensic DPA lookup without PII.
+                "actor_id": caller.sub,
+            },
+        )
+    )
+
+    await session.flush()
+
+    log.info(
+        "user_erased",
+        target_user=str(user_uuid)[:8],
+        pseudonym=pseudonym,
+    )
+
+    siem.emit(
+        event="user.erased",
+        correlation_id=correlation_id,
+        tenant_id=caller.tenant_id,
+        user_sub=caller.sub,
+        severity="WARN",
+        payload={
+            "target_user": str(user_uuid)[:8],
+            "pseudonym": pseudonym,
+            "reason_code": "GDPR_ART17",
+        },
+    )
+
+    return UserErasureResponse(
+        user_id=user_uuid,
+        pseudonym=pseudonym,
+        erased_at=erased_at,
+    )

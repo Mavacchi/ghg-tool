@@ -24,6 +24,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from fastapi import HTTPException
+from sqlalchemy.exc import IntegrityError
 
 # ---------------------------------------------------------------------------
 # Unit tests for schema validators
@@ -168,9 +169,13 @@ class TestCreateTenantEndpoint:
         )
         body = TenantCreateRequest(code="DUPE_CODE", legal_name="Test")
         mock_db = AsyncMock()
-        # Simulate a 23505 unique constraint violation
-        mock_db.execute.side_effect = Exception(
-            "duplicate key value violates unique constraint: 23505"
+        # Simulate a psycopg UniqueViolation wrapped in SQLAlchemy IntegrityError.
+        # The handle_unique_violation helper catches IntegrityError and checks
+        # exc.orig for UniqueViolation (or falls back to string match).
+        from psycopg.errors import UniqueViolation  # noqa: PLC0415
+        orig = UniqueViolation("duplicate key value violates unique constraint")
+        mock_db.execute.side_effect = IntegrityError(
+            statement=None, params=None, orig=orig
         )
         with pytest.raises(HTTPException) as exc_info:
             await create_tenant(body=body, user=user, db=mock_db)

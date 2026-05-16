@@ -47,6 +47,8 @@ from typing import Any
 import httpx
 import streamlit as st
 
+from ghg_tool.ui.clients._http_client import safe_request
+
 _DEFAULT_BASE_URL = os.environ.get("GHG_API_BASE_URL", "http://localhost:8000")
 _TIMEOUT = 30.0
 
@@ -88,19 +90,11 @@ def fetch_hotspots(anno: int, top_n: int = 5) -> dict[str, Any]:
 
     No GHG calculations are performed here.
     """
-    try:
-        resp = httpx.get(
-            f"{_get_base_url()}/api/v1/analysis/hotspots",
-            headers=_get_auth_headers(),
-            params={"anno": anno, "top_n": top_n},
-            timeout=_TIMEOUT,
-        )
-        resp.raise_for_status()
-        return resp.json()  # type: ignore[no-any-return]
-    except httpx.HTTPStatusError as exc:
-        return {
-            "error": str(exc),
-            "status_code": exc.response.status_code,
-        }
-    except httpx.RequestError as exc:
-        return {"error": str(exc)}
+    return safe_request(
+        "GET",
+        f"{_get_base_url()}/api/v1/analysis/hotspots",
+        headers=_get_auth_headers(),
+        params={"anno": anno, "top_n": top_n},
+        timeout=_TIMEOUT,
+        _httpx=httpx,
+    )

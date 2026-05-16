@@ -95,6 +95,8 @@ def render_demo_mode_banner(lang: str = "it") -> None:
 
     Call after ``require_auth`` on any page that renders data.
     """
+    # safe: ``message`` is sourced from the i18n catalog (static translation
+    # strings shipped with the app); no user/db interpolation here.
     message = _("demo_mode_banner", lang)
     st.markdown(
         f"""
@@ -282,6 +284,7 @@ def render_login_form(lang: str = "it") -> None:
     # the multipage sidebar nav and toolbar chrome while the login wall
     # is up. Users must NOT be able to browse page names from the URL
     # bar or sidebar before authenticating.
+    # safe: static marker element, no user/db data
     st.markdown(
         '<div class="ct-pre-auth-marker" aria-hidden="true"></div>',
         unsafe_allow_html=True,
@@ -293,6 +296,8 @@ def render_login_form(lang: str = "it") -> None:
     with _form_col:
         # Brand hero. Matches the Home hero block but smaller - this is
         # an auth wall, not the main page.
+        # safe: PRODUCT_NAME / COMPANY_NAME are module-level constants and
+        # the hero_tagline is an i18n static string; no user/db interpolation.
         st.markdown(
             f"""
 <div class="carbontrace-hero ct-login-hero">
@@ -338,6 +343,12 @@ def render_login_form(lang: str = "it") -> None:
                 st.rerun()
             else:
                 st.error(_("login_error", lang))
+
+        # GDPR Art. 13 privacy notice — rendered under the login form so
+        # that the data subject receives the mandatory disclosures before
+        # (or at the moment of) submitting their credentials (F-14).
+        from ghg_tool.ui.streamlit_app.lib.privacy import render_privacy_notice  # noqa: PLC0415
+        render_privacy_notice(lang=lang)
 
     # Second screen: TOTP challenge (only shown when partial token is pending).
     if st.session_state.get(_TOTP_PENDING_KEY):

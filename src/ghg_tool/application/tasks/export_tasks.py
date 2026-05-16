@@ -43,6 +43,7 @@ from typing import Any
 
 import structlog
 
+from ghg_tool.domain.exceptions.export_errors import PDFBuildError, XlsxBuildError
 from ghg_tool.infrastructure.celery_app import celery_app
 
 logger = structlog.get_logger(__name__)
@@ -110,9 +111,12 @@ def export_pdf_task(  # noqa: ANN401
     report_data = _build_report_data(params)
     try:
         result_bytes: bytes = PDFBuilder().build(report_data)
-    except Exception:
+    except PDFBuildError:
         log.exception("task_failed")
         raise
+    except Exception as exc:  # noqa: BLE001 — explicit broad catch: re-wrap unexpected errors
+        log.exception("task_failed")
+        raise PDFBuildError(f"Unexpected PDF build failure: {exc}") from exc
 
     encoded = base64.b64encode(result_bytes).decode("ascii")
     size = len(result_bytes)
@@ -156,9 +160,12 @@ def export_excel_task(self: Any, tenant_id: str, params: dict[str, Any]) -> dict
     report_data = _build_report_data(params)
     try:
         result_bytes = XlsxBuilder().build(report_data)
-    except Exception:
+    except XlsxBuildError:
         log.exception("task_failed")
         raise
+    except Exception as exc:  # noqa: BLE001 — explicit broad catch: re-wrap unexpected errors
+        log.exception("task_failed")
+        raise XlsxBuildError(f"Unexpected Excel build failure: {exc}") from exc
 
     encoded = base64.b64encode(result_bytes).decode("ascii")
     size = len(result_bytes)

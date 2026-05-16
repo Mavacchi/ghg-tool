@@ -5,7 +5,10 @@ from __future__ import annotations
 import uuid
 from decimal import Decimal
 
+import pytest
+
 from ghg_tool.application.calc import scope2_lb
+from ghg_tool.domain.exceptions.calc_errors import MissingFactorError
 from tests.unit.calc.conftest import InMemoryFactorCatalog
 
 
@@ -86,3 +89,36 @@ def test_lb_disclosure_contains_voce_s2(
         correlation_id=correlation_id, created_by="t",
     )
     assert "EE_Acquistata_GO" in (out[0].disclosure_notes or "")
+
+
+# ---------------------------------------------------------------------------
+# REQUIRED: MissingFactorError when grid factor absent
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("unknown_site,unknown_voce", [
+    # Unknown codice_sito: the factor catalog key is fixed (LB_IT_GRID_ISPRA_2024)
+    # so the factor is missing when the catalog has no entry for it.
+    # We test via an empty catalog that has no LB factor at all.
+    ("UNKNOWN_SITE_XX", "EE_Acquistata_Grid"),
+    ("OFFSHORE_WIND_99", "EE_Acquistata_GO"),
+])
+def test_lb_missing_grid_factor_raises(
+    unknown_site: str,
+    unknown_voce: str,
+    ar6_gwp,
+    correlation_id: uuid.UUID,
+) -> None:
+    """Raises MissingFactorError when LB grid factor not present in catalog.
+
+    The catalog is seeded WITHOUT the 'LB_IT_GRID_ISPRA_2024' key so that
+    any voce_s2 / codice_sito combination that tries to look it up fails.
+    """
+    # Build a catalog that deliberately lacks the LB factor
+    empty_catalog = InMemoryFactorCatalog(seed={})
+
+    row = _s2_row(codice_sito=unknown_site, voce_s2=unknown_voce)
+    with pytest.raises(MissingFactorError):
+        scope2_lb.calculate(
+            [row], empty_catalog, ar6_gwp,
+            correlation_id=correlation_id, created_by="t",
+        )

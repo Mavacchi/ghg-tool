@@ -258,14 +258,38 @@ async def get_current_user(
     # SEC-P1-007: server-side revocation check.  A token whose jti has been
     # blacklisted (via /auth/logout or refresh rotation) must be rejected even
     # though the signature and exp would otherwise validate.
+    # REQUIRED-2: fail closed when the blacklist backend (Redis) is
+    # unreachable — we map JWTUnavailableError to HTTP 503 rather than
+    # admitting the request.
     jti_claim = claims.get("jti", "")
-    if isinstance(jti_claim, str) and jti_claim and token_blacklist.is_revoked(jti_claim):
-        log.warning(
-            "JWT rejected: jti is on blacklist",
-            jti_prefix=jti_claim[:8],
-            probe_attempt=True,
-        )
-        raise _unauthorized("Token has been revoked")
+    if isinstance(jti_claim, str) and jti_claim:
+        try:
+            if token_blacklist.is_revoked(jti_claim):
+                log.warning(
+                    "JWT rejected: jti is on blacklist",
+                    jti_prefix=jti_claim[:8],
+                    probe_attempt=True,
+                )
+                raise _unauthorized("Token has been revoked")
+        except token_blacklist.JWTUnavailableError as exc:
+            log.error(
+                "JWT blacklist backend unavailable; failing closed (503)",
+                jti_prefix=jti_claim[:8],
+            )
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail={
+                    "type": "about:blank",
+                    "title": "Service Unavailable",
+                    "status": 503,
+                    "detail": (
+                        "Authorization subsystem is temporarily unavailable; "
+                        "retry shortly."
+                    ),
+                    "correlation_id": get_correlation_id(),
+                },
+                headers={"Content-Type": "application/problem+json"},
+            ) from exc
 
     try:
         user = CurrentUser(

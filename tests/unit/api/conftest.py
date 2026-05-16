@@ -7,7 +7,9 @@ and the dev secret so that decode_token works in the test environment.
 
 from __future__ import annotations
 
+import importlib
 import os
+import sys
 import uuid
 from collections.abc import AsyncGenerator
 from typing import Any
@@ -137,3 +139,46 @@ def client_no_auth() -> TestClient:
     with TestClient(app, raise_server_exceptions=False) as c:
         yield c
     app.dependency_overrides.clear()
+
+
+# ---------------------------------------------------------------------------
+# JWT module state isolation (BLOCK: order-dependent flaky tests)
+# ---------------------------------------------------------------------------
+
+_JWT_MOD = "ghg_tool.infrastructure.security.jwt"
+
+# Canonical env that every JWT test in this package should see.
+_JWT_TEST_ENV = {
+    "GHG_JWT_ALGORITHM": "HS256",
+    "GHG_JWT_SECRET": "test-secret-key-for-unit-tests-only",
+    "GHG_ENVIRONMENT": "development",
+}
+
+
+@pytest.fixture(autouse=True)
+def _reset_jwt_module_state(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Re-establish a deterministic JWT module state before every API test.
+
+    test_security_fixes.py::TestSecP0001JwtSecretGuard intentionally reloads
+    the jwt module with production env vars (GHG_ENVIRONMENT=production,
+    no GHG_JWT_SECRET) to verify the RuntimeError guard fires.  After those
+    tests the module is left with a *different* ``_JWT_SECRET`` (the test
+    fallback loaded in the final ``importlib.import_module`` call inside their
+    finally block) than what the rest of the suite expects.
+
+    This autouse fixture ensures that:
+    1. The canonical test env vars are always in place for every test.
+    2. The jwt module is reloaded from a clean state so ``_JWT_SECRET`` and
+       ``_JWT_ALGORITHM`` are derived from the canonical env, not from whatever
+       a prior test left behind.
+
+    The reload is cheap (< 1 ms) and avoids the ordering sensitivity described
+    in BLOCK-4 (flaky order-dependent JWT state).
+    """
+    for key, value in _JWT_TEST_ENV.items():
+        monkeypatch.setenv(key, value)
+
+    # Force a clean reload so module-level constants are re-derived from env.
+    if _JWT_MOD in sys.modules:
+        del sys.modules[_JWT_MOD]
+    importlib.import_module(_JWT_MOD)

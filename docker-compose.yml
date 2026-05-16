@@ -26,9 +26,10 @@ services:
     environment:
       POSTGRES_DB: ghg_tool
       POSTGRES_USER: ghg_app
-      # IMPORTANT: Override with a strong password in production.
-      # Do NOT commit real credentials here.
-      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-changeme}"
+      # SEC-P0: no hardcoded default — POSTGRES_PASSWORD MUST be set in the
+      # caller's .env or shell environment.  Compose will refuse to start
+      # without it. See .env.example.
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required (set via .env)}"
     ports:
       - "5432:5432"
     volumes:
@@ -93,7 +94,7 @@ services:
       redis:
         condition: service_healthy
     environment:
-      SQLALCHEMY_URL: "postgresql+psycopg://ghg_app:${POSTGRES_PASSWORD:-changeme}@db:5432/ghg_tool"
+      SQLALCHEMY_URL: "postgresql+psycopg://ghg_app:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required (set via .env)}@db:5432/ghg_tool"
     command: ["python", "-m", "alembic", "upgrade", "head"]
     restart: on-failure
 
@@ -111,8 +112,8 @@ services:
       redis:
         condition: service_healthy
     environment:
-      SQLALCHEMY_URL: "postgresql+asyncpg://ghg_app:${POSTGRES_PASSWORD:-changeme}@db:5432/ghg_tool"
-      DATABASE_URL: "postgresql+asyncpg://ghg_app:${POSTGRES_PASSWORD:-changeme}@db:5432/ghg_tool"
+      SQLALCHEMY_URL: "postgresql+asyncpg://ghg_app:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required (set via .env)}@db:5432/ghg_tool"
+      DATABASE_URL: "postgresql+asyncpg://ghg_app:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required (set via .env)}@db:5432/ghg_tool"
       GHG_LOG_LEVEL: "${GHG_LOG_LEVEL:-INFO}"
       # Production-safe defaults: no demo seed, no /docs Swagger UI.
       # Override with docker-compose.quickstart.yml for the
@@ -159,8 +160,8 @@ services:
     environment:
       CELERY_BROKER_URL: "redis://redis:6379/1"
       CELERY_RESULT_BACKEND: "redis://redis:6379/2"
-      SQLALCHEMY_URL: "postgresql+asyncpg://ghg_app:${POSTGRES_PASSWORD:-changeme}@db:5432/ghg_tool"
-      DATABASE_URL: "postgresql+asyncpg://ghg_app:${POSTGRES_PASSWORD:-changeme}@db:5432/ghg_tool"
+      SQLALCHEMY_URL: "postgresql+asyncpg://ghg_app:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required (set via .env)}@db:5432/ghg_tool"
+      DATABASE_URL: "postgresql+asyncpg://ghg_app:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required (set via .env)}@db:5432/ghg_tool"
       GHG_LOG_LEVEL: "${GHG_LOG_LEVEL:-INFO}"
       GHG_ENVIRONMENT: "${GHG_ENVIRONMENT:-production}"
       GHG_JWT_SECRET: "${GHG_JWT_SECRET}"
@@ -213,7 +214,7 @@ services:
       migrate:
         condition: service_completed_successfully
     environment:
-      SQLALCHEMY_URL: "postgresql+asyncpg://ghg_app:${POSTGRES_PASSWORD:-changeme}@db:5432/ghg_tool"
+      SQLALCHEMY_URL: "postgresql+asyncpg://ghg_app:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required (set via .env)}@db:5432/ghg_tool"
     volumes:
       - ./data:/app/data:ro
     # Override this command with the actual ETL entrypoint in wave 3

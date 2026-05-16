@@ -202,4 +202,8 @@ def downgrade() -> None:
         for pol in policy_prefixes:
             op.execute(f"DROP POLICY IF EXISTS {pol} ON {tbl};")
         op.execute(f"ALTER TABLE {tbl} DISABLE ROW LEVEL SECURITY;")
-    op.execute("GRANT SELECT (password_hash) ON ref.users TO PUBLIC;")
+    # Restoring PUBLIC grant would expose password hashes to every DB role;
+    # restrict to the application role only. PUBLIC access was never correct —
+    # the original REVOKE in upgrade() was itself fixing an over-permissive
+    # default.  Downgrade must not re-introduce the vulnerability.
+    op.execute("GRANT SELECT (password_hash) ON ref.users TO ghg_app;")

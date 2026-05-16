@@ -95,7 +95,7 @@ def _api_get(path: str, params: dict[str, Any] | None = None) -> Any:
     except httpx.HTTPStatusError as exc:
         st.error(f"API error {exc.response.status_code}: {exc.response.text[:200]}")
         return None
-    except Exception as exc:
+    except httpx.RequestError as exc:
         st.error(f"Connection error: {exc}")
         return None
 
@@ -109,7 +109,7 @@ def _api_post(path: str, body: dict[str, Any]) -> tuple[int, Any]:
             timeout=_TIMEOUT,
         )
         return r.status_code, r.json()
-    except Exception as exc:
+    except (httpx.HTTPStatusError, httpx.RequestError) as exc:
         return 0, {"detail": str(exc)}
 
 
@@ -121,7 +121,7 @@ def _api_patch(path: str) -> tuple[int, Any]:
             timeout=_TIMEOUT,
         )
         return r.status_code, r.json()
-    except Exception as exc:
+    except (httpx.HTTPStatusError, httpx.RequestError) as exc:
         return 0, {"detail": str(exc)}
 
 

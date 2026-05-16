@@ -734,7 +734,7 @@ async def calc_insert(
             body,
             factor_catalog=factor_catalog,  # type: ignore[arg-type]
             session=session,
-            user=user,
+            user=user,  # type: ignore[arg-type]
         )
     except MissingFactorError as exc:
         raise HTTPException(

@@ -37,6 +37,7 @@ import argparse
 import hashlib
 import logging
 import os
+import sys
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
@@ -44,6 +45,11 @@ from typing import Any
 import pandas as pd
 
 logger = logging.getLogger(__name__)
+
+
+class ConfigurationError(RuntimeError):
+    """Raised when required configuration (e.g. SHA-256 pin) is missing or invalid."""
+
 
 # ---------------------------------------------------------------------------
 # Repository root & data directory
@@ -336,10 +342,17 @@ def parse_ispra_pdf(path: Path) -> list[FactorRecord]:
         List with one FactorRecord for LB_IT_GRID_ISPRA_2024.
 
     Raises:
+        ConfigurationError: If ISPRA_PDF_SHA256 is empty and bypass env var is unset.
         ImportError: If pdfplumber is not installed.
         ValueError: If the factor value cannot be extracted from the PDF.
         FileNotFoundError: If the PDF file does not exist.
     """
+    if not ISPRA_PDF_SHA256 and not os.environ.get("GHG_SEED_SKIP_HASH_CHECK"):
+        raise ConfigurationError(
+            "ISPRA_PDF_SHA256 is empty; set the SHA-256 or export "
+            "GHG_SEED_SKIP_HASH_CHECK=1 to bypass (NOT for production)."
+        )
+
     try:
         import pdfplumber  # type: ignore[import-not-found]
     except ImportError as exc:
@@ -426,10 +439,17 @@ def parse_aib_pdf(path: Path) -> list[FactorRecord]:
         List with one FactorRecord for MB_IT_RESIDUAL_AIB_2024.
 
     Raises:
+        ConfigurationError: If AIB_PDF_SHA256 is empty and bypass env var is unset.
         ImportError: If pdfplumber is not installed.
         ValueError: If the Italian factor cannot be extracted from the PDF.
         FileNotFoundError: If the PDF file does not exist.
     """
+    if not AIB_PDF_SHA256 and not os.environ.get("GHG_SEED_SKIP_HASH_CHECK"):
+        raise ConfigurationError(
+            "AIB_PDF_SHA256 is empty; set the SHA-256 or export "
+            "GHG_SEED_SKIP_HASH_CHECK=1 to bypass (NOT for production)."
+        )
+
     try:
         import pdfplumber
     except ImportError as exc:
@@ -612,8 +632,16 @@ def load_all_seeds(
             n = insert_factors(conn, defra_records, evidence_url)
             result["sources"]["defra"] = {"inserted": n, "status": "OK"}
             result["total_inserted"] += n
-        except Exception as exc:
-            logger.error("DEFRA seed failed: %s", exc)
+        except FileNotFoundError as exc:
+            logger.error("DEFRA seed failed — file missing: %s", exc)
+            result["sources"]["defra"] = {"error": str(exc), "status": "FAILED"}
+            result["status"] = "PARTIAL"
+        except ValueError as exc:
+            logger.error("DEFRA seed failed — hash mismatch or parse error: %s", exc)
+            result["sources"]["defra"] = {"error": str(exc), "status": "FAILED"}
+            result["status"] = "PARTIAL"
+        except psycopg.DatabaseError as exc:
+            logger.error("DEFRA seed failed — database error: %s", exc)
             result["sources"]["defra"] = {"error": str(exc), "status": "FAILED"}
             result["status"] = "PARTIAL"
 
@@ -626,8 +654,16 @@ def load_all_seeds(
             n = insert_factors(conn, ecoinvent_records, evidence_url)
             result["sources"]["ecoinvent"] = {"inserted": n, "status": "OK"}
             result["total_inserted"] += n
-        except Exception as exc:
-            logger.error("Ecoinvent seed failed: %s", exc)
+        except FileNotFoundError as exc:
+            logger.error("Ecoinvent seed failed — file missing: %s", exc)
+            result["sources"]["ecoinvent"] = {"error": str(exc), "status": "FAILED"}
+            result["status"] = "PARTIAL"
+        except ValueError as exc:
+            logger.error("Ecoinvent seed failed — hash mismatch or parse error: %s", exc)
+            result["sources"]["ecoinvent"] = {"error": str(exc), "status": "FAILED"}
+            result["status"] = "PARTIAL"
+        except psycopg.DatabaseError as exc:
+            logger.error("Ecoinvent seed failed — database error: %s", exc)
             result["sources"]["ecoinvent"] = {"error": str(exc), "status": "FAILED"}
             result["status"] = "PARTIAL"
 
@@ -949,9 +985,9 @@ def _main() -> None:
 
     if args.list_tbc:
         ids = list_tbc_factor_ids()
-        print(f"TBC factor IDs ({len(ids)}):")
+        logger.info("tbc_factor_ids_count", extra={"count": len(ids)})
         for fid in ids:
-            print(f"  {fid}  ->  {_TBC_FACTOR_URLS[fid]}")
+            logger.info("tbc_factor_id", extra={"factor_id": fid, "url": _TBC_FACTOR_URLS[fid]})
         return
 
     if args.check_hash:
@@ -963,14 +999,15 @@ def _main() -> None:
         }
         path = file_map[args.check_hash]
         digest = compute_sha256(path)
-        print(f"{args.check_hash}: {digest}")
+        logger.info("file_sha256", extra={"source": args.check_hash, "digest": digest})
         return
 
     if args.apply:
         result = load_all_seeds(raw_dir=raw_dir, skip_pdf=args.skip_pdf)
         import json
 
-        print(json.dumps(result, indent=2))
+        # explicit stdout for machine-parseable output
+        sys.stdout.write(json.dumps(result, indent=2) + "\n")
         if result["status"] != "OK":
             raise SystemExit(1)
         return

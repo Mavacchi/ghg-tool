@@ -134,10 +134,10 @@ async def test_migration_succeeds_regardless_of_pgcron(
 
     We verify by checking that ``alembic_version`` holds a revision at or
     after 0027_M7.  Alembic stores only the current head (linear chain), so
-    after Wave 4 the head is 0028_M8 (which has 0027_M7 as its down_revision).
-    The presence of either id proves the 0027_M7 step ran without raising.
+    after any wave the head will be >= 0027_M7 (which has 0027_M7 either as
+    itself or as an ancestor down_revision). Parse the numeric prefix and
+    assert it is >= 27, which is robust against future wave migrations.
     """
-    expected_revisions = {"0027_M7", "0028_M8"}
     async with async_engine.connect() as conn:
         result = await conn.execute(
             text("SELECT version_num FROM alembic_version")
@@ -147,10 +147,13 @@ async def test_migration_succeeds_regardless_of_pgcron(
     assert row is not None, (
         "alembic_version is empty — alembic upgrade head did not run"
     )
-    assert row[0] in expected_revisions, (
-        f"alembic_version = {row[0]!r}; expected one of {expected_revisions} "
-        "after Wave 4 upgrade head — migration 0027_M7_wave4_foundation.py "
-        "did not apply (head should be at or after 0027_M7)"
+    # Revisions follow the convention NNNN_M* (e.g. '0027_M7', '0032_M12').
+    # Anything at or after 0027 proves the M7 step was applied as part of the
+    # linear chain.
+    numeric_prefix = int(row[0].split("_")[0])
+    assert numeric_prefix >= 27, (
+        f"alembic_version = {row[0]!r} (numeric prefix {numeric_prefix}); "
+        "expected >= 0027 — migration 0027_M7_wave4_foundation.py did not apply"
     )
 
 
@@ -527,10 +530,11 @@ def test_upgrade_downgrade_roundtrip(
     finally:
         engine2.dispose()
 
-    # head is 0028_M8 after Wave 4 linearization (0028 has 0027 as
-    # down_revision).  Accept either as proof that the M7 step ran and the
-    # chain made it back to or past it.
-    assert version_after_upgrade in {"0027_M7", "0028_M8"}, (
-        f"Expected alembic_version in {{'0027_M7','0028_M8'}} after re-upgrade, "
-        f"got '{version_after_upgrade}'"
+    # Wave 5 added more migrations downstream of 0027_M7 (currently up to
+    # 0032_M12). Accept any revision >= 0027 — the M7 step is in the chain
+    # regardless of where head currently is.
+    numeric_prefix = int(version_after_upgrade.split("_")[0])
+    assert numeric_prefix >= 27, (
+        f"Expected alembic_version >= 0027 after re-upgrade, "
+        f"got '{version_after_upgrade}' (numeric prefix {numeric_prefix})"
     )

@@ -80,11 +80,19 @@ def _run_scheduled_calc(
     from ghg_tool.application.services.calc_persistence import run_calc_and_persist  # noqa: PLC0415
 
     _DEFAULT_TENANT_CODE = os.getenv("GHG_SCHEDULER_TENANT_CODE", "GRESMALT")  # noqa: N806
-    _RAW_DSN: str = (  # noqa: N806
-        os.getenv("DATABASE_URL")
-        or os.getenv("SQLALCHEMY_URL")
-        or "postgresql+asyncpg://ghg_app:changeme@localhost:5432/ghg_tool"
-    )
+    # SEC-P0: no hardcoded ``ghg_app:changeme`` fallback.  When neither
+    # DATABASE_URL nor SQLALCHEMY_URL is set we either fall back to a clearly
+    # marked test-only DSN (under pytest) or refuse to start the scheduler.
+    _raw_dsn_env = os.getenv("DATABASE_URL") or os.getenv("SQLALCHEMY_URL")
+    if _raw_dsn_env:
+        _RAW_DSN: str = _raw_dsn_env  # noqa: N806
+    elif os.getenv("PYTEST_CURRENT_TEST"):
+        _RAW_DSN = "postgresql+asyncpg://ghg_app:test-only@localhost:5432/ghg_tool"  # noqa: N806
+    else:
+        raise RuntimeError(
+            "DATABASE_URL / SQLALCHEMY_URL is required for calc_scheduler "
+            "(no insecure default); set it in the process environment."
+        )
 
     def _sync_dsn(raw: str) -> str:
         no_driver = re.sub(r"^postgresql\+\w+://", "postgresql://", raw)

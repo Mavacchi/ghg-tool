@@ -1,0 +1,54 @@
+[importlinter]
+root_package = ghg_tool
+include_external_packages = True
+
+[importlinter:contract:domain-pure]
+name = Domain layer must not depend on infrastructure
+type = forbidden
+source_modules =
+    ghg_tool.domain
+forbidden_modules =
+    sqlalchemy
+    redis
+    celery
+    httpx
+    streamlit
+    fastapi
+
+[importlinter:contract:application-no-frameworks]
+name = Application layer must not import FastAPI/Streamlit directly
+type = forbidden
+source_modules =
+    ghg_tool.application
+forbidden_modules =
+    fastapi
+    streamlit
+# VIOLATION (wave5): ghg_tool.application.services.auto_calc_service -> fastapi (l.52)
+# Fix: BackgroundTasks must be moved to API layer or abstracted. Tracked for REFACTOR cluster.
+
+[importlinter:contract:layered]
+name = Strict layered architecture
+type = layers
+layers =
+    ghg_tool.api : ghg_tool.ui
+    ghg_tool.application
+    ghg_tool.domain
+    ghg_tool.infrastructure
+# VIOLATIONS (wave5) — tracked for REFACTOR cluster:
+#   application -> api:
+#     ghg_tool.application.services.auth_service -> ghg_tool.api.schemas.auth_schemas (l.29)
+#     ghg_tool.application.services.auto_calc_service -> ghg_tool.api.schemas.calc_schemas (l.55)
+#     ghg_tool.application.services.auto_calc_service -> ghg_tool.api.middleware.correlation_id (l.54)
+#   application -> ui:
+#     ghg_tool.application.tasks.export_tasks -> ghg_tool.ui.pdf.builder (l.108)
+#     ghg_tool.application.services.export_service -> ghg_tool.ui.excel.builder (l.235)
+#     ghg_tool.application.services.export_service -> ghg_tool.ui.pdf.builder (l.232)
+#     ghg_tool.application.tasks.export_tasks -> ghg_tool.ui.excel.builder (l.154)
+#   infrastructure -> application:
+#     ghg_tool.infrastructure.scheduling.calc_scheduler -> ghg_tool.application.services.calc_persistence (l.80)
+#
+# Legitimate hexagonal-arch wiring (adapters implementing domain ports) — ignored:
+#   infrastructure -> domain (sql_adapter implements domain port; this is correct DIP)
+ignore_imports =
+    ghg_tool.infrastructure.factors.sql_adapter -> ghg_tool.domain.ports.factor_catalog
+    ghg_tool.infrastructure.factors.sql_adapter -> ghg_tool.domain.exceptions.calc_errors

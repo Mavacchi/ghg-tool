@@ -84,13 +84,18 @@ class TestDemoModeEnabled:
         ):
             assert main_mod._demo_mode_enabled() is False
 
-    def test_demo_mode_on_in_staging_with_flag(self) -> None:
-        """staging env with GHG_DEMO_MODE=true -> True."""
+    def test_demo_mode_off_in_staging_even_with_flag(self) -> None:
+        """staging env with GHG_DEMO_MODE=true -> still False (BLOCK 6).
+
+        Staging mirrors production trust boundaries for CSRD reporting, so
+        the demo-mode flag is silently suppressed there — only development
+        and demo environments may opt-in.
+        """
         with (
             patch.object(main_mod, "_ENVIRONMENT", "staging"),
             patch.dict(os.environ, {"GHG_DEMO_MODE": "true"}, clear=False),
         ):
-            assert main_mod._demo_mode_enabled() is True
+            assert main_mod._demo_mode_enabled() is False
 
 
 # ---------------------------------------------------------------------------

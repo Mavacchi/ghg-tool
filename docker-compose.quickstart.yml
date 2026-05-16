@@ -19,10 +19,14 @@
 services:
   app:
     environment:
-      SQLALCHEMY_URL: "postgresql+asyncpg://ghg_app:${POSTGRES_PASSWORD:-changeme}@db:5432/ghg_tool"
-      SQLALCHEMY_ASYNC_URL: "postgresql+asyncpg://ghg_app:${POSTGRES_PASSWORD:-changeme}@db:5432/ghg_tool"
-      DATABASE_URL: "postgresql+asyncpg://ghg_app:${POSTGRES_PASSWORD:-changeme}@db:5432/ghg_tool"
-      GHG_JWT_SECRET: "quickstart-only-jwt-secret-min-32-chars-not-prod"
+      SQLALCHEMY_URL: "postgresql+asyncpg://ghg_app:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required (set via .env)}@db:5432/ghg_tool"
+      SQLALCHEMY_ASYNC_URL: "postgresql+asyncpg://ghg_app:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required (set via .env)}@db:5432/ghg_tool"
+      DATABASE_URL: "postgresql+asyncpg://ghg_app:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required (set via .env)}@db:5432/ghg_tool"
+      # SEC-P0: no hardcoded JWT secret default — the caller's .env MUST
+      # supply GHG_JWT_SECRET (>= 32 chars).  See .env.example for the
+      # quickstart workflow (run scripts/generate_quickstart_env.py or copy
+      # .env.example and replace the placeholder).
+      GHG_JWT_SECRET: "${GHG_JWT_SECRET:?GHG_JWT_SECRET required (>= 32 chars; set via .env)}"
       GHG_ENVIRONMENT: "development"
       GHG_DEMO_MODE: "true"
       GHG_CORS_ORIGINS: "http://localhost:8501"
