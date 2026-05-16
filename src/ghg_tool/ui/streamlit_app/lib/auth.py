@@ -339,6 +339,12 @@ def render_login_form(lang: str = "it") -> None:
             else:
                 st.error(_("login_error", lang))
 
+        # GDPR Art. 13 privacy notice — rendered under the login form so
+        # that the data subject receives the mandatory disclosures before
+        # (or at the moment of) submitting their credentials (F-14).
+        from ghg_tool.ui.streamlit_app.lib.privacy import render_privacy_notice  # noqa: PLC0415
+        render_privacy_notice(lang=lang)
+
     # Second screen: TOTP challenge (only shown when partial token is pending).
     if st.session_state.get(_TOTP_PENDING_KEY):
         _render_totp_challenge_form(

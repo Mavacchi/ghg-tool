@@ -32,6 +32,7 @@ st.set_page_config(
 
 from ghg_tool.ui.streamlit_app.lib.api_client import create_user, list_users  # noqa: E402
 from ghg_tool.ui.streamlit_app.lib.auth import get_lang, require_auth  # noqa: E402
+from ghg_tool.ui.streamlit_app.lib.privacy import render_privacy_notice  # noqa: E402
 from ghg_tool.ui.streamlit_app.lib.brand import (  # noqa: E402
     apply_brand_chrome,
     render_context_bar,
@@ -96,6 +97,11 @@ else:
 # ---------------------------------------------------------------------------
 st.subheader(_("admin_users_create", lang))
 st.caption(_("admin_users_create_caption", lang))
+
+# GDPR Art. 13 notice — shown to the admin who creates users on their behalf
+# so they are informed of the data processing obligations for newly created
+# accounts (F-14).
+render_privacy_notice(lang=lang)
 
 with st.form("admin_create_user", clear_on_submit=True):
     cols = st.columns([1, 1])
