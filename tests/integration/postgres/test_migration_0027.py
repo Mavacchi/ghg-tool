@@ -500,12 +500,17 @@ def test_upgrade_downgrade_roundtrip(
         f"got '{version_after_downgrade}'"
     )
 
-    # --- re-upgrade to head (0027_M7) ---------------------------------------
+    # --- re-upgrade all the way back to head -------------------------------
+    # IMPORTANT: must re-apply 0028_M8 too, otherwise this session-scoped
+    # database is left at 0027_M7 and any subsequent test that depends on
+    # M8 artefacts (e.g. tests/integration/postgres/test_migration_0028.py)
+    # sees an empty ref.factor_catalog for the M8 ids.
+    #
     # Same env-var override pattern as the downgrade call above.
     original_env = os.environ.get("SQLALCHEMY_URL")
     os.environ["SQLALCHEMY_URL"] = migrated_db_url
     try:
-        alembic_command.upgrade(cfg, "0027_M7")
+        alembic_command.upgrade(cfg, "head")
     finally:
         if original_env is None:
             os.environ.pop("SQLALCHEMY_URL", None)
@@ -522,7 +527,10 @@ def test_upgrade_downgrade_roundtrip(
     finally:
         engine2.dispose()
 
-    assert version_after_upgrade == "0027_M7", (
-        f"Expected alembic_version = '0027_M7' after re-upgrade, "
+    # head is 0028_M8 after Wave 4 linearization (0028 has 0027 as
+    # down_revision).  Accept either as proof that the M7 step ran and the
+    # chain made it back to or past it.
+    assert version_after_upgrade in {"0027_M7", "0028_M8"}, (
+        f"Expected alembic_version in {{'0027_M7','0028_M8'}} after re-upgrade, "
         f"got '{version_after_upgrade}'"
     )
