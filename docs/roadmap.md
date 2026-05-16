@@ -1,193 +1,275 @@
 # Roadmap — GHG Accounting Tool
 
-**Version**: 1.0.0
-**Date**: 2026-05-14
-**Status**: APPROVED — documents deferred work from Phase 8 security and reviewer advisories
+**Version**: 2.0.0
+**Date**: 2026-05-16 (post wave-5)
+**Status**: APPROVED — supersedes v1.0.0 (2026-05-14, pre-wave-3)
 
-This document records all items explicitly deferred from v1, with owner agent, target
-version, and traceability to the originating finding or advisory. Items are grouped by
-urgency and version target. No item in this document represents a defect in v1; each was
-deliberately scoped out of the production-ready v1 baseline after explicit review.
+This document records work explicitly deferred from the current production
+baseline, with owner agent, target wave/version, and traceability to the
+originating finding or advisory.
 
----
-
-## v1.1 — Phase 9 Polish (Non-blocking; addressable without production downtime)
-
-These items represent code-quality and maintainability improvements. They do not affect
-correctness, security, or regulatory compliance of v1 outputs.
-
-### REV-WAVE3-007 — Celery migration for export_service.py
-
-**Description**: The PDF and Excel export service (`src/ghg_tool/application/services/export_service.py`)
-uses an `asyncio.Lock`-guarded in-memory job store to track export jobs. This design is
-correct and safe for a single-worker deployment. It breaks at horizontal scale: two API
-replicas have independent in-memory stores, so a job submitted to replica A is invisible
-to replica B. The v1 deployment profile is single-worker, so this is not a runtime defect.
-
-**Remediation**: Replace the in-memory job store with a Celery task queue backed by Redis
-(or equivalent broker). Job state is stored in Redis; any replica can query or cancel any
-job.
-
-**Owner**: backend-agent
-**Target version**: v1.1
-**Finding ID**: REV-WAVE3-007
-
-### REV-WAVE3-010 — Factor source strings hardcoded in Excel summary sheet
-
-**Description**: The Summary sheet of the multi-sheet Excel export
-(`src/ghg_tool/ui/excel/sheets.py`) contains hardcoded factor source strings (e.g.
-`"DEFRA 2025"`, `"ecoinvent v3.10"`). When the factor catalog version changes, the sheet
-strings require a code change. They should be derived from the `factor_source` and
-`factor_version` fields of the factor catalog rows used in the corresponding calculation.
-
-**Remediation**: Extract factor source strings to named constants in a shared module, or
-derive them directly from the factor catalog data passed to the sheet renderer. Remove all
-hardcoded version strings from the Excel template layer.
-
-**Owner**: visualization-agent
-**Target version**: v1.1
-**Finding ID**: REV-WAVE3-010
-
-### REV-WAVE3-018 — Biogenic memo openpyxl row-juggling refactor
-
-**Description**: The `write_biogenic_memo_sheet` function in the Excel export module uses
-manual `openpyxl` row-offset arithmetic to position the biogenic CO2 disclosure memo below
-the main data table. The implementation is functionally correct but difficult to maintain:
-adding or removing rows above the memo requires updating hard-coded row offsets.
-
-**Remediation**: Refactor to use a named cell range or a structured table reference so that
-the memo position is derived from the data extent rather than a fixed offset.
-
-**Owner**: visualization-agent
-**Target version**: v1.1
-**Finding ID**: REV-WAVE3-018
+For features and findings that have **already shipped**, see
+[`CHANGELOG.md`](../CHANGELOG.md). For per-finding audit-trail records (BLOCK
+/ REQUIRED / INFO severity with status), see [`audit-trail.md`](audit-trail.md).
 
 ---
 
-## v2 — Production Hardening (Must be addressed before horizontal scaling or extended public exposure)
+## Wave 6 — Quality Follow-up (next planned wave)
 
-These items represent security improvements that are acceptable for v1 single-worker
-deployment but must be resolved before horizontal scaling, increased public exposure, or
-refresh-token rotation requirements are introduced.
+These items were explicitly deferred during wave 5 with ticket-quality
+rationale. None blocks production deployment of the current baseline.
 
-### SEC-P1-004 — Migrate from python-jose to PyJWT (CVE-2024-33664)
+### REQ-import-linter-violations
 
-**Description**: The current JWT implementation uses `python-jose` 3.3.x, which is
-affected by CVE-2024-33664 (algorithm confusion attack: a crafted token can cause
-python-jose to accept a symmetric-key token as if it were an asymmetric-key token when
-multiple algorithms are simultaneously allowed). The application currently uses HS256 only
-with an explicit algorithm allow-list, which mitigates the practical exploit vector. The
-advisory is P1 (not P0) because the mitigation is in place.
+**Description**: Wave 5 wired `import-linter` into CI with hexagonal
+contracts (`domain` → no deps; `application` → only `domain`; etc.). 9
+pre-existing violations were documented and the CI step runs in *warning
+mode* (`continue-on-error: true`).
 
-**Remediation**: Migrate to `PyJWT >= 2.8` with an explicit `algorithms=["HS256"]`
-parameter on every `jwt.decode()` call. PyJWT 2.x does not exhibit the algorithm-confusion
-vulnerability. Update `pyproject.toml`, `infrastructure/security/jwt.py`, and
-`api/routers/auth.py` accordingly. Validate all JWT tests continue to pass after migration.
+**Remediation**: Resolve the 9 violations (mostly `application` → `api` /
+`ui` reverse-imports and `infrastructure` → `application` reverse-imports).
+Drop `continue-on-error`.
 
-**Owner**: security-agent + backend-agent
-**Target version**: v2
-**Finding ID**: SEC-P1-004
+**Owner**: refactor-agent + architect-agent
+**Target**: wave 6
+**Finding ID**: REQ-import-linter (audit-trail.md wave 5)
 
-### SEC-P1-007 — Refresh token rotation with Redis blacklist
+### REQ-cve-transitive-major-upgrade
 
-**Description**: In v1, refresh tokens are long-lived (24-hour TTL) and not rotated on
-each use. A stolen refresh token remains valid until expiry. There is no server-side
-blacklist to invalidate a specific token before its TTL expires (logout is a client-side
-no-op in v1).
+**Description**: `pip-audit` reports 10 CVE in transitive dependencies
+(starlette, streamlit, weasyprint, pillow). These require a major version
+upgrade of FastAPI and Streamlit. CI ignores them with explicit
+`--ignore-vuln` flags.
 
-**Remediation**: Implement per-refresh token rotation:
-1. On each `POST /api/v1/auth/refresh`, issue a new refresh token with a fresh `jti`
-   (JWT ID) claim and a reduced TTL (1-4 hours recommended).
-2. Add the previous refresh token's `jti` to a Redis blacklist with TTL equal to the
-   original token's remaining validity.
-3. Validate on every refresh that the incoming token's `jti` is not on the blacklist.
-4. The logout endpoint becomes a real operation: add the refresh token's `jti` to the
-   blacklist immediately on `POST /api/v1/auth/logout`.
+**Remediation**: Upgrade FastAPI 0.111 → 0.115+ and Streamlit 1.35 → 1.40+;
+regenerate the lock file; re-run the full test suite; remove
+`--ignore-vuln` flags.
 
-This requires a Redis instance in the deployment stack (which is also required for
-SEC-ADV-008 rate-limiter migration).
+**Owner**: security-agent + devops-agent
+**Target**: wave 6
+**Finding ID**: REQ-cve-transitive (audit-trail.md wave 5)
 
-**Owner**: security-agent + backend-agent
-**Target version**: v2
-**Finding ID**: SEC-P1-007
+### REQ-mypy-ignore-errors-cleanup
 
-### SEC-ADV-008 — Redis-backed rate limiter (replace in-process slowapi storage)
+**Description**: `pyproject.toml` contains 18 module-level
+`ignore_errors = true` overrides for mypy. Root causes were analysed:
+SQLAlchemy 2.0 `rowcount` typing gap (CursorResult vs Result),
+Streamlit `T | None` returns, pandas-stubs incompleteness, and a few
+legacy `Any`-heavy modules.
 
-**Description**: See `docs/deployment.md` SEC-ADV-008 acknowledged risk. The in-process
-rate limiter does not coordinate across replicas.
+**Remediation**: Per-module fix plan available; tackle one module at a
+time, removing the `ignore_errors` after each.
 
-**Remediation**: Configure slowapi to use a Redis storage backend. The Redis instance
-required for SEC-P1-007 (token blacklist) can serve double duty.
+**Owner**: refactor-agent + python-expert-agent
+**Target**: wave 6
+**Finding ID**: REQ-mypy-ignore-errors (audit-trail.md wave 5)
 
-**Owner**: backend-agent
-**Target version**: v2
-**Finding ID**: SEC-ADV-008
+### REQ-auth-router-refactor
+
+**Description**: `api/routers/auth.py::login` (179 LOC) and `refresh`
+(195 LOC) exceed the 50-LOC reviewer guideline. Functions are tightly
+coupled to DB session + TOTP + session-rotation logic.
+
+**Remediation**: Gated on integration-test coverage being added first;
+once safe, decompose into a service layer (`AuthLoginService`,
+`AuthRefreshService`) mirroring the `FactorPublishService` extraction
+pattern from wave 5.
+
+**Owner**: refactor-agent
+**Target**: wave 6
+**Finding ID**: REQ-auth-router-refactor (audit-trail.md wave 5)
+
+### REQ-e2e-full-pipeline
+
+**Description**: `tests/integration/e2e/test_full_pipeline.py` scaffold
+exists (4 methods) but is `pytest.skip`'d because it needs a live PG
+instance + Celery-eager fixture coordination.
+
+**Remediation**: Build the shared fixture, enable the tests, and gate
+the deployment workflow on E2E success.
+
+**Owner**: test-agent + devops-agent
+**Target**: wave 6
+**Finding ID**: REQ-e2e-pipeline (audit-trail.md wave 5)
+
+### REQ-arch-doc-role-rename
+
+**Description**: `docs/architecture.md` still uses the pre-wave-3 role
+names (`data_steward / esg_manager / auditor`) throughout its narrative,
+Mermaid diagrams, and SQL examples. A banner has been added documenting
+the 1:1 mapping, but the document itself was not rewritten.
+
+**Remediation**: Full document rewrite — replace role names in all
+narrative sections, regenerate Mermaid diagrams, update RBAC tables and
+SQL `SET LOCAL` examples.
+
+**Owner**: documentation-agent + architect-agent
+**Target**: wave 6
+**Finding ID**: post-wave-5 documentation cleanup
 
 ---
 
-## v2 — Feature Roadmap
+## Open Questions — Outstanding (no target wave yet)
 
-These items represent planned feature additions that are explicitly out of scope for v1.
+These items are normative/policy decisions that need stakeholder input
+before they can be assigned to a wave.
 
-### EU ETS Phase IV MRR XML upload format
+### ISPRA factor: production-side vs consumption-side
 
-**Description**: The current tool produces AR5 tCO2e values for IANO (Annex I Activity 17)
-tagged `regulatory_stream=EU_ETS_PHASE_IV` (FR-34). The MRR XML / verified-report
-serialisation format required by the EU ETS registry is **not produced** in v1. The v2
-target is to produce a compliant MRR XML submission file from the existing AR5 data.
+The Italian grid factor is currently pinned at **0.216 kgCO2/kWh** (production-side,
+ISPRA 2024). GHG Protocol Scope 2 §4.2 recommends a **consumption-side**
+factor (~0.243 kgCO2/kWh after import-mix and grid-loss adjustments). The
+current pin is an interim measure.
 
-**Standard reference**: MRR Regulation 2018/2066 as amended by 2023/2122; EU ETS MRR
-XML schema published by the European Commission.
+**Remediation**: Extract ISPRA 2024 Table 3 (consumption-side); migration
+to repin.
+
+**Owner**: sustainability-expert-agent
+**Target**: TBD
+**Tracking**: `docs/factor_sources.md` §O1
+
+### Privacy notice placeholders
+
+The GDPR Art. 13 privacy notice rendered on the Login + Admin pages
+contains placeholder `[Titolare]` and `[DPO]` strings. Deployment-time
+configuration via env vars `GHG_CONTROLLER_NAME` and `GHG_DPO_EMAIL` is
+documented but not enforced.
+
+**Remediation**: Either enforce non-empty values at startup, or replace
+the placeholders with a configurable Markdown block read from `docs/`
+at render time.
+
+**Owner**: compliance-agent + backend-agent
+**Target**: TBD
+
+---
+
+## Future / v2 — Feature Roadmap
+
+These items are explicitly out of scope for v1 (the current production
+baseline) and represent multi-wave feature additions.
+
+### EU ETS Phase IV MRR XML export format
+
+**Description**: The current tool produces AR5 tCO2e values for IANO
+(Annex I Activity 17) tagged `regulatory_stream=EU_ETS_PHASE_IV` (FR-34).
+The MRR XML / verified-report serialisation format required by the EU ETS
+registry is **not produced** in v1.
+
+**Remediation**: Implement an MRR XML exporter that serialises the existing
+AR5 data into the EU ETS registry schema.
+
+**Standard reference**: MRR Regulation 2018/2066 as amended by 2023/2122;
+EU ETS MRR XML schema published by the European Commission.
+
 **Owner**: backend-agent + compliance-agent
-**Target version**: v2
+**Target**: v2
 **Finding ID**: FR-34 (deferred scope)
 
 ### EU Taxonomy CapEx / OpEx / turnover alignment KPIs
 
-**Description**: EU Taxonomy alignment assessment (substantial contribution criteria,
-do-no-significant-harm criteria, minimum social safeguards) is out of scope for v1 per
-`docs/requirements.md` §2.2 and CG-10. A placeholder disclosure is present in the PDF
-appendix (A.7). v2 to implement the Taxonomy KPI calculation module for NACE C23.31
-(manufacture of ceramic tiles and flags).
+**Description**: EU Taxonomy alignment assessment (Substantial Contribution
+criteria, Do-No-Significant-Harm criteria, minimum social safeguards) is
+out of scope for v1 per `docs/requirements.md` §2.2 and CG-10. A placeholder
+disclosure is present in the PDF appendix (A.7).
 
-**Standard reference**: EU Taxonomy Regulation 2020/852; Climate Delegated Act 2021/2139.
+**Remediation**: Implement the Taxonomy KPI calculation module for
+NACE C23.31 (manufacture of ceramic tiles and flags).
+
+**Standard reference**: EU Taxonomy Regulation 2020/852; Climate Delegated
+Act 2021/2139.
+
 **Owner**: sustainability-expert-agent + backend-agent
-**Target version**: v2
+**Target**: v2
 **Finding ID**: COMP-P1-002 (v2 feature, not a v1 defect)
 
 ### SFDR PAI indicators
 
-**Description**: SFDR Principal Adverse Impact indicators are not applicable to v1 (the
-reporting entity is not a financial-market participant). If scope expands to include
-investor-facing reporting (e.g. if the company is acquired by or reports into a financial
-group), SFDR PAI indicators (Annex I, Table 1-3) must be added.
+**Description**: SFDR Principal Adverse Impact indicators are not applicable
+to v1 (the reporting entity is not a financial-market participant). If scope
+expands to include investor-facing reporting (e.g. if the company is acquired
+by or reports into a financial group), SFDR PAI indicators (Annex I, Tables
+1–3) must be added.
 
-**Standard reference**: SFDR Regulation 2019/2088; RTS Commission Delegated Regulation
-2022/1288.
+**Standard reference**: SFDR Regulation 2019/2088; RTS Commission Delegated
+Regulation 2022/1288.
+
 **Owner**: sustainability-expert-agent
-**Target version**: v2 (if scope change confirmed)
+**Target**: v2 (if scope change confirmed)
 **Finding ID**: requirements.md §4 (out of scope v1)
 
-### GHG Protocol Scope 3 Hot Spot Analysis
+---
 
-**Description**: v1 implements the 9 material Scope 3 categories. A Hot Spot Analysis per
-GHG Protocol Corporate Value Chain Standard Chapter 7 would identify which Scope 3 sub-
-categories within Cat 1 (purchased goods) contribute disproportionately to the total and
-guide supplier engagement priorities. This requires spend-data enrichment and supplier-
-specific emission factor collection.
+## Completed — Already Shipped
 
-**Standard reference**: GHG Protocol Corporate Value Chain (Scope 3) Standard (2011), Ch. 7.
-**Owner**: sustainability-expert-agent + data-analyst-agent
-**Target version**: v2
-**Finding ID**: OI-5 (Phase 2, partially addressed; hot spot ranking deferred)
+The following items previously appeared in this roadmap and have since
+shipped. They are listed here for traceability; full detail is in
+[`CHANGELOG.md`](../CHANGELOG.md).
 
-### Multi-tenant management UI
+### Wave 4 (PR #45, 2026-05-16)
 
-**Description**: The database schema supports multi-tenancy via the `tenant_id` column
-and RLS policies (M4 migration). v1 is single-tenant (one row in `ref.tenants`). v2 to
-add an admin panel for tenant onboarding: creating tenants, assigning users, and
-initialising per-tenant factor catalogs.
+- ✅ **REV-WAVE3-007** — Celery migration for export_service (replaced in-memory
+  `asyncio.Lock` store with Celery + Redis broker)
+- ✅ **REV-WAVE3-010** — Dynamic factor source labels in Excel summary sheet
+  (no more hardcoded "DEFRA 2025" / "ecoinvent v3.10" strings)
+- ✅ **SEC-P1-004** — PyJWT migration from python-jose (CVE-2024-33664 mitigated
+  fully, not just by allow-list)
+- ✅ **SEC-P1-007** — Refresh-token rotation with Redis-backed JWT blacklist
+- ✅ **SEC-ADV-008** — Redis-backed rate limiter (multi-instance coordinated)
+- ✅ **GHG Protocol Scope 3 Hot Spot Analysis** — service + endpoint + UI page
+- ✅ **Multi-tenant management UI** — admin panel for tenant onboarding,
+  user assignment, per-tenant factor catalogs
+- ✅ **NCV dual-unit factor variants** (migration `0028_M8`)
+- ✅ **JWT lazy user provisioning** for SSO-origin tokens
+- ✅ **Real seed_loader pipeline** — DEFRA / ISPRA / AIB / Ecoinvent ingestion
+  (replaces the v1 stub)
 
-**Owner**: backend-agent + visualization-agent
-**Target version**: v2
-**Finding ID**: requirements.md §2.2 (single-tenant v1 design choice)
+### Wave 5 (PR #46, 2026-05-16)
+
+- ✅ **REV-WAVE3-018** — Biogenic memo openpyxl refactor was superseded by
+  REV-WAVE3-010 (factor sources now derive from catalog data; memo position
+  follows). Closed without separate work.
+- ✅ **GDPR Art. 13 privacy notice** on Login + Admin pages
+- ✅ **GDPR Art. 17 erasure endpoint** — `DELETE /api/v1/users/{id}` with
+  pseudonymisation + audit_log (migration `0032_M12` adds `users.erased_at`)
+- ✅ **audit_log 10-year retention** via pg_cron archive job (migration
+  `0029_M9`) — CSRD audit-trail durability requirement
+- ✅ **Schema hardening** (migration `0030_M10`): `ref.tenants` RLS, GIST
+  temporal exclusion constraints, partial index `is_published`, `search_path`
+  injection fix in 2 SECURITY DEFINER functions
+- ✅ **Factor pinning** (migration `0031_M11`): ISPRA 0.216 (interim), AIB
+  0.441, 4 DEFRA WTT factors
+- ✅ **`docs/factor_sources.md`** — 40 `factor_id` documented with source URL,
+  publication date, retrieval date
+- ✅ **JWT blacklist fail-closed** when Redis unreachable (was fail-open)
+- ✅ **`SQLALCHEMY_URL` fail-closed** at module import (no insecure default)
+- ✅ **SQL injection fixes** in migrations 0028 + 0003 (parametrised via
+  `sa.text().bindparams()`)
+- ✅ **XSS escapes** in 13 Streamlit `unsafe_allow_html` blocks
+- ✅ Filename collision fix: `0012_M13` → `0013b_M13`
+- ✅ `0005_M4` downgrade: restrict `password_hash` GRANT to app role
+  (not `PUBLIC`)
+- ✅ Coverage 87.05% → 93.25% (calc/* + domain/* at 100%)
+
+### Wave 3 (PRs #33–#44, 2026-05-15)
+
+- ✅ **Role rename** `data_steward / esg_manager / auditor` →
+  `editor / admin / viewer` (1:1 mapping, internal migration tag M24)
+- ✅ **Auto-calc** flow (consumption → tCO2e preview → idempotent insert)
+- ✅ **Excel template** generator (`GET /api/v1/raw/excel/template`)
+- ✅ **Site-type filter** + country-aware LB factor lookup
+- ✅ **Idempotency-Key** on `POST /calc/insert`
+- ✅ **Factor-catalog CRUD** + **emission correction** workflow
+- ✅ **Bootstrap admin** from env (`GHG_BOOTSTRAP_ADMIN_*`)
+- ✅ Demo mode hardening + production-safe defaults
+
+---
+
+## Document control
+
+- This document is updated at the close of each wave by the orchestrator-agent.
+- Items move from `Wave N — planned` → `Completed` as they ship; the
+  CHANGELOG entry is created in the same PR.
+- New items entering this document require a Finding ID (either a wave-level
+  REQUIRED, a deferred BLOCK with rationale, or a stakeholder-raised feature
+  request).

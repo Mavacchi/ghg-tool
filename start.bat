@@ -100,9 +100,7 @@ REM secret casuale + una password Postgres di default.  L'utente puo
 REM cambiare i valori a posteriori modificando il file.
 if not exist ".env" (
     echo [INFO] Primo avvio: genero un file .env con un GHG_JWT_SECRET casuale.
-    powershell -NoProfile -ExecutionPolicy Bypass -Command ^
-        "$s = -join ((48..57 + 65..90 + 97..122) | Get-Random -Count 48 | ForEach-Object {[char]$_}); ^
-         \"GHG_JWT_SECRET=$s`r`nPOSTGRES_PASSWORD=changeme\" ^| Out-File -Encoding ASCII -FilePath .env -NoNewline"
+    powershell -NoProfile -ExecutionPolicy Bypass -Command "$s = -join ((48..57 + 65..90 + 97..122) | Get-Random -Count 48 | ForEach-Object {[char]$_}); \"GHG_JWT_SECRET=$s`r`nPOSTGRES_PASSWORD=changeme\" | Out-File -Encoding ASCII -FilePath .env -NoNewline"
     if errorlevel 1 (
         echo [ERRORE] Non sono riuscito a generare il file .env.
         echo Creane uno a mano con questo contenuto ^(sostituisci ^<secret^> con
@@ -150,7 +148,7 @@ where curl >nul 2>&1
 if not errorlevel 1 (
     curl -fsS --max-time 2 http://localhost:8000/healthz >nul 2>&1
 ) else (
-    powershell -NoProfile -ExecutionPolicy Bypass -Command "try { Invoke-WebRequest -Uri 'http://localhost:8000/healthz' -UseBasicParsing -TimeoutSec 2 ^| Out-Null; exit 0 } catch { exit 1 }" >nul 2>&1
+    powershell -NoProfile -ExecutionPolicy Bypass -Command "try { Invoke-WebRequest -Uri 'http://localhost:8000/healthz' -UseBasicParsing -TimeoutSec 2 | Out-Null; exit 0 } catch { exit 1 }" >nul 2>&1
 )
 if errorlevel 1 (
     timeout /t 2 /nobreak >nul
@@ -169,7 +167,7 @@ where curl >nul 2>&1
 if not errorlevel 1 (
     curl -fsS --max-time 2 http://localhost:8501 >nul 2>&1
 ) else (
-    powershell -NoProfile -ExecutionPolicy Bypass -Command "try { Invoke-WebRequest -Uri 'http://localhost:8501' -UseBasicParsing -TimeoutSec 2 ^| Out-Null; exit 0 } catch { exit 1 }" >nul 2>&1
+    powershell -NoProfile -ExecutionPolicy Bypass -Command "try { Invoke-WebRequest -Uri 'http://localhost:8501' -UseBasicParsing -TimeoutSec 2 | Out-Null; exit 0 } catch { exit 1 }" >nul 2>&1
 )
 if errorlevel 1 (
     timeout /t 2 /nobreak >nul

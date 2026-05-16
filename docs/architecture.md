@@ -3,6 +3,26 @@
 Ceramic-Tile Manufacturer (gres porcellanato) — 7 Italian Production Sites
 Base Year 2024 — Operational Control — CSRD ESRS E1 — ISAE 3000 Limited — EU ETS Phase IV (IANO Annex I Activity 17, OI-7 closed YES)
 
+> **⚠️ Role-name note (added post wave-5):**
+> This document was authored in Phase 4 and still uses the **pre-wave-3 role
+> names** (`data_steward`, `esg_manager`, `auditor`) throughout the narrative
+> sections, Mermaid diagrams, RBAC tables, and SQL examples. Wave 3 renamed
+> these to **`editor / admin / viewer`** (1:1 mapping; see
+> [`docs/requirements.md`](requirements.md) §1.2.4 for the migration record).
+> Read every occurrence accordingly:
+>
+> | Architecture doc (legacy) | Runtime today |
+> |---|---|
+> | `data_steward` | `editor` |
+> | `esg_manager`  | `admin`  |
+> | `auditor`      | `viewer` |
+>
+> The legacy names are preserved here so that the AD-XXX architectural
+> decisions remain traceable to their original Phase-4 requirements. Code,
+> migrations, JWT claims, RLS policies, and `ref.users.role_code` rows all
+> use the new names. A full document-rewrite pass is on the wave-6 backlog
+> (tracked as `REQ-arch-doc-role-rename` in `docs/audit-trail.md`).
+
 ---
 
 ## 0. Document Control

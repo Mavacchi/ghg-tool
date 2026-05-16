@@ -1,66 +1,100 @@
 # GHG Accounting Tool — Ceramic Tile Manufacturer
 
 ![Build](https://img.shields.io/badge/build-passing-brightgreen)
-![Coverage](https://img.shields.io/badge/coverage-95%25%2B-brightgreen)
+![Coverage](https://img.shields.io/badge/coverage-93%25-brightgreen)
 ![Python](https://img.shields.io/badge/python-3.11%2B-blue)
 ![FastAPI](https://img.shields.io/badge/FastAPI-0.111%2B-009688)
 ![Streamlit](https://img.shields.io/badge/Streamlit-1.35%2B-FF4B4B)
+![Celery](https://img.shields.io/badge/Celery-5.4-37814A)
+![PostgreSQL](https://img.shields.io/badge/PostgreSQL-15-336791)
 ![License](https://img.shields.io/badge/license-proprietary-lightgrey)
 
-Purpose-built GHG emissions accounting system for Gruppo Ceramiche Gresmalt S.p.A., a gres
-porcellanato manufacturer operating 7 Italian production sites. The platform ingests annual
-activity data, applies a versioned emission factor catalog, calculates greenhouse gas
-emissions across Scopes 1, 2, and 3 per the GHG Protocol Corporate Standard, and produces
-CSRD-grade outputs designed to support ESRS E1 disclosure obligations and EU ETS Phase IV
-reporting for the IANO Annex I Activity 17 installation.
+Purpose-built GHG emissions accounting platform for **Gruppo Ceramiche Gresmalt S.p.A.**,
+a gres porcellanato manufacturer operating 7 Italian production sites. The platform ingests
+annual activity data, applies a versioned emission factor catalog, calculates greenhouse
+gas emissions across Scopes 1, 2, and 3 per the GHG Protocol Corporate Standard, and
+produces CSRD-grade outputs designed to support ESRS E1 disclosure obligations and
+EU ETS Phase IV reporting for the IANO Annex I Activity 17 installation.
 
-Phase 9 (documentation) complete: 540 tests passing, mypy --strict on 149 source files,
-coverage >= 95%. Security APPROVED. Compliance APPROVED.
+**Current status (post wave-5, 2026-05-16)**
+- 1306 unit tests + integration suite (PG service + testcontainers) passing
+- mypy clean across 216 source files, ruff clean, import-linter wired (warning mode)
+- Global coverage 93.25%; audit-critical modules (`application/calc/*`, `domain/*`) at **100%**
+- Alembic chain at `0032_M12` (32 linear migrations, M0 → M13)
+- Multi-tenant operational with RLS on all tenant-scoped tables
+- Celery export pipeline (PDF / Excel) with Redis-backed job queue
+- Scope-3 Hot Spot Analysis service in production
+- Last audit cycle closed **13/13 BLOCK + 45/50 REQUIRED findings** — full ledger in
+  [`CHANGELOG.md`](CHANGELOG.md) and [`docs/audit-trail.md`](docs/audit-trail.md)
 
 ---
 
 ## Install
 
 ```bash
-# 1. Clone and create virtual environment
+# 1. Clone and create a virtual environment
 git clone <repo-url> ghg-tool && cd ghg-tool
 python3.11 -m venv .venv && source .venv/bin/activate
 
-# 2. Install dependencies
-make install
+# 2. Install dependencies (runtime + dev)
+make install                  # equivalent to: pip install -e ".[dev]"
 
-# 3. Start PostgreSQL 15 via Docker Compose
-make db-up
+# 3. Bootstrap .env from .env.example, then start PostgreSQL 15 + Redis via Docker
+cp .env.example .env          # edit GHG_JWT_SECRET, GHG_BOOTSTRAP_ADMIN_*, etc.
+make db-up                    # docker compose up -d db redis
 
-# 4. Run all Alembic migrations (M0 through M7)
-make migrate
+# 4. Run the full Alembic chain (M0 -> M13, i.e. 0001 -> 0032_M12)
+make migrate                  # alembic upgrade head
 
-# 5. Run linting and tests
-make lint
-make test
+# 5. Lint + tests
+make lint                     # ruff + mypy + import-linter
+make test                     # pytest tests/unit  (1306 tests)
+make test-integration         # pytest tests/integration  (needs db-up)
 ```
+
+Required env vars (see `.env.example` for the full list):
+
+| Variable | Purpose | Required in |
+|---|---|---|
+| `GHG_JWT_SECRET` | ≥ 32 chars; fail-closed at startup if missing in production | all envs |
+| `SQLALCHEMY_URL` | async DSN (`postgresql+asyncpg://...`); no insecure default | all envs |
+| `GHG_REDIS_URL` | required for JWT blacklist + rate limiter | staging, production |
+| `GHG_ENVIRONMENT` | `development` / `staging` / `production` | all envs |
+| `GHG_BOOTSTRAP_ADMIN_EMAIL` + `_PASSWORD` | idempotent first-admin bootstrap on startup | all envs |
+| `GHG_CORS_ORIGINS` | comma-separated; **must be HTTPS** in production / staging | all envs |
+| `GHG_COMPANY_NAME` | reporting-entity name injected into PDF templates | all envs |
+| `GHG_DPO_EMAIL` + `GHG_CONTROLLER_NAME` | GDPR Art. 13 privacy notice placeholders | staging, production |
+| `GHG_DEMO_ENABLED` + `GHG_DEMO_ALLOWED_ENVS` | demo-seeding gate; never reaches production | development only |
 
 ---
 
 ## Quickstart
 
 ```bash
-# Start the database (if not already running)
-docker compose up -d db
+# 1. Start database + Redis
+docker compose up -d db redis
 
-# Apply all migrations
+# 2. Apply all migrations
 alembic upgrade head
 
-# Start the FastAPI API server (port 8000)
+# 3. Start the FastAPI API (port 8000)
 uvicorn ghg_tool.api.main:app --host 0.0.0.0 --port 8000
 
-# In a separate terminal, start the Streamlit dashboard (port 8501)
+# 4. In a separate terminal, start a Celery worker (export jobs)
+celery -A ghg_tool.infrastructure.celery_app worker --loglevel=info
+
+# 5. In a third terminal, start the Streamlit dashboard (port 8501)
 streamlit run src/ghg_tool/ui/streamlit_app/Home.py
 ```
 
-After the ETL pipeline runs (`make etl`), the dashboard at `http://localhost:8501` provides
-scope-to-subcategory drill-down, year-over-year comparison (2024 vs 2025), and intensity
-metrics (tCO2e/tonne, tCO2e/M EUR, tCO2e/FTE).
+The dashboard at `http://localhost:8501` provides:
+- Scope-to-subcategory drill-down
+- Year-over-year comparison (2024 vs 2025) with bootstrap CI
+- Intensity metrics (tCO2e / tonne, tCO2e / M EUR, tCO2e / FTE)
+- Scope-3 Hot Spot Analysis (top contributors by category)
+- Auto-calc data-entry flow (consumption → tCO2e preview → idempotent insert)
+- Multi-tenant admin panel (admin role only)
+- PDF / Excel export with async job tracking
 
 The API is documented at `http://localhost:8000/docs` (OpenAPI 3.1).
 
@@ -70,22 +104,36 @@ The API is documented at `http://localhost:8000/docs` (OpenAPI 3.1).
 
 Hexagonal / ports-and-adapters design. Calculation logic lives in `domain/` with no
 framework imports; infrastructure adapters in `infrastructure/`; FastAPI in `api/`;
-Streamlit in `ui/`.
+Streamlit + Jinja2 PDF templates in `ui/`.
 
 ```
 src/ghg_tool/
-  domain/          Pure Python domain models and calculation logic
-  application/     Use cases: ETL orchestration, calculation services, export services
-  infrastructure/  DB adapters (SQLAlchemy 2.x), factor loader, JWT security
-  api/             FastAPI application, routers, middleware, RBAC
-  ui/              Streamlit pages, PDF templates (WeasyPrint), Excel sheets (openpyxl)
+  domain/          Pure Python domain models, value objects, calculation policies
+                   (GWP enforcement, immutability) — 100% coverage
+  application/     Use cases: calc services, ETL orchestration, export services
+                   (Celery tasks), reconciliation, SBTi, intensity
+  infrastructure/  DB adapters (SQLAlchemy 2.x async), factor loader, JWT security,
+                   Redis client, Celery app, APScheduler (optional)
+  api/             FastAPI routers, middleware (session-check, correlation-id), RBAC
+  ui/              Streamlit pages, PDF templates (WeasyPrint), Excel builders (openpyxl),
+                   API clients with retry + circuit breaker
   etl/             ETL pipeline stages and pandera validation schemas
 ```
 
-Database schemas: `raw` (ingestion staging), `ref` (users, roles, factor catalog),
-`calc` (emissions, DQ findings, DLQ, audit log), `ops` (shared mutation-guard functions).
+PostgreSQL schemas:
 
-See `docs/architecture.md` for the full C4 diagram, DDL, and RBAC/RLS design.
+- `raw` — ingestion staging (Excel uploads, direct entries)
+- `ref` — users, roles, tenants, factor catalog, sites
+- `calc` — `emissions_consolidated`, DQ findings, DLQ, **append-only** audit log
+- `ops` — shared mutation-guard functions, idempotency keys, pg_cron jobs
+- `cache` — Redis-backed idempotency keys mirror
+
+Tenant isolation via PostgreSQL **Row-Level Security** on all tenant-scoped tables;
+GUC variables (`app.tenant_id`, `app.role_code`, `app.user_id`) set per-connection via
+`SET LOCAL` from JWT claims.
+
+See [`docs/architecture.md`](docs/architecture.md) for the full C4 diagram, DDL, and
+RBAC/RLS design.
 
 ---
 
@@ -93,22 +141,30 @@ See `docs/architecture.md` for the full C4 diagram, DDL, and RBAC/RLS design.
 
 The calculation methodology implements:
 
-- **GHG Protocol Corporate Standard (2004)** — organisational boundary (operational control),
-  Scope 1/2/3 definitions, dual Scope 2 reporting (LB + MB)
+- **GHG Protocol Corporate Standard (2004)** — organisational boundary (operational
+  control), Scope 1/2/3 definitions, dual Scope 2 reporting (Location-Based + Market-Based)
 - **GHG Protocol Scope 2 Guidance (2015)** — 8 Quality Criteria for Guarantees of Origin
 - **GHG Protocol Corporate Value Chain (Scope 3) Standard (2011)** — 9 material categories
 - **CSRD ESRS E1** — disclosure data points E1-6 §44/§45; E1-7 biogenic carbon
-- **IPCC AR6 GWP100** (CH4=27.9, N2O=273) — primary GWP set; AR5 maintained for EU ETS
-- **EU ETS Phase IV** (Directive 2003/87/EC; MRR 2018/2066) — AR5 dual-track for IANO
+- **IPCC AR6 GWP100** (CH4=27.9, N2O=273) — primary GWP set
+- **IPCC AR5 GWP100** — maintained as parallel track for EU ETS Phase IV (MRR mandates AR5)
+- **EU ETS Phase IV** (Directive 2003/87/EC; MRR 2018/2066) — AR5 dual-run for the IANO
+  Annex I Activity 17 installation, surfaced via `dual_run_id` in the API response
 
-Biogenic CO2 is stored in a separate column (`co2_biogenic_tonne`) and is never summed
+Biogenic CO2 is stored in a separate column (`co2_biogenic_tonne`) and is **never summed**
 into Scope 1/2/3 totals, per GHG Protocol §4.5 and ESRS E1-7.
 
-All emission records are append-only with bitemporal versioning. Corrections follow a
-stored-procedure workflow with 5 canonical reason codes. No UPDATE or DELETE is permitted
-on the emission tables.
+All emission records are **append-only** with bitemporal versioning (`valid_from`,
+`valid_to`, `superseded_by`). Corrections follow a stored-procedure workflow with 5
+canonical reason codes — `UPDATE` and `DELETE` on emission tables are denied by trigger.
 
-See `docs/methodology.md` for the full methodology reference.
+Documentation:
+- [`docs/methodology.md`](docs/methodology.md) — full methodology reference
+- [`docs/factor_sources.md`](docs/factor_sources.md) — per-`factor_id` source URL,
+  publication date, retrieval date (40 factors documented; new in wave 5)
+- [`docs/methodology/auto_calc_design.md`](docs/methodology/auto_calc_design.md) —
+  normative decisions for the consumption → tCO2e auto-calc pipeline (9 open questions
+  closed in wave 3)
 
 ---
 
@@ -119,61 +175,132 @@ the operator is responsible for regulatory filings.
 
 | Framework | Status | Notes |
 |---|---|---|
-| CSRD / ESRS E1 | Supported — designed to support Art. 19a obligations | ESRS E1-6 tables, E1-7 biogenic; ISAE 3000 Limited assurance package (audit trail, factor provenance, immutability proof) |
-| GRI 305: Emissions | Supplemental alignment | GRI 305-1/305-2/305-3/305-4 data points present |
-| EU ETS Phase IV | AR5 dual-track output for IANO (Annex I Activity 17) | MRR XML format deferred to v2 |
+| CSRD / ESRS E1 | Supported — designed to support Art. 19a obligations | ESRS E1-6 tables, E1-7 biogenic; ISAE 3000 Limited-assurance package (audit trail, factor provenance, immutability proof, 10-year retention via pg_cron job) |
+| GRI 305: Emissions | Supplemental alignment | GRI 305-1 / 305-2 / 305-3 / 305-4 data points present |
+| EU ETS Phase IV | AR5 dual-track output for IANO (Annex I Activity 17) | MRR XML export format deferred (see Roadmap) |
 | ISO 14064-1:2018 | Reference alignment | Consistent with GHG Protocol; cited in assurance package |
-| GDPR Art. 6/Art. 30 | Records of processing activities maintained | See `docs/gdpr_processing_register.md` |
-| EU Taxonomy (Regulation 2020/852) | Out of scope v1; placeholder disclosure in PDF | Assessment deferred to v2 |
+| **GDPR Art. 6 / 13 / 17 / 30** | Privacy notice on Login + Admin; Art. 17 erasure endpoint with pseudonymisation + audit; records of processing maintained | `docs/gdpr_processing_register.md`; new in wave 5: `DELETE /api/v1/users/{id}`, `users.erased_at` column |
+| EU Taxonomy (Regulation 2020/852) | Out of scope v1; placeholder disclosure in PDF | SC + DNSH + Safeguards assessment deferred |
 | SFDR PAI indicators | Out of scope | Issuer-level tool; not a financial-market participant |
+| SBTi | Target-setting service + UI page | Sector-pathway validation; near-term + net-zero targets |
 
-Security posture: JWT HS256 (>= 32-char secret enforced at startup), bcrypt-12 password
-hashing, PostgreSQL RLS on all emission tables, security-barrier views on materialised
-views (M7), append-only audit trail with deny-mutation trigger (M1), PII-free structured
-logging (usernames SHA-256 hashed), 5/min login rate limit.
+**Security posture** (current, post wave-5):
 
-See `docs/gdpr_processing_register.md` and `docs/deployment.md` for production guidance.
+- JWT **PyJWT** HS256 (≥ 32-char secret enforced at startup, fail-closed)
+- **Refresh-token rotation** + Redis-backed blacklist (fail-closed when Redis unreachable)
+- bcrypt-12 password hashing
+- PostgreSQL **Row-Level Security** on all tenant-scoped tables
+- Security-barrier views on materialised views
+- **Append-only** audit trail with deny-mutation trigger; 10-year retention via pg_cron
+- PII-free structured logging (usernames SHA-256 hashed)
+- **Redis-backed rate limiter** (multi-instance coordinated): 5/min login, 60/min API
+- HTTPS-only CORS in production / staging (enforced at startup)
+- Demo-mode token rejected server-side (not just on UI)
+- `pip-audit` in CI; 6 CVE resolved, 10 transitive CVEs deferred with explicit ignore-list
+
+See [`docs/gdpr_processing_register.md`](docs/gdpr_processing_register.md) and
+[`docs/deployment.md`](docs/deployment.md) for production guidance.
 
 ---
 
 ## Deployment
 
-See `docs/deployment.md` for the full production runbook, including:
-- Environment variable reference (GHG_JWT_SECRET, GHG_ENVIRONMENT, DATABASE_URL, etc.)
+See [`docs/deployment.md`](docs/deployment.md) for the full production runbook, including:
+
+- Environment variable reference (every `GHG_*` var, every secret)
 - Alembic migration sequence and grant verification
-- TLS termination requirements (reverse proxy mandatory)
-- Acknowledged risk register (SEC-ADV-008 in-process rate limiter, SEC-ADV-009 CORS
-  credentials, SEC-ADV-010 CSP and Streamlit) with operator actions
+- TLS termination requirements (reverse proxy mandatory; HSTS recommended)
+- Acknowledged risk register with operator actions
+- Redis sizing for JWT blacklist + rate-limiter + Celery broker
 - Backup / restore procedure including the immutable audit log restoration protocol
-- Smoke test checklist (login, /kpis, /intensity, PDF export with magic-bytes check)
+- Smoke test checklist (login, /kpis, /intensity, PDF export with magic-bytes check,
+  RLS isolation probe)
 
 ---
 
 ## Roadmap
 
-See `docs/roadmap.md` for deferred items:
+See [`CHANGELOG.md`](CHANGELOG.md) `[Unreleased]` section for the live backlog and
+[`docs/audit-trail.md`](docs/audit-trail.md) for the per-finding status.
 
-- **v1.1**: Celery migration for export service (REV-WAVE3-007), factor string constants
-  (REV-WAVE3-010), biogenic memo refactor (REV-WAVE3-018)
-- **v2 hardening**: PyJWT migration from python-jose (SEC-P1-004, CVE-2024-33664),
-  refresh token rotation with Redis blacklist (SEC-P1-007), Redis-backed rate limiter
-  (SEC-ADV-008)
-- **v2 features**: EU ETS MRR XML, EU Taxonomy KPIs, SFDR PAI indicators,
-  Scope 3 Hot Spot Analysis, multi-tenant admin panel
+**Wave 6 — quality follow-up (planned):**
+
+- Resolve the 9 documented `import-linter` hexagonal-contract violations (currently
+  CI-warning); unlock full enforcement.
+- 10 transitive CVE remediation via major upgrade of FastAPI / Streamlit / WeasyPrint.
+- Eliminate the 18 `mypy ignore_errors=true` module overrides (SQLAlchemy 2.0 `rowcount`
+  typing gap, Streamlit `T | None`, pandas-stubs).
+- Auth router refactor (`login` 179 LOC + `refresh` 195 LOC) — gated on integration-test
+  coverage.
+- Live E2E full-pipeline test (PG + Celery-eager fixture coordination).
+
+**Wave 7+ — features (planned):**
+
+- EU ETS MRR XML export format
+- EU Taxonomy SC + DNSH + Social Safeguards assessment
+- SFDR PAI indicators (if scope extends to issuer-level reporting)
+- ISPRA consumption-side grid factor migration (currently production-side as interim)
+
+**Already shipped** (see CHANGELOG for full detail):
+
+- ✅ Celery export pipeline (wave 4)
+- ✅ PyJWT migration + refresh rotation + Redis blacklist (wave 4)
+- ✅ Redis-backed rate limiter (wave 4)
+- ✅ Scope-3 Hot Spot Analysis (wave 4)
+- ✅ Multi-tenant admin panel (wave 4)
+- ✅ NCV dual-unit factor variants (wave 4)
+- ✅ Auto-calc (consumption → tCO2e) flow (wave 3)
+- ✅ Excel template + auto-import (wave 3)
+- ✅ Site-type filter + country-aware LB factor lookup (wave 3)
+- ✅ Idempotency-Key on `POST /calc/insert` (wave 3)
+- ✅ Role rename `admin / editor / viewer` (wave 3)
+- ✅ Factor-catalog CRUD + emission correction UI (wave 3)
+- ✅ Audit-log 10-year retention (wave 5)
+- ✅ GDPR Art. 13 + Art. 17 endpoints (wave 5)
+- ✅ Factor-source documentation (wave 5)
 
 ---
 
 ## Development
 
 ```bash
-make lint          # ruff + mypy --strict (149 source files, zero errors)
-make test          # pytest unit + property tests (540 passing)
-make test-integration  # requires make db-up first; integration tests with live DB
-make coverage      # pytest --cov with HTML report; threshold >= 95%
+make lint              # ruff + mypy (216 source files, zero errors) + import-linter
+make test              # pytest tests/unit (1306 tests, ~50s)
+make test-integration  # requires `make db-up`; uses PG service + testcontainers
+make coverage          # pytest --cov; gate >= 85% (current 93.25%)
+make migrate           # alembic upgrade head
+make migrate-down      # alembic downgrade -1 (use with care; audit-log retention pinned)
 ```
 
-CI pipeline (GitHub Actions): lint -> mypy -> pytest -> coverage -> bandit -> gitleaks.
-All checks are required gates on every PR.
+**CI pipeline** (GitHub Actions, all required gates on every PR):
+
+1. Lint (ruff + mypy + import-linter warning)
+2. Unit tests with coverage gate ≥ 85%
+3. Integration tests against PostgreSQL service container
+4. Postgres integration suite via testcontainers
+5. Alembic offline check (chain linearity + downgrade reversibility)
+6. `pip-audit` (CVE scan with documented ignore-list)
+7. E2E tests (currently skipped — see Roadmap wave 6)
+
+Audit-team agents (orchestrated via `claude-code-orchestrator`) run independently and
+emit BLOCK / REQUIRED / INFO findings into `docs/audit-trail.md`; SecurityAgent and
+ComplianceAgent are both required to emit `APPROVED` before deployment.
+
+---
+
+## Documentation index
+
+| File | Purpose |
+|---|---|
+| [`README.md`](README.md) | this file — entry point, status, install, quickstart |
+| [`CHANGELOG.md`](CHANGELOG.md) | Keep a Changelog format; one section per wave |
+| [`docs/audit-trail.md`](docs/audit-trail.md) | per-finding remediation log (BLOCK / REQUIRED / INFO) |
+| [`docs/methodology.md`](docs/methodology.md) | GHG calculation methodology reference |
+| [`docs/factor_sources.md`](docs/factor_sources.md) | per-`factor_id` source URL + retrieval date |
+| [`docs/methodology/auto_calc_design.md`](docs/methodology/auto_calc_design.md) | auto-calc normative decisions |
+| [`docs/architecture.md`](docs/architecture.md) | C4 diagram, DDL, RBAC/RLS design |
+| [`docs/deployment.md`](docs/deployment.md) | production runbook |
+| [`docs/gdpr_processing_register.md`](docs/gdpr_processing_register.md) | GDPR Art. 30 register |
 
 ---
 
@@ -181,5 +308,5 @@ All checks are required gates on every PR.
 
 Proprietary — Gruppo Ceramiche Gresmalt S.p.A. All rights reserved.
 
-For questions about this tool: [TBD — insert internal contact before deployment]
-For data protection enquiries: [TBD — insert DPO contact before deployment]
+For questions about this tool: configured per deployment via `GHG_CONTROLLER_NAME` env var.
+For data protection enquiries: configured per deployment via `GHG_DPO_EMAIL` env var.

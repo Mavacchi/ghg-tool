@@ -135,8 +135,9 @@ an employer-employee regulatory compliance tool.
 ### 2.3 Accuracy
 
 Users can update their own email address via the admin API. Currently only
-the `esg_manager` role can update other users' accounts. A self-service
-profile update endpoint is planned (TODO — see Open Items, Section 8).
+the `admin` role (formerly `esg_manager`, renamed in wave 3) can update
+other users' accounts. A self-service profile update endpoint is planned
+(TODO — see Open Items, Section 8).
 
 ### 2.4 Storage limitation
 
@@ -154,7 +155,7 @@ profile update endpoint is planned (TODO — see Open Items, Section 8).
 | TLS in transit | Mandatory per `docs/deployment.md` Section 4. Plain HTTP is not routable to the application from outside the cluster. |
 | Encryption at rest | PostgreSQL volume or managed DB encryption enabled at the infrastructure level (see `docs/deployment.md` Section 5 checklist). |
 | Bcrypt password hashing | Bcrypt with cost factor ≥12 recommended. The `hash_password()` function uses the `bcrypt` library. |
-| RBAC | Three roles: `data_steward`, `esg_manager`, `auditor`. Role is embedded in the JWT and enforced by API route dependencies. |
+| RBAC | Three roles: `editor` (formerly `data_steward`), `admin` (formerly `esg_manager`), `viewer` (formerly `auditor`). Renamed in wave 3. Role is embedded in the JWT and enforced by API route dependencies and by PostgreSQL RLS policies (M4 + wave-5 hardening). |
 | Append-only emission ledger | DB triggers (MG-02) block `UPDATE` and `DELETE` on `calc.emissions_*`. The audit log itself is protected by the same triggers. |
 | Rate limiting | `RateLimitMiddleware` limits authenticated users to 100 req/min; the login endpoint is limited to 5 attempts/min/IP (SEC-P1-003). |
 | `alg=none` rejection | `decode_token()` in `jwt.py` peeks at the JWT header before decoding and explicitly rejects `alg=none` (SG-01). |
@@ -171,9 +172,9 @@ profile update endpoint is planned (TODO — see Open Items, Section 8).
 | R2 | Database dump exfiltration → bcrypt brute-force on weak passwords | `ref.users.password_hash`; indirectly all emissions data | MEDIUM — bcrypt slows brute force; emissions data itself is not secret (CSRD reports are public) | LOW — DB access requires network + credentials; encryption at rest | Bcrypt hashing; TLS; encryption at rest; network isolation | LOW |
 | R3 | Audit log tampering → loss of CSRD defensibility | `calc.audit_log`; `calc.emissions_*` | HIGH — CSRD and ISAE 3000 assurance depends on audit trail integrity | VERY LOW — DB triggers block UPDATE/DELETE at the PostgreSQL level; object-lock on backups | Immutability triggers (MG-02); Object Lock on backup storage; append-only design | VERY LOW |
 | R4 | Inadvertent PII in logs (full email in `sub` claim) | IP address; email address in logs | LOW — logs are internal only; `sub` is a UUID not email | ADDRESSED — `sub` is UUID by design; logs truncate to 8 chars; Pydantic validator on `CurrentUser.sub` | NFR-08 implementation; UUID sub; log truncation | VERY LOW |
-| R5 | Insider threat: ESG manager creates or modifies user accounts inappropriately | `ref.users` | MEDIUM — could grant unauthorised access | LOW — only `esg_manager` role can manage users; all user operations logged in `calc.audit_log` | RBAC; audit log; separation of duties (IT manager handles infra, ESG manager handles data) | LOW |
+| R5 | Insider threat: admin creates or modifies user accounts inappropriately | `ref.users` | MEDIUM — could grant unauthorised access | LOW — only `admin` role (formerly `esg_manager`) can manage users; all user operations logged in `calc.audit_log` (10-year retention via pg_cron, wave 5) | RBAC; audit log; separation of duties (IT manager handles infra, ESG manager handles data) | LOW |
 | R6 | Unpatched container image vulnerability → remote code execution | Entire database and personal data in scope | HIGH — RCE gives attacker full access | LOW — non-root user `ghg` in container; image rebuilt from `python:3.11-slim`; no dev tools in runtime | Non-root user (NFR-21); minimal runtime image; update policy required (see Open Items) | LOW |
-| R7 | External auditor access overly broad | `calc.audit_log`, emissions data, potentially user data | MEDIUM — auditor should see emissions but not user PII beyond attribution | LOW — `auditor` role is read-only; scope of read access defined by API route dependencies | RBAC `auditor` role; NDA with auditor firm | LOW — pending confirmation that `auditor` role excludes `ref.users` read |
+| R7 | External auditor access overly broad | `calc.audit_log`, emissions data, potentially user data | MEDIUM — auditor should see emissions but not user PII beyond attribution | LOW — `viewer` role (formerly `auditor`) is read-only; scope of read access defined by API route dependencies | RBAC `viewer` role; NDA with auditor firm | LOW — pending confirmation that `viewer` role excludes `ref.users` read |
 
 ### 3.2 Risks requiring additional action
 
@@ -196,7 +197,7 @@ profile update endpoint is planned (TODO — see Open Items, Section 8).
 | PII in logs (R4) | UUID `sub` claim; 8-char truncation in logs; Pydantic validator on `CurrentUser.sub`; `_safe_error()` strips input fields | Implemented |
 | Insider misuse (R5) | RBAC; all user operations in `calc.audit_log`; separation of duties | Implemented; HR offboarding procedure needed |
 | Unpatched image (R6) | Non-root `ghg` user; minimal runtime image; monthly rebuild cadence to be established | Partially implemented; cadence TBD |
-| Auditor over-access (R7) | `auditor` role limited to read-only on emissions and audit routes; confirm `ref.users` exclusion in route dependencies | Needs confirmation |
+| Auditor over-access (R7) | `viewer` role (formerly `auditor`) limited to read-only on emissions and audit routes; confirm `ref.users` exclusion in route dependencies | Needs confirmation |
 
 ---
 
@@ -284,7 +285,7 @@ completeness of the DPIA, not because they block the technical deployment.
 | OI-1 | DPO identity | Confirm the name and contact of Gresmalt's appointed DPO (or document that Gresmalt is not required to appoint one under Art. 37 and has instead designated a privacy contact) | Gresmalt legal / HR |
 | OI-2 | EU region confirmation | Confirm that the production PostgreSQL instance and backup storage bucket are hosted in an EU region (no EEA transfer) | IT manager |
 | OI-3 | User anonymisation cron job | Implement and schedule the cron job that anonymises deactivated user accounts after 7 years | Development team |
-| OI-4 | Auditor role scope | Confirm that the `auditor` API role excludes read access to `ref.users` (PII table); verify in route dependency code | Development team |
+| OI-4 | Viewer role scope | Confirm that the `viewer` API role (formerly `auditor`) excludes read access to `ref.users` (PII table); verify in route dependency code | Development team |
 | OI-5 | Self-service email update | Decide whether data subjects (employees) can update their own email address via the UI without ESG manager involvement | Gresmalt ESG manager + DPO |
 | OI-6 | Container update cadence | Establish a formal monthly base-image rebuild schedule to address CVEs in `python:3.11-slim` and runtime system libraries | Ops / IT manager |
 | OI-7 | DPO sign-off | Obtain formal DPO review and sign-off on this DPIA before production go-live | DPO |
