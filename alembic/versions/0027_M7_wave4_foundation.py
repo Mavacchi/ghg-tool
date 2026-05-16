@@ -161,7 +161,7 @@ BEGIN
 
         RAISE NOTICE
             '[0027_M7] pg_cron job ''idempotency_keys_cleanup'' registered '
-            '(runs at :15 every hour, cleans cache.idempotency_keys).';
+            '(runs at minute 15 of every hour, cleans cache.idempotency_keys).';
     END IF;
 END $$;
 """

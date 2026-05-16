@@ -31,7 +31,7 @@ from __future__ import annotations
 import os
 import uuid
 from datetime import UTC, datetime
-from typing import Any, Final
+from typing import Any, Final, cast
 
 import jwt  # PyJWT >= 2.8 (SEC-P1-004)
 import structlog
@@ -259,7 +259,7 @@ def decode_token(token: str) -> dict[str, Any]:
             algorithms=[_JWT_ALGORITHM],
             audience=audience,
             issuer=issuer,
-            options=options,
+            options=cast(Any, options),
         )
         return decoded
     except ExpiredSignatureError:
