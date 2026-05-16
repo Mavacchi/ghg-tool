@@ -28,16 +28,18 @@ import streamlit as st
 # Deployment-configurable values — set via env vars at deploy time.
 # ---------------------------------------------------------------------------
 
-#: Legal name of the data controller.  Override at deployment time.
+#: Legal name of the data controller.  Override at deployment time via
+#: ``GHG_CONTROLLER_NAME`` env var if redeployed for a different legal entity.
 _CONTROLLER_NAME: str = os.getenv(
     "GHG_CONTROLLER_NAME",
-    "[Titolare del Trattamento — configurare GHG_CONTROLLER_NAME]",
+    "Gruppo Ceramiche Gresmalt S.p.A.",
 )
 
-#: E-mail address of the Data Protection Officer.  Override at deployment time.
+#: E-mail address of the Data Protection Officer.  Override at deployment time
+#: via ``GHG_DPO_EMAIL`` env var.
 _DPO_EMAIL: str = os.getenv(
     "GHG_DPO_EMAIL",
-    "[email DPO — configurare GHG_DPO_EMAIL]",
+    "info@gresmalt.it",
 )
 
 # ---------------------------------------------------------------------------
@@ -48,22 +50,25 @@ _DPO_EMAIL: str = os.getenv(
 
 _WORKTREE_ROOT = pathlib.Path(__file__).parents[6]
 _STATIC_PRIVACY_HTML = _WORKTREE_ROOT / "static" / "privacy.html"
-_FALLBACK_ROPA_MD = "docs/gdpr_processing_register.md"
 
 
-def _privacy_policy_link() -> str:
-    """Return an appropriate privacy policy link for the current deployment.
+def _privacy_policy_link() -> str | None:
+    """Return a clickable Markdown link to the full privacy policy, or None.
 
-    Checks for a ``static/privacy.html`` file at repository root; if found
-    returns ``/static/privacy.html``.  Otherwise returns the relative path to
-    the GDPR processing register Markdown document.
+    Streamlit does not serve the repo's ``docs/*.md`` tree at any URL, so the
+    previous fallback (``docs/gdpr_processing_register.md``) rendered as a
+    white page when clicked. We now only emit a link when a deployment-time
+    ``static/privacy.html`` is actually present; otherwise we return ``None``
+    and the caller omits the link entirely. The full ROPA is still available
+    in the repo for auditors; the privacy notice itself in the Streamlit UI
+    already contains all Art. 13 mandatory elements inline.
 
     Returns:
-        Markdown link string, e.g. ``[Privacy policy completa](/static/privacy.html)``.
+        Markdown link string, or ``None`` if no static privacy.html exists.
     """
     if _STATIC_PRIVACY_HTML.exists():
         return "[Privacy policy completa](/static/privacy.html)"
-    return f"[Registro completo dei trattamenti (ROPA)]({_FALLBACK_ROPA_MD})"
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -89,6 +94,7 @@ def render_privacy_notice(*, lang: str = "it") -> None:
             provided for completeness but Italian takes precedence.
     """
     privacy_link = _privacy_policy_link()
+    privacy_link_md = f"\n\n{privacy_link}" if privacy_link else ""
 
     # A one-line teaser visible without expanding, in both languages so that
     # non-Italian speakers recognise this as a legal disclosure.
@@ -122,9 +128,7 @@ Per esercitare i tuoi diritti contatta il **Responsabile della Protezione dei Da
 [{_DPO_EMAIL}](mailto:{_DPO_EMAIL})
 
 **Trasferimenti**: i dati non sono trasferiti verso Paesi terzi extra-SEE senza le
-garanzie richieste dagli artt. 44-49 GDPR.
-
-{privacy_link}
+garanzie richieste dagli artt. 44-49 GDPR.{privacy_link_md}
 """
         )
 
@@ -145,8 +149,6 @@ legitimate interest for system security — Art. 6(1)(c) and 6(1)(f) GDPR.
 for 10 years (CSRD Art. 23(2); GDPR Art. 6(1)(c) + Art. 32).
 
 **Your rights**: access, rectification, erasure, restriction, portability, objection
-(Arts. 15-22 GDPR). Contact the DPO: [{_DPO_EMAIL}](mailto:{_DPO_EMAIL})
-
-{privacy_link}
+(Arts. 15-22 GDPR). Contact the DPO: [{_DPO_EMAIL}](mailto:{_DPO_EMAIL}){privacy_link_md}
 """
             )

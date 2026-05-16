@@ -537,9 +537,10 @@ with tab_factor:
     st.info(
         "**Stato pubblicazione.** Questa interfaccia crea fattori in stato "
         "*draft*: non sono utilizzabili in calcolo finché non vengono pubblicati. "
-        "Il flusso di pubblicazione (che richiede approvazione `admin` e "
-        "registra timestamp + identità del pubblicatore per audit ISAE 3000) "
-        "non è ancora disponibile in questa release: arriva con la wave 3.",
+        "Il flusso di pubblicazione richiede approvazione di un secondo `admin` "
+        "(two-eyes principle, ISAE 3000) e registra timestamp + identità del "
+        "pubblicatore per l'audit trail. Apri la pagina **Catalogo Fattori** "
+        "per pubblicare un draft esistente.",
         icon="📌",
     )
 

@@ -91,5 +91,8 @@ async def get_kpis(
             gwp_set=gwp_set,
             correlation_id=correlation_id or "",
             as_of=datetime.now(tz=UTC),
-            note="calc.v_kpi_summary not yet available — created in wave 3",
+            note=(
+                "Nessun KPI disponibile per i filtri selezionati. Verifica che "
+                "esista almeno un calcolo eseguito (vedi pagina Inserimento Dati)."
+            ),
         )

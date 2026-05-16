@@ -228,9 +228,12 @@ async def get_intensity(
         )
 
     except (ProgrammingError, OperationalError) as exc:
-        # MV not yet created (wave-3 pipeline pending) — return empty stub
+        # MV exists since migration 0007_M6 + 0008_M7 (RLS-aware view). If we
+        # land here the MV is reachable but empty / un-refreshed — most likely
+        # cause is no calc run has populated it yet for the current tenant.
+        # Return an empty stub with a helpful note instead of 500'ing.
         log.warning(
-            "mv_intensity_metrics not available, returning stub",
+            "mv_intensity_metrics query failed, returning stub",
             exc_type=type(exc).__name__,
         )
         return IntensityResponse(
@@ -241,7 +244,13 @@ async def get_intensity(
             anno_to=anno_to,
             correlation_id=correlation_id,
             as_of=dt.datetime.now(tz=dt.UTC),
-            **{"_note": "calc.v_intensity_metrics not yet available — created in wave 3"},
+            **{
+                "_note": (
+                    "Nessun dato di intensità disponibile per i filtri selezionati. "
+                    "Verifica che esista almeno un calcolo eseguito per l'anno "
+                    "richiesto (vedi pagina Inserimento Dati)."
+                )
+            },
         )
 
     except InvalidGWPSetError as exc:

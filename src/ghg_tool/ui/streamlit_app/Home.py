@@ -69,16 +69,15 @@ def _get_factor_sources_label(lang: str) -> str:
     label_it = "Fonti fattori"
     label_en = "Factor sources"
     label = label_it if lang == "it" else label_en
-    try:
-        factors = fetch_factor_catalog(limit=200) or []
-        sources = sorted({
-            f["source"]
-            for f in factors
-            if f.get("is_published") and f.get("source")
-        })
-        value = " · ".join(sources) if sources else FACTOR_SOURCES_FALLBACK
-    except Exception:  # noqa: BLE001
-        value = FACTOR_SOURCES_FALLBACK
+    # Previously this enumerated the distinct `source` values from the published
+    # factor catalog (e.g. "AIB · DEFRA · ISPRA"). The list grew to include
+    # ecoinvent, EXIOBASE, DEFRA WTT, etc. — enumerating every source on the
+    # home page became visual clutter without conveying useful information.
+    # Replace with a generic label; the full per-factor source registry lives
+    # in docs/factor_sources.md and the Factor Catalog page.
+    value_it = "catalogo certificato (vedi Catalogo Fattori)"
+    value_en = "certified catalog (see Factor Catalog)"
+    value = value_it if lang == "it" else value_en
     return f"{label}: {value}"
 
 
