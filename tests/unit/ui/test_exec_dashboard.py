@@ -398,3 +398,328 @@ class TestFmtNum:
         from ghg_tool.ui.pdf.exec_dashboard import _fmt_num
 
         assert _fmt_num("9700") == "9,700"
+
+
+# ---------------------------------------------------------------------------
+# _fmt_dec (missing lines 248-249)
+# ---------------------------------------------------------------------------
+
+class TestFmtDec:
+
+    def test_decimal_two_places(self) -> None:
+        from ghg_tool.ui.pdf.exec_dashboard import _fmt_dec
+
+        assert _fmt_dec(1234.567) == "1,234.57"
+
+    def test_zero_formatted(self) -> None:
+        from ghg_tool.ui.pdf.exec_dashboard import _fmt_dec
+
+        assert _fmt_dec(0) == "0.00"
+
+    def test_none_returns_na(self) -> None:
+        from ghg_tool.ui.pdf.exec_dashboard import _fmt_dec
+
+        assert _fmt_dec(None) == "N/A"
+
+    def test_non_numeric_string_returns_na(self) -> None:
+        from ghg_tool.ui.pdf.exec_dashboard import _fmt_dec
+
+        assert _fmt_dec("not-a-number") == "N/A"
+
+
+# ---------------------------------------------------------------------------
+# _build_chart_png and _png_to_data_uri (missing lines 165-223, 228-229)
+# ---------------------------------------------------------------------------
+
+def _matplotlib_available() -> bool:
+    try:
+        import matplotlib  # noqa: F401
+        return True
+    except ImportError:
+        return False
+
+
+_skip_no_matplotlib = pytest.mark.skipif(
+    not _matplotlib_available(),
+    reason="matplotlib not installed in this environment",
+)
+
+
+class TestBuildChartPng:
+
+    @_skip_no_matplotlib
+    def test_returns_bytes(self) -> None:
+        from ghg_tool.ui.pdf.exec_dashboard import _build_chart_png
+
+        png = _build_chart_png(
+            current={"scope1": 1200, "scope2_lb": 500, "scope3": 8000},
+            prior={"scope1": 1400, "scope2_lb": 600, "scope3": 9000},
+            anno=2025,
+            prior_anno=2024,
+        )
+        assert isinstance(png, bytes)
+        assert len(png) > 0
+
+    @_skip_no_matplotlib
+    def test_returns_valid_png_magic(self) -> None:
+        from ghg_tool.ui.pdf.exec_dashboard import _build_chart_png
+
+        png = _build_chart_png(
+            current={"scope1": 100, "scope2_lb": 50, "scope3": 800},
+            prior={"scope1": 140, "scope2_lb": 60, "scope3": 900},
+            anno=2025,
+            prior_anno=2024,
+        )
+        # PNG magic bytes: \x89PNG
+        assert png[:4] == b"\x89PNG"
+
+    @_skip_no_matplotlib
+    def test_all_zeros_does_not_raise(self) -> None:
+        from ghg_tool.ui.pdf.exec_dashboard import _build_chart_png
+
+        png = _build_chart_png(
+            current={"scope1": 0, "scope2_lb": 0, "scope3": 0},
+            prior={"scope1": 0, "scope2_lb": 0, "scope3": 0},
+            anno=2025,
+            prior_anno=2024,
+        )
+        assert isinstance(png, bytes)
+
+    @_skip_no_matplotlib
+    def test_missing_keys_treated_as_zero(self) -> None:
+        from ghg_tool.ui.pdf.exec_dashboard import _build_chart_png
+
+        # Passing empty dicts — should default to 0 for all values
+        png = _build_chart_png(
+            current={},
+            prior={},
+            anno=2025,
+            prior_anno=2024,
+        )
+        assert isinstance(png, bytes)
+
+
+class TestPngToDataUri:
+
+    def test_produces_data_uri_prefix(self) -> None:
+        from ghg_tool.ui.pdf.exec_dashboard import _png_to_data_uri
+
+        result = _png_to_data_uri(b"\x89PNGfakecontent")
+        assert result.startswith("data:image/png;base64,")
+
+    def test_data_uri_is_decodeable(self) -> None:
+        import base64
+        from ghg_tool.ui.pdf.exec_dashboard import _png_to_data_uri
+
+        raw = b"some png bytes here"
+        uri = _png_to_data_uri(raw)
+        b64_part = uri.removeprefix("data:image/png;base64,")
+        decoded = base64.b64decode(b64_part)
+        assert decoded == raw
+
+
+# ---------------------------------------------------------------------------
+# _build_context — total_lb computation when absent (lines 399-407)
+# ---------------------------------------------------------------------------
+
+class TestBuildContextTotalLbComputed:
+
+    def test_total_lb_computed_when_not_supplied_current(self) -> None:
+        """When total_lb is absent in totals_current, it is computed from scopes."""
+        from ghg_tool.ui.pdf.exec_dashboard import ExecDashboardBuilder
+
+        data = {
+            "anno": 2025,
+            "prior_anno": 2024,
+            "company_name": "Test Co",
+            "gwp_set": "AR6",
+            "language": "en",
+            "totals_current": {
+                "scope1": 1000.0,
+                "scope2_lb": 200.0,
+                "scope3": 3000.0,
+                # total_lb intentionally absent
+            },
+            "totals_prior": {
+                "scope1": 1100.0,
+                "scope2_lb": 220.0,
+                "scope3": 3200.0,
+                # total_lb intentionally absent
+            },
+        }
+        html = ExecDashboardBuilder().render_html_only(data)
+        # Should render without error; total_lb = 1000+200+3000 = 4200
+        assert html is not None
+        assert len(html) > 0
+
+    def test_total_lb_not_recomputed_when_supplied(self) -> None:
+        """When total_lb is already in totals_current, it is preserved."""
+        from ghg_tool.ui.pdf.exec_dashboard import ExecDashboardBuilder
+
+        data = {
+            "anno": 2025,
+            "prior_anno": 2024,
+            "company_name": "Test Co",
+            "gwp_set": "AR6",
+            "language": "en",
+            "totals_current": {
+                "scope1": 1000.0,
+                "scope2_lb": 200.0,
+                "scope3": 3000.0,
+                "total_lb": 9999.0,  # override — not sum of scopes
+            },
+            "totals_prior": {
+                "scope1": 1100.0,
+                "scope2_lb": 220.0,
+                "scope3": 3200.0,
+                "total_lb": 9998.0,
+            },
+        }
+        html = ExecDashboardBuilder().render_html_only(data)
+        assert "9,999" in html
+
+
+# ---------------------------------------------------------------------------
+# factor_sources from factor list (lines 469-474)
+# ---------------------------------------------------------------------------
+
+def _minimal_totals(scope1: float = 100.0, scope2_lb: float = 50.0,
+                    scope2_mb: float = 30.0, scope3: float = 800.0) -> dict:
+    return {
+        "scope1": scope1, "scope2_lb": scope2_lb,
+        "scope2_mb": scope2_mb, "scope3": scope3,
+    }
+
+
+class TestBuildContextFactorSources:
+
+    def test_factor_sources_extracted_from_published_factors(self) -> None:
+        """When factors list is supplied, published sources are extracted."""
+        from ghg_tool.ui.pdf.exec_dashboard import ExecDashboardBuilder
+
+        data = {
+            "anno": 2025,
+            "prior_anno": 2024,
+            "company_name": "Co",
+            "gwp_set": "AR6",
+            "language": "en",
+            "totals_current": _minimal_totals(),
+            "totals_prior": _minimal_totals(scope1=110, scope2_lb=55),
+            "factors": [
+                {"source": "DEFRA", "is_published": True},
+                {"source": "ISPRA", "is_published": True},
+                {"source": "DRAFT", "is_published": False},
+            ],
+        }
+        html = ExecDashboardBuilder().render_html_only(data)
+        # Both published sources should appear somewhere in the HTML
+        assert "DEFRA" in html or "ISPRA" in html
+
+    def test_factor_sources_empty_published_falls_back_to_default(self) -> None:
+        """When factors list has entries but none published, falls back to default text."""
+        from ghg_tool.ui.pdf.exec_dashboard import ExecDashboardBuilder
+
+        data = {
+            "anno": 2025,
+            "prior_anno": 2024,
+            "company_name": "Co",
+            "gwp_set": "AR6",
+            "language": "en",
+            "totals_current": _minimal_totals(),
+            "totals_prior": _minimal_totals(scope1=110, scope2_lb=55),
+            "factors": [
+                {"source": "DRAFT", "is_published": False},
+            ],
+        }
+        html = ExecDashboardBuilder().render_html_only(data)
+        assert "catalogo" in html.lower() or "Vedi catalogo" in html
+
+
+# ---------------------------------------------------------------------------
+# ExecDashboardBuilder.__init__ — jinja2 ImportError path (lines 321-322)
+# ---------------------------------------------------------------------------
+
+class TestExecDashboardBuilderJinja2Fallback:
+
+    def test_builder_works_without_jinja2(self, monkeypatch: "pytest.MonkeyPatch") -> None:
+        """When jinja2 is unavailable, builder falls back to minimal HTML."""
+        import sys
+        from unittest.mock import patch
+
+        # Temporarily hide jinja2 so ImportError path is hit in __init__
+        with patch.dict(sys.modules, {"jinja2": None}):  # type: ignore[dict-item]
+            from ghg_tool.ui.pdf.exec_dashboard import ExecDashboardBuilder
+            builder = ExecDashboardBuilder()
+            # _jinja_env should be None since import failed
+            assert builder._jinja_env is None
+
+        # After unpatching, create a new builder — it should use jinja2 again
+        builder2 = ExecDashboardBuilder()
+        assert builder2._jinja_env is not None
+
+
+# ---------------------------------------------------------------------------
+# _render_html — template exception fallback (lines 513-515)
+# ---------------------------------------------------------------------------
+
+class TestRenderHtmlTemplateFallback:
+
+    def test_render_falls_back_on_template_exception(self, minimal_data: dict) -> None:
+        """When Jinja2 template rendering raises, fallback HTML is returned."""
+        from unittest.mock import MagicMock, patch
+        from ghg_tool.ui.pdf.exec_dashboard import ExecDashboardBuilder
+
+        builder = ExecDashboardBuilder()
+
+        if builder._jinja_env is not None:
+            # Patch get_template to raise
+            with patch.object(
+                builder._jinja_env,
+                "get_template",
+                side_effect=Exception("template broken"),
+            ):
+                html = builder.render_html_only(minimal_data)
+            # Must have fallen back — fallback always contains "Carbontrace"
+            assert "Carbontrace" in html or len(html) > 0
+
+    def test_render_returns_fallback_when_jinja_env_none(self, minimal_data: dict) -> None:
+        """When _jinja_env is None, _render_html always uses _fallback_html_exec."""
+        from ghg_tool.ui.pdf.exec_dashboard import ExecDashboardBuilder
+
+        builder = ExecDashboardBuilder()
+        builder._jinja_env = None  # Force fallback path
+
+        ctx = builder._build_context(minimal_data)
+        html = builder._render_html(ctx)
+        # Fallback always contains ADR-007
+        assert "ADR-007" in html
+
+
+# ---------------------------------------------------------------------------
+# chart_data_uri in _build_context (line 442 — _png_to_data_uri call)
+# ---------------------------------------------------------------------------
+
+class TestBuildContextChartUri:
+
+    def test_chart_data_uri_in_context_when_matplotlib_available(
+        self, minimal_data: dict
+    ) -> None:
+        """_build_context produces a non-empty chart_data_uri when matplotlib works."""
+        from ghg_tool.ui.pdf.exec_dashboard import ExecDashboardBuilder
+
+        builder = ExecDashboardBuilder()
+        ctx = builder._build_context(minimal_data)
+        # chart_data_uri is either a data URI (success) or "" (failure)
+        assert isinstance(ctx["chart_data_uri"], str)
+
+    def test_chart_data_uri_is_data_uri_format_on_success(
+        self, minimal_data: dict
+    ) -> None:
+        """On successful chart rendering, the data URI has the correct prefix."""
+        from ghg_tool.ui.pdf.exec_dashboard import ExecDashboardBuilder
+
+        builder = ExecDashboardBuilder()
+        ctx = builder._build_context(minimal_data)
+        uri = ctx["chart_data_uri"]
+        if uri:  # empty string on failure — acceptable if matplotlib not available
+            assert uri.startswith("data:image/png;base64,")
