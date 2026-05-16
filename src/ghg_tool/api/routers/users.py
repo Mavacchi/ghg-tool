@@ -24,6 +24,7 @@ from pydantic import BaseModel, ConfigDict, EmailStr, Field
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ghg_tool.api.dependencies import handle_unique_violation
 from ghg_tool.api.dependencies.auth import CurrentUser
 from ghg_tool.api.dependencies.db import get_db
 from ghg_tool.api.middleware.correlation_id import get_correlation_id
@@ -330,7 +331,10 @@ async def create_user(
 
     pwd_hash = hash_password(body.password)
     new_id = uuid.uuid4()
-    try:
+    with handle_unique_violation(
+        "A user with that username or email already exists in this tenant.",
+        correlation_id,
+    ):
         await session.execute(
             text(
                 "INSERT INTO ref.users "
@@ -346,26 +350,6 @@ async def create_user(
                 "rid": role.id,
             },
         )
-    except Exception as exc:  # noqa: BLE001 - we translate DB errors uniformly
-        # A UNIQUE violation on (tenant_id, username) or (tenant_id, email)
-        # is the only realistic path. Other failures are surfaced as 500
-        # by the global error handler.
-        if "duplicate key" in str(exc).lower() or "unique" in str(exc).lower():
-            log.warning("create_user_duplicate", error_class=type(exc).__name__)
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail={
-                    "type": "about:blank",
-                    "title": "Conflict",
-                    "status": 409,
-                    "error_code": "duplicate_user",
-                    "detail": (
-                        "A user with that username or email already exists in this tenant."
-                    ),
-                    "correlation_id": correlation_id,
-                },
-            ) from exc
-        raise
 
     # Audit row in the same transaction.
     session.add(

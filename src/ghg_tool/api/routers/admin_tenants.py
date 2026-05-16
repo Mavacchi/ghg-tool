@@ -33,6 +33,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ghg_tool.api.dependencies import handle_unique_violation
 from ghg_tool.api.dependencies.auth import CurrentUser
 from ghg_tool.api.dependencies.db import get_db
 from ghg_tool.api.middleware.correlation_id import get_correlation_id
@@ -326,7 +327,9 @@ async def create_tenant(
     )
     log.info("admin_create_tenant")
 
-    try:
+    with handle_unique_violation(
+        f"Tenant code '{body.code}' already exists.", correlation_id
+    ):
         result = await db.execute(
             text(
                 "INSERT INTO ref.tenants (code, legal_name, is_active) "
@@ -336,20 +339,6 @@ async def create_tenant(
             {"code": body.code, "legal_name": body.legal_name},
         )
         row = result.fetchone()
-    except Exception as exc:
-        exc_str = str(exc)
-        if "23505" in exc_str or "unique" in exc_str.lower():
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail={
-                    "type": "about:blank",
-                    "title": "Conflict",
-                    "status": 409,
-                    "detail": f"Tenant code '{body.code}' already exists.",
-                    "correlation_id": correlation_id,
-                },
-            ) from exc
-        raise
 
     t = dict(row._mapping)  # type: ignore[union-attr]
     sites, users = await _count_sites_and_users(db, str(t["id"]))
@@ -429,7 +418,9 @@ async def rename_tenant(
     new_code = body.code if body.code is not None else before["code"]
     new_name = body.legal_name if body.legal_name is not None else before["legal_name"]
 
-    try:
+    with handle_unique_violation(
+        f"Tenant code '{new_code}' already exists.", correlation_id
+    ):
         await db.execute(
             text(
                 "UPDATE ref.tenants SET code = :code, legal_name = :legal_name "
@@ -437,20 +428,6 @@ async def rename_tenant(
             ),
             {"code": new_code, "legal_name": new_name, "id": str(tenant_id)},
         )
-    except Exception as exc:
-        exc_str = str(exc)
-        if "23505" in exc_str or "unique" in exc_str.lower():
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail={
-                    "type": "about:blank",
-                    "title": "Conflict",
-                    "status": 409,
-                    "detail": f"Tenant code '{new_code}' already exists.",
-                    "correlation_id": correlation_id,
-                },
-            ) from exc
-        raise
 
     # Mandatory audit log for tenant rename (CSRD traceability)
     import json  # noqa: PLC0415
