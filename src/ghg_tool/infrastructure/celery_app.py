@@ -27,6 +27,7 @@ Task configuration:
 from __future__ import annotations
 
 import os
+from typing import Final
 
 from celery import Celery
 
@@ -35,6 +36,11 @@ celery_app = Celery(
     broker=os.getenv("CELERY_BROKER_URL", "redis://localhost:6379/1"),
     backend=os.getenv("CELERY_RESULT_BACKEND", "redis://localhost:6379/2"),
 )
+
+# Task execution limits — calibrated for WeasyPrint PDF builds + Excel reports.
+_TASK_HARD_LIMIT_S: Final[int] = 600
+_TASK_SOFT_LIMIT_S: Final[int] = 540
+_RESULT_TTL_S: Final[int] = 86_400  # 24 hours
 
 celery_app.conf.update(
     # Serialisation — JSON only (no pickle)
@@ -47,8 +53,8 @@ celery_app.conf.update(
     # State tracking
     task_track_started=True,
     # Time limits (seconds)
-    task_time_limit=600,       # hard kill at 10 min
-    task_soft_time_limit=540,  # soft warning at 9 min
+    task_time_limit=_TASK_HARD_LIMIT_S,       # hard kill at 10 min
+    task_soft_time_limit=_TASK_SOFT_LIMIT_S,  # soft warning at 9 min
     # Result expiry — keep results for 24 h so status polls can be served
-    result_expires=86_400,
+    result_expires=_RESULT_TTL_S,
 )
