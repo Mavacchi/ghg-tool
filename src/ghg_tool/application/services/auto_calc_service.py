@@ -1084,22 +1084,52 @@ def _preview_s3_cat9(
     )
 
 
-def _preview_s3_cat12(
-    req: CalcInputRequest,
-    catalog: FactorCatalogPort,
-) -> CalcPreviewResponse:
-    """Scope 3 Cat 12 EOL: 30/70 landfill/recycle split × ecoinvent factors.
+@dataclass(frozen=True)
+class _Cat12Factors:
+    """Factor objects and fractions resolved for Cat 12 EOL.
 
-    Returns tco2e as the sum of both fractions (combined headline).
+    Attributes:
+        landfill_factor: Factor object for the landfill stream.
+        recycle_factor: Factor object for the recycle stream.
+        landfill_fraction: Decimal fraction of mass going to landfill (0.30).
+        recycle_fraction: Decimal fraction of mass going to recycle (0.70).
+    """
+
+    landfill_factor: Any
+    recycle_factor: Any
+    landfill_fraction: Decimal
+    recycle_fraction: Decimal
+
+
+def _parse_cat12_input(req: CalcInputRequest) -> Decimal:
+    """Validate and extract the mass quantity from a Cat 12 request.
 
     Args:
-        req: Validated CalcInputRequest.
+        req: Validated CalcInputRequest with quantita representing total mass (t).
+
+    Returns:
+        Mass in tonnes as Decimal.
+    """
+    return req.quantita
+
+
+def _lookup_cat12_factors(
+    req: CalcInputRequest,
+    catalog: FactorCatalogPort,
+) -> _Cat12Factors:
+    """Resolve landfill and recycle factors from the catalog for Cat 12 EOL.
+
+    Args:
+        req: Validated CalcInputRequest (gwp_set, anno used for lookup).
         catalog: Factor catalog port.
 
     Returns:
-        CalcPreviewResponse with combined landfill+recycle tco2e.
+        _Cat12Factors with both factor objects and the split fractions.
+
+    Raises:
+        MissingFactorError: If either factor is absent from the catalog.
     """
-    from ghg_tool.application.calc.scope3_cat12_eol import (
+    from ghg_tool.application.calc.scope3_cat12_eol import (  # noqa: PLC0415
         _LANDFILL_FACTOR_ID,
         _LANDFILL_FRACTION,
         _RECYCLE_FACTOR_ID,
@@ -1112,43 +1142,90 @@ def _preview_s3_cat12(
     recycle_factor = require_factor(
         catalog, _RECYCLE_FACTOR_ID, gwp_set=req.gwp_set, vintage_year=req.anno
     )
+    return _Cat12Factors(
+        landfill_factor=landfill_factor,
+        recycle_factor=recycle_factor,
+        landfill_fraction=_LANDFILL_FRACTION,
+        recycle_fraction=_RECYCLE_FRACTION,
+    )
 
-    mass_t = req.quantita
-    landfill_mass = mass_t * _LANDFILL_FRACTION
-    recycle_mass = mass_t * _RECYCLE_FRACTION
 
-    landfill_tco2e = (landfill_factor.value or Decimal("0")) * landfill_mass * KG_TO_TONNE
-    recycle_tco2e = (recycle_factor.value or Decimal("0")) * recycle_mass * KG_TO_TONNE
-    tco2e = _quantize_tco2e(landfill_tco2e + recycle_tco2e)
+def _compute_cat12_emissions(
+    mass_t: Decimal,
+    factors: _Cat12Factors,
+) -> tuple[Decimal, Decimal, Decimal, list[str]]:
+    """Compute landfill + recycle tCO2e for Cat 12 EOL.
 
+    Args:
+        mass_t: Total mass in tonnes.
+        factors: Resolved _Cat12Factors (landfill/recycle factors + fractions).
+
+    Returns:
+        Tuple of (total_tco2e, landfill_tco2e_raw, recycle_tco2e_raw, warnings).
+        The raw values are pre-quantize for formula display; total is quantized.
+    """
+    landfill_mass = mass_t * factors.landfill_fraction
+    recycle_mass = mass_t * factors.recycle_fraction
+    landfill_tco2e_raw = (
+        (factors.landfill_factor.value or Decimal("0")) * landfill_mass * KG_TO_TONNE
+    )
+    recycle_tco2e_raw = (
+        (factors.recycle_factor.value or Decimal("0")) * recycle_mass * KG_TO_TONNE
+    )
+    tco2e = _quantize_tco2e(landfill_tco2e_raw + recycle_tco2e_raw)
     warnings: list[str] = []
-    if landfill_factor.vintage and str(landfill_factor.vintage) != str(req.anno):
-        warnings.append(
-            f"Vintage {landfill_factor.vintage} used "
-            f"(closest-prior to {req.anno} request)"
-        )
+    lf = factors.landfill_factor
+    if lf.vintage and str(lf.vintage) != str(mass_t):  # vintage vs anno checked below
+        pass  # anno not in scope here; handled by caller awareness
+    return tco2e, landfill_tco2e_raw, recycle_tco2e_raw, warnings
 
-    lfv = landfill_factor.value or Decimal("0")
-    rfv = recycle_factor.value or Decimal("0")
-    lf_q = _quantize_tco2e(landfill_tco2e)
-    rf_q = _quantize_tco2e(recycle_tco2e)
+
+def _build_cat12_response(
+    req: CalcInputRequest,
+    mass_t: Decimal,
+    factors: _Cat12Factors,
+    tco2e: Decimal,
+    landfill_tco2e_raw: Decimal,
+    recycle_tco2e_raw: Decimal,
+    warnings: list[str],
+) -> CalcPreviewResponse:
+    """Build the CalcPreviewResponse for a Cat 12 EOL calculation.
+
+    Args:
+        req: Original request (for gwp_set, anno).
+        mass_t: Total mass in tonnes.
+        factors: Resolved factor objects and fractions.
+        tco2e: Quantized total tCO2e.
+        landfill_tco2e_raw: Pre-quantize landfill tCO2e (for formula).
+        recycle_tco2e_raw: Pre-quantize recycle tCO2e (for formula).
+        warnings: Accumulated warning strings.
+
+    Returns:
+        CalcPreviewResponse populated with Cat 12 metadata.
+    """
+    lf = factors.landfill_factor
+    lfv = lf.value or Decimal("0")
+    rfv = factors.recycle_factor.value or Decimal("0")
+    landfill_mass = mass_t * factors.landfill_fraction
+    recycle_mass = mass_t * factors.recycle_fraction
+    lf_q = _quantize_tco2e(landfill_tco2e_raw)
+    rf_q = _quantize_tco2e(recycle_tco2e_raw)
     formula = (
         f"{mass_t} t × (30% landfill: {landfill_mass} t × {lfv} kgCO2e/kg × 1e-3 = "
         f"{lf_q} tCO2e) + "
         f"(70% recycle: {recycle_mass} t × {rfv} kgCO2e/kg × 1e-3 = "
         f"{rf_q} tCO2e) = {tco2e} tCO2e"
     )
-
     return CalcPreviewResponse(
         tco2e=tco2e,
         co2_biogenic_tonne=None,
         co2_fossil_tonne=None,
-        factor_id=landfill_factor.factor_id,
+        factor_id=lf.factor_id,
         factor_value=lfv,
-        factor_unit=landfill_factor.unit,
-        factor_source=landfill_factor.source,
-        factor_version=landfill_factor.version,
-        factor_vintage=str(landfill_factor.vintage or req.anno),
+        factor_unit=lf.unit,
+        factor_source=lf.source,
+        factor_version=lf.version,
+        factor_vintage=str(lf.vintage or req.anno),
         gwp_set=req.gwp_set,
         gwp_value=None,
         methodology="mass-based",
@@ -1156,6 +1233,46 @@ def _preview_s3_cat12(
         unit_conversion_applied=None,
         warnings=warnings,
     )
+
+
+def _preview_s3_cat12(
+    req: CalcInputRequest,
+    catalog: FactorCatalogPort,
+) -> CalcPreviewResponse:
+    """Scope 3 Cat 12 EOL: 30/70 landfill/recycle split × ecoinvent factors.
+
+    Returns tco2e as the sum of both fractions (combined headline).
+
+    Delegates to four private helpers (Extract Method refactor):
+      _parse_cat12_input     — validate and extract mass quantity
+      _lookup_cat12_factors  — resolve factor catalog entries
+      _compute_cat12_emissions — arithmetic (no ESG logic changed)
+      _build_cat12_response  — assemble CalcPreviewResponse
+
+    The public signature is IDENTICAL to the pre-refactor version.
+
+    Args:
+        req: Validated CalcInputRequest.
+        catalog: Factor catalog port.
+
+    Returns:
+        CalcPreviewResponse with combined landfill+recycle tco2e.
+    """
+    mass_t = _parse_cat12_input(req)
+    factors = _lookup_cat12_factors(req, catalog)
+
+    # Vintage warning — checked here so _compute helper stays pure.
+    warnings: list[str] = []
+    if factors.landfill_factor.vintage and str(factors.landfill_factor.vintage) != str(req.anno):
+        warnings.append(
+            f"Vintage {factors.landfill_factor.vintage} used "
+            f"(closest-prior to {req.anno} request)"
+        )
+
+    tco2e, lf_raw, rf_raw, _extra_warnings = _compute_cat12_emissions(mass_t, factors)
+    warnings.extend(_extra_warnings)
+
+    return _build_cat12_response(req, mass_t, factors, tco2e, lf_raw, rf_raw, warnings)
 
 
 # ---------------------------------------------------------------------------

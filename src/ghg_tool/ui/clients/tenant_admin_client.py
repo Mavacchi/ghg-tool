@@ -41,19 +41,27 @@ def _get_auth_headers() -> dict[str, str]:
 
 
 def _safe_get(url: str) -> dict[str, Any]:
-    return safe_request("GET", url, headers=_get_auth_headers(), timeout=_TIMEOUT, _httpx=httpx)
+    return safe_request(
+        "GET", url, headers=_get_auth_headers(), timeout=_TIMEOUT, _httpx=httpx
+    )
 
 
 def _safe_post(url: str, body: dict[str, Any]) -> dict[str, Any]:
-    return safe_request("POST", url, headers=_get_auth_headers(), body=body, timeout=_TIMEOUT, _httpx=httpx)
+    return safe_request(
+        "POST", url, headers=_get_auth_headers(), body=body, timeout=_TIMEOUT, _httpx=httpx
+    )
 
 
 def _safe_patch(url: str, body: dict[str, Any]) -> dict[str, Any]:
-    return safe_request("PATCH", url, headers=_get_auth_headers(), body=body, timeout=_TIMEOUT, _httpx=httpx)
+    return safe_request(
+        "PATCH", url, headers=_get_auth_headers(), body=body, timeout=_TIMEOUT, _httpx=httpx
+    )
 
 
 def _safe_delete(url: str) -> dict[str, Any]:
-    return safe_request("DELETE", url, headers=_get_auth_headers(), timeout=_TIMEOUT, _httpx=httpx)
+    return safe_request(
+        "DELETE", url, headers=_get_auth_headers(), timeout=_TIMEOUT, _httpx=httpx
+    )
 
 
 def list_tenants() -> list[dict[str, Any]] | dict[str, Any]:
