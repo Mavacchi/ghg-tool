@@ -162,7 +162,7 @@ BEGIN
         PERFORM cron.schedule(
             'idempotency_keys_cleanup',
             '15 * * * *',
-            $$DELETE FROM cache.idempotency_keys WHERE expires_at < now()$$
+            $body$DELETE FROM cache.idempotency_keys WHERE expires_at < now()$body$
         );
 
         RAISE NOTICE
