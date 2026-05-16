@@ -38,7 +38,7 @@ Mathematical relation:
   tolerance check: factor_per_kwh * NCV == factor_per_native_unit ± 0.1%
 
 Revision ID : 0028_M8
-Revises     : 0026_M6
+Revises     : 0027_M7
 Create Date : 2026-05-15
 """
 
@@ -48,7 +48,7 @@ from alembic import op
 
 # ---------------------------------------------------------------------------
 revision: str = "0028_M8"
-down_revision: str = "0026_M6"
+down_revision: str = "0027_M7"
 branch_labels: str | None = None
 depends_on: str | None = None
 # ---------------------------------------------------------------------------

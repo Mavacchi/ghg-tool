@@ -15,12 +15,9 @@ from __future__ import annotations
 import asyncio
 import uuid
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, call
-
-import pytest
+from unittest.mock import MagicMock
 
 from ghg_tool.api.dependencies.auth import get_or_provision_user
-
 
 # ---------------------------------------------------------------------------
 # Helpers

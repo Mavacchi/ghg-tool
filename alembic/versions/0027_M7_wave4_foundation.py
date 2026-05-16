@@ -90,6 +90,8 @@ depends_on: str | None = None
 #   42704  undefined_object         — extension not present in the PG catalog
 #   0A000  feature_not_supported    — pg_cron not in shared_preload_libraries
 #   58P01  undefined_file           — .so file missing from filesystem (rare)
+#   OTHERS catch-all                — CI containers may raise an unmapped
+#                                     SQLSTATE; we log it and continue.
 #
 # The job unschedule + reschedule pattern makes the block idempotent: calling
 # upgrade() twice produces the same final state (one job, current definition).
@@ -120,6 +122,19 @@ BEGIN
             RAISE NOTICE
                 '[0027_M7] pg_cron shared library (.so) not found on the filesystem. '
                 'Skipping cron job registration.';
+        WHEN OTHERS THEN                     -- catch-all for CI containers
+            -- Some PG containers (notably postgres:15-alpine in CI) raise a
+            -- non-mapped SQLSTATE when CREATE EXTENSION fails because pg_cron
+            -- is absent.  We catch everything else here, log the SQLSTATE and
+            -- SQLERRM for postmortem, and continue with _cron_available := FALSE
+            -- so the migration degrades gracefully instead of aborting the
+            -- entire upgrade chain.
+            _cron_available := FALSE;
+            RAISE NOTICE
+                '[0027_M7] CREATE EXTENSION pg_cron failed with unmapped error. '
+                'SQLSTATE=%, SQLERRM=%. '
+                'Skipping cron job registration; migration continues.',
+                SQLSTATE, SQLERRM;
     END;
 
     -- Step 2: only proceed if extension creation succeeded.
