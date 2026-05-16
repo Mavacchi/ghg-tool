@@ -261,7 +261,7 @@ class FactorPublishService:
             )
         )
         result = await self._session.execute(update_stmt)
-        if result.rowcount != 1:
+        if result.rowcount != 1:  # type: ignore[attr-defined]
             log.warning("publish_factor_race_lost")
             raise PublishRaceConflictError(factor.factor_id, factor.version)
 
