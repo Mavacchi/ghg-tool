@@ -262,6 +262,7 @@ if _role == "editor" and raw:
 
     # ---- Empty state ---------------------------------------------------
     if not draft_factors:
+        # safe: static markup + i18n strings, no user/db data
         st.markdown(
             """
 <div class="ct-empty-state">
@@ -310,6 +311,7 @@ if _role == "editor" and raw:
                 # ---- Delete button (two-step) ------------------------------
                 _del_confirm_key = f"del_confirm_{_fid}"
                 with _hcols[2]:
+                    # safe: static markup, no user/db data
                     st.markdown(
                         '<div class="ct-destructive-wrap"></div>',
                         unsafe_allow_html=True,
@@ -368,6 +370,7 @@ if _role == "editor" and raw:
 
                 # ---- Inline edit form (toggled by edit button) ------------
                 if st.session_state.get(_edit_key, False):
+                    # safe: static markup, no user/db data
                     st.markdown(
                         '<div class="ct-edit-panel">',
                         unsafe_allow_html=True,
@@ -484,6 +487,7 @@ if _role == "editor" and raw:
                             st.session_state[_edit_key] = False
                             st.rerun()
 
+                    # safe: static closing tag, no user/db data
                     st.markdown("</div>", unsafe_allow_html=True)
 
     # ---- Published factors: lock badge only (no affordances) ---------------
@@ -507,6 +511,7 @@ if _role == "editor" and raw:
                             f"GWP {pub.get('gwp_set', '')}"
                         )
                 with _pcols[1]:
+                    # safe: only static i18n string in attribute (no user/db data)
                     st.markdown(
                         f'<span class="ct-lock-badge" title="{_("factor_locked_tooltip", lang)}">'
                         f"&#128274; Pubblicato</span>",

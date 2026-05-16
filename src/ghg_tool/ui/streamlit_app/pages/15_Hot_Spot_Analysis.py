@@ -79,8 +79,12 @@ def _priority_badge_html(priority: str) -> str:
     Returns:
         HTML string with an inline-styled badge.
     """
+    import html as _html  # noqa: PLC0415
+
     color = _PRIORITY_COLORS.get(priority, "#888888")
-    label = _PRIORITY_LABELS_IT.get(priority, priority)
+    # ``priority`` may fall through from a backend-supplied raw value;
+    # escape the label before embedding into HTML (CWE-79).
+    label = _html.escape(str(_PRIORITY_LABELS_IT.get(priority, priority)))
     return (
         f'<span style="display:inline-flex;align-items:center;gap:4px;">'
         f'<span style="width:10px;height:10px;border-radius:50%;'
@@ -268,6 +272,11 @@ else:
             # Render table with HTML badges for the priority column
             # (st.dataframe does not support HTML; use st.markdown with a
             # manually constructed table for the priority badges).
+            # ``Categoria`` and ``YoY`` come from the API (DB-sourced hotspot
+            # rows); every cell value is HTML-escaped before interpolation
+            # to neutralise XSS via crafted category labels (CWE-79).
+            import html as _html_esc  # noqa: PLC0415
+
             table_html = (
                 '<table style="width:100%;border-collapse:collapse;font-size:0.9rem;">'
                 "<thead><tr>"
@@ -283,9 +292,13 @@ else:
             )
             for _, row in df_table.iterrows():
                 table_html += "<tr>"
-                table_html += f'<td style="padding:6px 10px;">{row["Rank"]}</td>'
                 table_html += (
-                    f'<td style="padding:6px 10px;">{row["Categoria"]}</td>'
+                    f'<td style="padding:6px 10px;">'
+                    f'{_html_esc.escape(str(row["Rank"]))}</td>'
+                )
+                table_html += (
+                    f'<td style="padding:6px 10px;">'
+                    f'{_html_esc.escape(str(row["Categoria"]))}</td>'
                 )
                 table_html += (
                     f'<td style="padding:6px 10px;text-align:right;">'
@@ -301,8 +314,10 @@ else:
                 )
                 table_html += (
                     f'<td style="padding:6px 10px;text-align:right;">'
-                    f'{row["YoY"]}</td>'
+                    f'{_html_esc.escape(str(row["YoY"]))}</td>'
                 )
+                # ``_priority_badge_html`` returns module-static markup keyed by
+                # a controlled enum-like priority code; no DB interpolation.
                 table_html += (
                     f'<td style="padding:6px 10px;">'
                     f'{_priority_badge_html(row["_priority_raw"])}</td>'

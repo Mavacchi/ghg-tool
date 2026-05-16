@@ -1051,6 +1051,12 @@ def _ac_render_preview(preview: dict, lang: str) -> None:
     disclosure = preview.get("disclosure_notes", "")
 
     # --- Hero metric ---
+    # ``tco2e_str`` is coerced to float before formatting so an attacker-controlled
+    # backend cannot smuggle markup through it; ``gwp_set_used`` originates from
+    # the API response (sourced from the factor catalog DB) and is escaped to
+    # eliminate any XSS surface even though the value is policy-constrained.
+    import html as _html  # noqa: PLC0415
+
     st.markdown(
         f"""
 <div class="ct-preview-card">
@@ -1060,7 +1066,7 @@ def _ac_render_preview(preview: dict, lang: str) -> None:
   </div>
   <span class="ct-preview-tco2e">{float(tco2e_str):,.6f}</span>
   <span class="ct-preview-unit">tCO2e</span>
-  <span class="ct-gwp-chip">{gwp_set_used}</span>
+  <span class="ct-gwp-chip">{_html.escape(str(gwp_set_used))}</span>
 </div>
 """,
         unsafe_allow_html=True,
@@ -1091,6 +1097,7 @@ def _ac_render_preview(preview: dict, lang: str) -> None:
                 st.caption(f"Unita fattore: `{fm.get('unit', '—')}`")
                 st.caption(f"Metodologia: {methodology}")
             if vintage_offset:
+                # safe: static markup, no user/db data
                 st.markdown(
                     '<div class="ct-vintage-warn">'
                     '⚠ Vintage offset applicato — fattore piu recente disponibile '
@@ -1100,14 +1107,17 @@ def _ac_render_preview(preview: dict, lang: str) -> None:
                 )
 
     # --- Gas breakdown table ---
+    # ``gas_components`` rows come from the backend (factor_catalog DB).  Each
+    # cell value is HTML-escaped before interpolation to neutralise any XSS
+    # vector via crafted factor metadata (CWE-79).
     gas_components = breakdown.get("gas_components") or []
     if gas_components:
         with st.expander("Scomposizione per gas", expanded=False):
             rows_html = "".join(
                 f"<tr>"
-                f"<td>{gc.get('gas','')}</td>"
-                f"<td class='ct-num'>{gc.get('factor_value','—')}</td>"
-                f"<td class='ct-num'>{gc.get('gwp','1')}</td>"
+                f"<td>{_html.escape(str(gc.get('gas','')))}</td>"
+                f"<td class='ct-num'>{_html.escape(str(gc.get('factor_value','—')))}</td>"
+                f"<td class='ct-num'>{_html.escape(str(gc.get('gwp','1')))}</td>"
                 f"<td class='ct-num'>{float(gc.get('contribution_tco2e','0')):,.6f}</td>"
                 f"</tr>"
                 for gc in gas_components
@@ -1126,6 +1136,8 @@ def _ac_render_preview(preview: dict, lang: str) -> None:
 
     # --- Human-readable formula ---
     # Build it from available data when the backend doesn't return one.
+    # The formula embeds backend-sourced values (``primary_factor_val``,
+    # ``unit``, ``tco2e_str``) so the rendered HTML must be escaped (CWE-79).
     primary_factor_val = fm.get("primary_factor_val") or (
         gas_components[0].get("factor_value") if gas_components else None
     )
@@ -1139,7 +1151,7 @@ def _ac_render_preview(preview: dict, lang: str) -> None:
 
     st.markdown(f"**{_('auto_calc_formula_label', lang)}**")
     st.markdown(
-        f'<div class="ct-formula-block">{formula_str}</div>',
+        f'<div class="ct-formula-block">{_html.escape(formula_str)}</div>',
         unsafe_allow_html=True,
     )
 
@@ -1196,6 +1208,7 @@ with tab_autocalc:
     # The site selector is therefore rendered BEFORE the sub-scope selector
     # for Scope 1 so the sub-scope list can be filtered accordingly.
     # -----------------------------------------------------------------------
+    # safe: static markup, no user/db data
     st.markdown('<div class="ct-autocalc-form">', unsafe_allow_html=True)
 
     # Load site catalogue from API (cached, TTL 5 min).
@@ -1588,7 +1601,7 @@ with tab_autocalc:
     elif preview_result is not None:
         _ac_render_preview(preview_result, lang)
     else:
-        # Empty state card
+        # Empty state card — safe: static markup, no user/db data
         st.markdown(
             """
 <div class="ct-preview-empty">

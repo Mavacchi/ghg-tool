@@ -504,7 +504,7 @@ else:
                 st.divider()
                 st.markdown(f"#### {_('emission_correct_btn', lang)}")
 
-                # Append-only explainer note — static HTML, no user content
+                # safe: static HTML + i18n string only, no user/db data
                 st.markdown(
                     '<div class="ct-correction-note">'
                     '<span class="ct-note-icon">&#8505;</span>'
