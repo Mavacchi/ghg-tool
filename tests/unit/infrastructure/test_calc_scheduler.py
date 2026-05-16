@@ -15,15 +15,20 @@ Patching strategy for _run_scheduled_calc:
 
 from __future__ import annotations
 
+import importlib.util
 import sys
 import uuid
 from typing import Any
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from ghg_tool.infrastructure.scheduling.calc_scheduler import (
     _deterministic_correlation_id,
     start_scheduler,
 )
+
+_HAS_APSCHEDULER = importlib.util.find_spec("apscheduler") is not None
 
 # ---------------------------------------------------------------------------
 # _deterministic_correlation_id
@@ -105,7 +110,20 @@ class TestStartSchedulerInvalidCron:
 
 
 class TestStartSchedulerHappyPath:
-    """Happy-path tests that use real apscheduler but mock the job body."""
+    """Happy-path tests that use real apscheduler but mock the job body.
+
+    apscheduler is an optional runtime dependency (the production code at
+    ``calc_scheduler.start_scheduler`` returns ``None`` with a logged warning
+    when the import fails — i.e., scheduling is opt-in). It is NOT declared
+    in ``pyproject.toml``, so it may be absent on CI runners that perform a
+    clean ``pip install``. Skip the whole class when the package is missing
+    rather than asserting against the graceful-fallback ``None`` return.
+    """
+
+    pytestmark = pytest.mark.skipif(
+        not _HAS_APSCHEDULER,
+        reason="apscheduler not installed (optional dependency)",
+    )
 
     def test_returns_scheduler_instance_when_cron_valid(self) -> None:
 
