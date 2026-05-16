@@ -24,6 +24,7 @@ from typing import Literal
 import httpx
 import streamlit as st
 
+from ghg_tool.ui.clients._http_client import safe_request
 from ghg_tool.ui.streamlit_app.lib.constants import KNOWN_SITES
 
 # ---------------------------------------------------------------------------
@@ -148,14 +149,14 @@ def get_sites() -> list[Site]:
     Returns:
         List of ``Site`` instances for the caller's tenant.
     """
-    try:
-        resp = httpx.get(
-            f"{_get_base_url()}/api/v1/sites/",
-            headers=_get_auth_headers(),
-            timeout=_TIMEOUT,
-        )
-        resp.raise_for_status()
-        data = resp.json()
+    data = safe_request(
+        "GET",
+        f"{_get_base_url()}/api/v1/sites/",
+        headers=_get_auth_headers(),
+        timeout=_TIMEOUT,
+        _httpx=httpx,
+    )
+    if "error" not in data:
         raw_sites = data.get("sites", [])
         sites = []
         for raw in raw_sites:
@@ -176,9 +177,7 @@ def get_sites() -> list[Site]:
             )
         if sites:
             return sites
-        # Empty response: fall through to fallback.
-    except (httpx.HTTPStatusError, httpx.RequestError):
-        pass
+    # Error response or empty response: fall through to fallback.
     return _build_fallback_sites()
 
 

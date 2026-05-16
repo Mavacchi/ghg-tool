@@ -26,6 +26,7 @@ from decimal import Decimal
 from typing import Any, Literal
 
 import structlog
+from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = structlog.get_logger(__name__)
 
@@ -159,7 +160,7 @@ WHERE tenant_id = CAST(:tid AS uuid)
 # ---------------------------------------------------------------------------
 
 async def compute_hotspots(
-    session: Any,
+    session: AsyncSession,
     tenant_id: str,
     anno: int,
     top_n: int = 5,

@@ -46,10 +46,11 @@ from __future__ import annotations
 import uuid
 from datetime import UTC, datetime
 from decimal import ROUND_HALF_UP, Decimal
-from typing import Any
+from typing import Any, Protocol
 
 import structlog
 from fastapi import HTTPException, status
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from ghg_tool.api.middleware.correlation_id import get_correlation_id
 from ghg_tool.api.schemas.calc_schemas import (
@@ -62,6 +63,23 @@ from ghg_tool.domain.exceptions.calc_errors import MissingFactorError
 from ghg_tool.domain.ports.factor_catalog import FactorCatalogPort
 
 logger = structlog.get_logger(__name__)
+
+# ---------------------------------------------------------------------------
+# User context Protocol
+# ---------------------------------------------------------------------------
+
+
+class _UserContext(Protocol):
+    """Structural type for the authenticated request user.
+
+    Matches ``CurrentUser`` from ``ghg_tool.api.dependencies.auth`` without
+    creating an upward dependency from application → api layer.
+    """
+
+    sub: str
+    role: str
+    tenant_id: str
+
 
 # ---------------------------------------------------------------------------
 # Custom exception
@@ -97,7 +115,7 @@ class _SiteMeta:
 
 
 async def _fetch_site_meta(
-    session: Any,
+    session: AsyncSession,
     *,
     codice_sito: str,
     tenant_id: str,
@@ -1168,7 +1186,7 @@ async def compute_preview(
     request: CalcInputRequest,
     *,
     factor_catalog: FactorCatalogPort,
-    session: Any = None,
+    session: AsyncSession | None = None,
     tenant_id: str | None = None,
 ) -> CalcPreviewResponse:
     """Compute a tCO2e preview for the given request without writing to the DB.
@@ -1253,8 +1271,8 @@ async def compute_and_insert(
     request: CalcInputRequest,
     *,
     factor_catalog: FactorCatalogPort,
-    session: Any,
-    user: Any,
+    session: AsyncSession,
+    user: _UserContext,
 ) -> CalcInsertResponse:
     """Compute tCO2e and append a row to calc.emissions_consolidated.
 

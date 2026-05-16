@@ -30,6 +30,8 @@ import httpx
 import pandas as pd
 import streamlit as st
 
+from ghg_tool.ui.clients._http_client import safe_request as _safe_request
+
 _DEFAULT_BASE_URL = os.environ.get("GHG_API_BASE_URL", "http://localhost:8000")
 _TIMEOUT = 30.0
 
@@ -68,12 +70,11 @@ def _safe_get(url: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
     Returns:
         Parsed JSON response or empty dict on network/auth error.
     """
-    try:
-        resp = httpx.get(url, headers=_get_headers(), params=params, timeout=_TIMEOUT)
-        resp.raise_for_status()
-        return resp.json()
-    except (httpx.HTTPStatusError, httpx.RequestError):
+    result = _safe_request("GET", url, headers=_get_headers(), params=params, timeout=_TIMEOUT, _httpx=httpx)
+    # api_client contract: return {} (not an error dict) on any failure, for backward compat.
+    if "error" in result:
         return {}
+    return result
 
 
 def _safe_post(url: str, body: dict[str, Any]) -> dict[str, Any]:
@@ -86,14 +87,7 @@ def _safe_post(url: str, body: dict[str, Any]) -> dict[str, Any]:
     Returns:
         Parsed JSON response or ``{"error": "..."}`` on failure.
     """
-    try:
-        resp = httpx.post(url, headers=_get_headers(), json=body, timeout=_TIMEOUT)
-        resp.raise_for_status()
-        return resp.json()
-    except httpx.HTTPStatusError as exc:
-        return {"error": str(exc), "status_code": exc.response.status_code}
-    except httpx.RequestError as exc:
-        return {"error": str(exc)}
+    return _safe_request("POST", url, headers=_get_headers(), body=body, timeout=_TIMEOUT, _httpx=httpx)
 
 
 # ---------------------------------------------------------------------------

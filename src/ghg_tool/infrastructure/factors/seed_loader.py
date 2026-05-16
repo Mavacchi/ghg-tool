@@ -632,8 +632,16 @@ def load_all_seeds(
             n = insert_factors(conn, defra_records, evidence_url)
             result["sources"]["defra"] = {"inserted": n, "status": "OK"}
             result["total_inserted"] += n
-        except Exception as exc:
-            logger.error("DEFRA seed failed: %s", exc)
+        except FileNotFoundError as exc:
+            logger.error("DEFRA seed failed — file missing: %s", exc)
+            result["sources"]["defra"] = {"error": str(exc), "status": "FAILED"}
+            result["status"] = "PARTIAL"
+        except ValueError as exc:
+            logger.error("DEFRA seed failed — hash mismatch or parse error: %s", exc)
+            result["sources"]["defra"] = {"error": str(exc), "status": "FAILED"}
+            result["status"] = "PARTIAL"
+        except psycopg.DatabaseError as exc:
+            logger.error("DEFRA seed failed — database error: %s", exc)
             result["sources"]["defra"] = {"error": str(exc), "status": "FAILED"}
             result["status"] = "PARTIAL"
 
@@ -646,8 +654,16 @@ def load_all_seeds(
             n = insert_factors(conn, ecoinvent_records, evidence_url)
             result["sources"]["ecoinvent"] = {"inserted": n, "status": "OK"}
             result["total_inserted"] += n
-        except Exception as exc:
-            logger.error("Ecoinvent seed failed: %s", exc)
+        except FileNotFoundError as exc:
+            logger.error("Ecoinvent seed failed — file missing: %s", exc)
+            result["sources"]["ecoinvent"] = {"error": str(exc), "status": "FAILED"}
+            result["status"] = "PARTIAL"
+        except ValueError as exc:
+            logger.error("Ecoinvent seed failed — hash mismatch or parse error: %s", exc)
+            result["sources"]["ecoinvent"] = {"error": str(exc), "status": "FAILED"}
+            result["status"] = "PARTIAL"
+        except psycopg.DatabaseError as exc:
+            logger.error("Ecoinvent seed failed — database error: %s", exc)
             result["sources"]["ecoinvent"] = {"error": str(exc), "status": "FAILED"}
             result["status"] = "PARTIAL"
 

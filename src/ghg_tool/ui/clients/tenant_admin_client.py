@@ -17,6 +17,8 @@ from typing import Any
 import httpx
 import streamlit as st
 
+from ghg_tool.ui.clients._http_client import safe_request
+
 _DEFAULT_BASE_URL = os.environ.get("GHG_API_BASE_URL", "http://localhost:8000")
 _TIMEOUT = 30.0
 _API_PREFIX = "/api/v1/admin/tenants"
@@ -39,51 +41,19 @@ def _get_auth_headers() -> dict[str, str]:
 
 
 def _safe_get(url: str) -> dict[str, Any]:
-    try:
-        resp = httpx.get(url, headers=_get_auth_headers(), timeout=_TIMEOUT)
-        resp.raise_for_status()
-        return resp.json()  # type: ignore[no-any-return]
-    except httpx.HTTPStatusError as exc:
-        return {"error": str(exc), "status_code": exc.response.status_code}
-    except httpx.RequestError as exc:
-        return {"error": str(exc)}
+    return safe_request("GET", url, headers=_get_auth_headers(), timeout=_TIMEOUT, _httpx=httpx)
 
 
 def _safe_post(url: str, body: dict[str, Any]) -> dict[str, Any]:
-    try:
-        resp = httpx.post(
-            url, headers=_get_auth_headers(), json=body, timeout=_TIMEOUT
-        )
-        resp.raise_for_status()
-        return resp.json()  # type: ignore[no-any-return]
-    except httpx.HTTPStatusError as exc:
-        return {"error": str(exc), "status_code": exc.response.status_code}
-    except httpx.RequestError as exc:
-        return {"error": str(exc)}
+    return safe_request("POST", url, headers=_get_auth_headers(), body=body, timeout=_TIMEOUT, _httpx=httpx)
 
 
 def _safe_patch(url: str, body: dict[str, Any]) -> dict[str, Any]:
-    try:
-        resp = httpx.patch(
-            url, headers=_get_auth_headers(), json=body, timeout=_TIMEOUT
-        )
-        resp.raise_for_status()
-        return resp.json()  # type: ignore[no-any-return]
-    except httpx.HTTPStatusError as exc:
-        return {"error": str(exc), "status_code": exc.response.status_code}
-    except httpx.RequestError as exc:
-        return {"error": str(exc)}
+    return safe_request("PATCH", url, headers=_get_auth_headers(), body=body, timeout=_TIMEOUT, _httpx=httpx)
 
 
 def _safe_delete(url: str) -> dict[str, Any]:
-    try:
-        resp = httpx.delete(url, headers=_get_auth_headers(), timeout=_TIMEOUT)
-        resp.raise_for_status()
-        return resp.json()  # type: ignore[no-any-return]
-    except httpx.HTTPStatusError as exc:
-        return {"error": str(exc), "status_code": exc.response.status_code}
-    except httpx.RequestError as exc:
-        return {"error": str(exc)}
+    return safe_request("DELETE", url, headers=_get_auth_headers(), timeout=_TIMEOUT, _httpx=httpx)
 
 
 def list_tenants() -> list[dict[str, Any]] | dict[str, Any]:
