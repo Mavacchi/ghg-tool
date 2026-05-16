@@ -121,8 +121,8 @@ if not exist ".env" (
     if errorlevel 1 (
         echo [ERRORE] Il file .env esiste ma non contiene una riga valida
         echo          GHG_JWT_SECRET=^<alfanumerici^>.  Probabilmente e' rotto
-        echo          (generato da una versione precedente di start.bat con
-        echo          il bug PowerShell delle escape '^').
+        echo          ^(generato da una versione precedente di start.bat con
+        echo          il bug PowerShell delle escape '^^'^).
         echo.
         echo Soluzione: cancella il file .env e rilancia start.bat.
         echo Lo script ne creera' uno nuovo con un secret casuale.
