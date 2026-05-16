@@ -70,6 +70,7 @@ Create Date : 2026-05-15
 from __future__ import annotations
 
 from alembic import op
+from sqlalchemy import text
 
 # ---------------------------------------------------------------------------
 revision: str = "0027_M7"
@@ -215,7 +216,7 @@ def upgrade() -> None:
 
     No changes are made to ref.roles — see Decision C in the module docstring.
     """
-    op.execute(_PGCRON_SETUP_BLOCK)
+    op.execute(text(_PGCRON_SETUP_BLOCK))
 
 
 # ---------------------------------------------------------------------------
@@ -234,4 +235,4 @@ def downgrade() -> None:
 
     Only the specific job registered by this migration is removed.
     """
-    op.execute(_PGCRON_TEARDOWN_BLOCK)
+    op.execute(text(_PGCRON_TEARDOWN_BLOCK))
