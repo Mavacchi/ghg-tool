@@ -126,16 +126,21 @@ BEGIN
         WHEN OTHERS THEN                     -- catch-all for CI containers
             -- Some PG containers (notably postgres:15-alpine in CI) raise a
             -- non-mapped SQLSTATE when CREATE EXTENSION fails because pg_cron
-            -- is absent.  We catch everything else here, log the SQLSTATE and
-            -- SQLERRM for postmortem, and continue with _cron_available := FALSE
-            -- so the migration degrades gracefully instead of aborting the
-            -- entire upgrade chain.
+            -- is absent.  We catch everything else here and continue with
+            -- _cron_available := FALSE so the migration degrades gracefully
+            -- instead of aborting the entire upgrade chain.
+            --
+            -- Important: this NOTICE intentionally uses no format placeholders
+            -- (no ``%`` characters and no SQLSTATE/SQLERRM args).  ``%`` in the
+            -- statement text is interpreted as a bind-parameter marker by
+            -- SQLAlchemy's pyformat compiler (psycopg2 dialect) and triggers
+            -- ObjectNotExecutableError (sqlalche.me/e/20/f405) before the SQL
+            -- ever reaches the server.  Diagnostic SQLSTATE/SQLERRM logging
+            -- can be added back via a server-side function if needed.
             _cron_available := FALSE;
             RAISE NOTICE
-                '[0027_M7] CREATE EXTENSION pg_cron failed with unmapped error. '
-                'SQLSTATE=%, SQLERRM=%. '
-                'Skipping cron job registration; migration continues.',
-                SQLSTATE, SQLERRM;
+                '[0027_M7] CREATE EXTENSION pg_cron failed with unmapped error; '
+                'skipping cron job registration; migration continues.';
     END;
 
     -- Step 2: only proceed if extension creation succeeded.
