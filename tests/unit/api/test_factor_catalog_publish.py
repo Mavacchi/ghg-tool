@@ -436,10 +436,15 @@ class TestPublishAuditLog:
             def warning(self, event: str, **kw: Any) -> None:
                 pass
 
-        with patch(
-            "ghg_tool.api.routers.factor_catalog.logger",
-            _CapturingLogger(),
-        ), TestClient(app, raise_server_exceptions=False) as client:
+        capturing = _CapturingLogger()
+        with (
+            patch("ghg_tool.api.routers.factor_catalog.logger", capturing),
+            patch(
+                "ghg_tool.application.services.factor_publish_service.logger",
+                capturing,
+            ),
+            TestClient(app, raise_server_exceptions=False) as client,
+        ):
             resp = client.post(
                 _BASE_URL,
                 json={"reason_code": "INITIAL_PUBLICATION", "publish_notes": "CSRD sign-off Q1"},
