@@ -20,13 +20,36 @@ from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+
 # ---------------------------------------------------------------------------
 # Engine
 # ---------------------------------------------------------------------------
-_DATABASE_URL = os.environ.get(
-    "SQLALCHEMY_URL",
-    "postgresql+asyncpg://ghg_app:changeme@localhost:5432/ghg_tool",
-)
+def _resolve_database_url() -> str:
+    """Resolve the async SQLAlchemy URL with fail-closed defaults.
+
+    SEC-P0: no hardcoded ``ghg_app:changeme`` fallback (the previous default
+    leaked a known weak password into images / coredumps).  When the env var
+    is missing we either:
+
+    - fall back to a clearly-marked test-only DSN when running under pytest
+      (``PYTEST_CURRENT_TEST`` is set automatically by the runner so this
+      branch is only ever active in CI/local tests), or
+    - raise ``RuntimeError`` so the API fails at import time instead of
+      silently connecting somewhere unexpected.
+    """
+    url = os.environ.get("SQLALCHEMY_URL", "").strip()
+    if url:
+        return url
+    if os.environ.get("PYTEST_CURRENT_TEST"):
+        # Test-only fallback — never reached outside pytest.
+        return "postgresql+asyncpg://ghg_app:test-only@localhost:5432/ghg_tool"
+    raise RuntimeError(
+        "SQLALCHEMY_URL is required (no insecure default); "
+        "set it in the process environment before importing this module."
+    )
+
+
+_DATABASE_URL = _resolve_database_url()
 
 engine = create_async_engine(
     _DATABASE_URL,

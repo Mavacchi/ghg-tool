@@ -133,6 +133,14 @@ def get_unverified_claims(token: str) -> dict[str, Any]:
 
 _FORBIDDEN_ALGORITHMS = frozenset({"none"})
 
+# REQUIRED-3: the Streamlit UI uses the literal ``demo-jwt-token`` as a
+# session-state sentinel when running in demo mode.  It MUST never be
+# accepted by the API as a real Bearer credential.  We reject it
+# unconditionally here even when GHG_ENVIRONMENT == 'development': the
+# only path that legitimately accepts the sentinel is the Streamlit UI's
+# *own* session_state — it is never sent over the wire to the API.
+_DEMO_TOKEN_SENTINEL: Final[str] = "demo-jwt-token"  # noqa: S105 — well-known public sentinel
+
 
 def _load_key(path: str) -> str:
     """Read a PEM key file from disk."""
@@ -238,7 +246,16 @@ def decode_token(token: str) -> dict[str, Any]:
 
     SEC-P1-004 / SG-01: explicit ``algorithms=[_JWT_ALGORITHM]`` allow-list;
     ``alg=none`` rejected at header-peek.
+
+    REQUIRED-3: the Streamlit demo sentinel ``demo-jwt-token`` is rejected
+    server-side before any decode attempt — it must never be honoured as a
+    Bearer credential regardless of environment.
     """
+    if token == _DEMO_TOKEN_SENTINEL:
+        raise InvalidTokenError(
+            "demo sentinel token is not a valid Bearer credential"
+        )
+
     try:
         header = jwt.get_unverified_header(token)
     except PyJWTError as exc:

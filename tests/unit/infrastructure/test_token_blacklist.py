@@ -150,3 +150,60 @@ class TestTokenBlacklistRevoke:
         assert token_blacklist.is_revoked(jti) is True
         token_blacklist.clear_for_testing(jti)
         assert token_blacklist.is_revoked(jti) is False
+
+
+class TestTokenBlacklistFailClosed:
+    """REQUIRED-2 — Redis outage must surface JWTUnavailableError, not False.
+
+    The auth dependency maps this exception to HTTP 503; the unit test
+    here pins the contract so a future refactor cannot silently turn
+    ``is_revoked`` back into a fail-open swallow-and-return-False.
+    """
+
+    def test_is_revoked_raises_when_backend_fails(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """A ConnectionError from the backend must surface as JWTUnavailableError."""
+
+        class _BrokenClient:
+            def exists(self, _name: str) -> int:
+                raise ConnectionError("simulated redis outage")
+
+            def setex(self, *_a: object, **_k: object) -> bool:
+                return True
+
+            def delete(self, *_a: object) -> int:
+                return 0
+
+            def ping(self) -> bool:
+                return False
+
+        monkeypatch.setattr(
+            token_blacklist, "get_redis_client", lambda: _BrokenClient()
+        )
+
+        with pytest.raises(token_blacklist.JWTUnavailableError):
+            token_blacklist.is_revoked(str(uuid.uuid4()))
+
+    def test_is_revoked_raises_when_backend_times_out(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A TimeoutError from the backend must also surface as JWTUnavailableError."""
+
+        class _TimingOutClient:
+            def exists(self, _name: str) -> int:
+                raise TimeoutError("simulated redis timeout")
+
+            def setex(self, *_a: object, **_k: object) -> bool:
+                return True
+
+            def delete(self, *_a: object) -> int:
+                return 0
+
+            def ping(self) -> bool:
+                return False
+
+        monkeypatch.setattr(
+            token_blacklist, "get_redis_client", lambda: _TimingOutClient()
+        )
+
+        with pytest.raises(token_blacklist.JWTUnavailableError):
+            token_blacklist.is_revoked(str(uuid.uuid4()))
