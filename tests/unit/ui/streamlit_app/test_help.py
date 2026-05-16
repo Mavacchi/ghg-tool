@@ -7,13 +7,8 @@ Tests verify the glossary loader and the ``_help`` public helper.
 from __future__ import annotations
 
 import json
-from pathlib import Path
-from unittest.mock import MagicMock, patch
-
-import pytest
 
 import ghg_tool.ui.streamlit_app.lib.help as help_mod
-
 
 # ---------------------------------------------------------------------------
 # Helpers

@@ -20,13 +20,10 @@ import uuid
 from typing import Any
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from ghg_tool.infrastructure.scheduling.calc_scheduler import (
     _deterministic_correlation_id,
     start_scheduler,
 )
-
 
 # ---------------------------------------------------------------------------
 # _deterministic_correlation_id
@@ -111,7 +108,6 @@ class TestStartSchedulerHappyPath:
     """Happy-path tests that use real apscheduler but mock the job body."""
 
     def test_returns_scheduler_instance_when_cron_valid(self) -> None:
-        from apscheduler.schedulers.background import BackgroundScheduler
 
         with patch.dict("os.environ", {"GHG_CALC_SCHEDULE_CRON": "0 2 * * *"}, clear=False):
             result = start_scheduler(anno=2025)

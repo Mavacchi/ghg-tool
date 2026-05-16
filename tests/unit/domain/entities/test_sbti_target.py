@@ -9,19 +9,18 @@ Parametrize cases: valid construction, each invalid field, boundary/edge cases.
 from __future__ import annotations
 
 import uuid
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from decimal import Decimal
 
 import pytest
 
 from ghg_tool.domain.entities.sbti_target import SbtiTarget
 
-
 # ---------------------------------------------------------------------------
 # Factory helpers
 # ---------------------------------------------------------------------------
 
-_NOW = datetime(2026, 1, 1, tzinfo=timezone.utc)
+_NOW = datetime(2026, 1, 1, tzinfo=UTC)
 _BASELINE_DATE = date(2020, 1, 1)
 
 

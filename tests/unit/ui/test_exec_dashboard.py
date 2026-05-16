@@ -509,6 +509,7 @@ class TestPngToDataUri:
 
     def test_data_uri_is_decodeable(self) -> None:
         import base64
+
         from ghg_tool.ui.pdf.exec_dashboard import _png_to_data_uri
 
         raw = b"some png bytes here"
@@ -641,7 +642,7 @@ class TestBuildContextFactorSources:
 
 class TestExecDashboardBuilderJinja2Fallback:
 
-    def test_builder_works_without_jinja2(self, monkeypatch: "pytest.MonkeyPatch") -> None:
+    def test_builder_works_without_jinja2(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """When jinja2 is unavailable, builder falls back to minimal HTML."""
         import sys
         from unittest.mock import patch
@@ -666,7 +667,8 @@ class TestRenderHtmlTemplateFallback:
 
     def test_render_falls_back_on_template_exception(self, minimal_data: dict) -> None:
         """When Jinja2 template rendering raises, fallback HTML is returned."""
-        from unittest.mock import MagicMock, patch
+        from unittest.mock import patch
+
         from ghg_tool.ui.pdf.exec_dashboard import ExecDashboardBuilder
 
         builder = ExecDashboardBuilder()

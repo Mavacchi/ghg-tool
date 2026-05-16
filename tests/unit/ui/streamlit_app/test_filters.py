@@ -6,10 +6,7 @@ No Streamlit runtime, no network, no DB.
 
 from __future__ import annotations
 
-import datetime
 from unittest.mock import MagicMock, patch
-
-import pytest
 
 # ---------------------------------------------------------------------------
 # Module-level streamlit mock applied before first import of filters.
@@ -21,7 +18,6 @@ import pytest
 def _fresh_filters(session_state: dict | None = None):
     """Import filters module with a clean st mock injected."""
     import sys
-    import types
 
     state = session_state if session_state is not None else {}
 
@@ -35,7 +31,6 @@ def _fresh_filters(session_state: dict | None = None):
             del sys.modules[key]
 
     with patch.dict(sys.modules, {"streamlit": st_mock}):
-        import importlib
         import ghg_tool.ui.streamlit_app.lib.filters as f
         return f, st_mock, state
 

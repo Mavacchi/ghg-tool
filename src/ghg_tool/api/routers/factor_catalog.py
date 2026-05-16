@@ -16,7 +16,7 @@ import structlog
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy import select, text, update
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ghg_tool.api.dependencies.auth import CurrentUser
@@ -29,15 +29,14 @@ from ghg_tool.api.schemas.common import CursorPage
 from ghg_tool.api.schemas.factor_schemas import (
     FactorCatalogCreate,
     FactorCatalogPublishRequest,
-    FactorCatalogPublishResponse,
     FactorCatalogResponse,
     FactorCatalogUpdate,
     FactorFilter,
 )
 from ghg_tool.application.services.factor_publish_service import (
     FactorAlreadyPublishedError,
-    FactorNullValueError,
     FactorNotFoundError,
+    FactorNullValueError,
     FactorPublishService,
     FactorTbcError,
     PublishRaceConflictError,
@@ -659,7 +658,7 @@ async def publish_factor(
             f"Factor {factor_uuid} not found.",
             "factor_not_found",
             correlation_id,
-        )
+        ) from None
     except FactorAlreadyPublishedError as exc:
         log.warning("publish_factor_already_published")
         raise _problem(
@@ -671,7 +670,7 @@ async def publish_factor(
             ),
             "already_published",
             correlation_id,
-        )
+        ) from exc
     except FactorTbcError as exc:
         raise _problem(
             status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -682,7 +681,7 @@ async def publish_factor(
             ),
             "tbc_factor",
             correlation_id,
-        )
+        ) from exc
     except FactorNullValueError as exc:
         raise _problem(
             status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -694,7 +693,7 @@ async def publish_factor(
             ),
             "null_value",
             correlation_id,
-        )
+        ) from exc
     except SelfApprovalForbiddenError:
         log.warning("publish_factor_self_approval_blocked")
         raise _problem(
@@ -706,7 +705,7 @@ async def publish_factor(
             ),
             "self_approval_forbidden",
             correlation_id,
-        )
+        ) from None
     except SelfApprovalCreatorError:
         raise _problem(
             status.HTTP_409_CONFLICT,
@@ -714,7 +713,7 @@ async def publish_factor(
             "The factor creator cannot also approve publication (ISAE 3000).",
             "self_approval_creator",
             correlation_id,
-        )
+        ) from None
     except PublishRaceConflictError as exc:
         raise _problem(
             status.HTTP_409_CONFLICT,
@@ -725,7 +724,7 @@ async def publish_factor(
             ),
             "already_published",
             correlation_id,
-        )
+        ) from exc
 
     # Map typed result to HTTP response.
     if isinstance(result, PublishResultApprovalRequested):

@@ -16,14 +16,11 @@ import base64
 import uuid
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from ghg_tool.application.tasks.export_tasks import (
     _build_report_data,
     export_excel_task,
     export_pdf_task,
 )
-
 
 # ---------------------------------------------------------------------------
 # _build_report_data

@@ -23,7 +23,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from decimal import Decimal
-from typing import Any, Literal
+from typing import Literal
 
 import structlog
 from sqlalchemy.ext.asyncio import AsyncSession

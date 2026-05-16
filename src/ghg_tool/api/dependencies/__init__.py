@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from contextlib import contextmanager
 from collections.abc import Iterator
+from contextlib import contextmanager
 
 from fastapi import Depends, HTTPException, status
 from sqlalchemy.exc import IntegrityError
@@ -60,7 +60,7 @@ def handle_unique_violation(
 
 def get_factor_publish_service(
     session: AsyncSession = Depends(get_db),
-) -> "FactorPublishService":  # noqa: F821  # type: ignore[name-defined]
+) -> FactorPublishService:  # noqa: F821  # type: ignore[name-defined]
     """Dependency: return a FactorPublishService wired to the current session.
 
     Import is deferred to avoid a circular import between api.__init__ (which
@@ -78,7 +78,9 @@ def get_factor_publish_service(
     # api.__init__ -> api.main -> api.routers -> api.dependencies.__init__
     # -> application.services.factor_publish_service -> api.schemas ->
     # api.__init__ (cycle).
-    from ghg_tool.application.services.factor_publish_service import FactorPublishService  # noqa: PLC0415
+    from ghg_tool.application.services.factor_publish_service import (
+        FactorPublishService,  # noqa: PLC0415
+    )
 
     return FactorPublishService(session=session)
 

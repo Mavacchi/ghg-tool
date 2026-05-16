@@ -145,7 +145,12 @@ class TestFullPipelineE2E:
         )
         assert resp.status_code == 202, resp.text
 
-    def test_step3_calc_run_creates_emissions(self, http_client, admin_token: str, tenant_id: str) -> None:  # type: ignore[name-defined]
+    def test_step3_calc_run_creates_emissions(
+        self,
+        http_client,  # type: ignore[no-untyped-def]
+        admin_token: str,
+        tenant_id: str,
+    ) -> None:
         """Step 3: POST /api/v1/calc/run → calc.emissions_consolidated rows.
 
         Expected: HTTP 202; at least 1 row in emissions_consolidated for

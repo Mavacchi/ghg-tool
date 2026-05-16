@@ -137,7 +137,7 @@ class UserContext:
         self.tenant_id = tenant_id
 
     @classmethod
-    def from_current_user(cls, user: Any) -> "UserContext":
+    def from_current_user(cls, user: Any) -> UserContext:
         """Build a UserContext from a CurrentUser dependency."""
         return cls(sub=user.sub, role=user.role, tenant_id=user.tenant_id)
 
@@ -328,7 +328,9 @@ class FactorPublishService:
         )
 
         # Deferred import to avoid circular dependency with ghg_tool.api.
-        from ghg_tool.api.schemas.factor_schemas import FactorCatalogPublishResponse  # noqa: PLC0415
+        from ghg_tool.api.schemas.factor_schemas import (
+            FactorCatalogPublishResponse,  # noqa: PLC0415
+        )
 
         return FactorCatalogPublishResponse.model_validate(factor)
 
