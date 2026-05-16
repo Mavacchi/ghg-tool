@@ -36,6 +36,37 @@ jobs:
       - name: Install dev dependencies
         run: pip install -e ".[dev]"
 
+      - name: pip-audit (dependency CVE scan)
+        # Scans project dependencies declared in pyproject.toml for known CVEs.
+        # Uses project-path mode to avoid editable-install resolution issues.
+        # Fixed in this wave: python-multipart (>=0.0.27), python-dotenv (>=1.1/1.2.2).
+        #
+        # Ignored findings — require SecurityAgent + breaking-version upgrades:
+        #   CVE-2024-47874  starlette 0.37.2 (blocked by fastapi>=0.111,<0.112 pin → SecurityAgent)
+        #   CVE-2025-54121  starlette 0.37.2 (same; fix needs fastapi major upgrade)
+        #   PYSEC-2024-153  streamlit 1.35.0 (major upgrade 1.37+ breaks UI layer → SecurityAgent)
+        #   CVE-2026-33682  streamlit 1.35.0 (same; needs 1.54+ full retest)
+        #   CVE-2025-68616  weasyprint 62.3   (needs >=68.0; PDF API breaking change → SecurityAgent)
+        #   CVE-2026-25990  pillow 10.4.0     (transitive via streamlit/qrcode → SecurityAgent)
+        #   CVE-2026-40192  pillow 10.4.0     (transitive, same)
+        #   CVE-2026-42308  pillow 10.4.0     (transitive, same)
+        #   CVE-2026-42310  pillow 10.4.0     (transitive, same)
+        #   CVE-2026-42311  pillow 10.4.0     (transitive, same)
+        run: |
+          python -m pip install pip-audit
+          python -m pip_audit . \
+            --ignore-vuln CVE-2024-47874 \
+            --ignore-vuln CVE-2025-54121 \
+            --ignore-vuln PYSEC-2024-153 \
+            --ignore-vuln CVE-2026-33682 \
+            --ignore-vuln CVE-2025-68616 \
+            --ignore-vuln CVE-2026-25990 \
+            --ignore-vuln CVE-2026-40192 \
+            --ignore-vuln CVE-2026-42308 \
+            --ignore-vuln CVE-2026-42310 \
+            --ignore-vuln CVE-2026-42311
+        continue-on-error: false  # block on CVE
+
       - name: Run ruff (style + complexity)
         run: python -m ruff check src tests
 

@@ -34,9 +34,13 @@ dependencies = [
     # SEC-P1-004: migrated from python-jose (CVE-2024-33664) to PyJWT 2.8+.
     "pyjwt[crypto]>=2.8,<3.0",
     "passlib[bcrypt]>=1.7,<1.8",
+<<<<<<< HEAD
     # SEC-CVE-2024-24762: bump python-multipart to >=0.0.18 to pick up the
     # ReDoS fix in the multipart parser.
     "python-multipart>=0.0.18,<0.1.0",
+=======
+    "python-multipart>=0.0.27,<0.0.29",  # CVE-2024-53981/CVE-2026-24486/CVE-2026-40347/CVE-2026-42561 fixed in 0.0.27
+>>>>>>> a9687d5 (ci(security): add pip-audit dependency vulnerability scan (security-rec))
     # Rate limiting
     "slowapi>=0.1,<0.2",
     # TOTP 2FA
@@ -49,7 +53,7 @@ dependencies = [
     "streamlit>=1.35,<1.36",
     "plotly>=5.22,<5.23",
     # Utilities
-    "python-dotenv>=1.0,<1.1",
+    "python-dotenv>=1.1,<1.3",  # CVE-2026-28684 fixed in 1.2.2
     # Async task queue (REV-WAVE3-007)
     "celery>=5.4,<5.5",
     "redis>=5.0,<6.0",
@@ -72,6 +76,8 @@ dev = [
     "testcontainers[postgres]>=4.0,<5.0",
     # import-linter -- wave 5 wiring: enforce hexagonal architecture contracts
     "import-linter>=2.1",  # enabled wave 5; see .importlinter for contracts
+    # pip-audit -- wave 5 security: CVE scan of project dependencies in CI
+    "pip-audit>=2.7",  # enabled wave 5; run via: python -m pip_audit .
 ]
 
 [tool.hatch.build.targets.wheel]
