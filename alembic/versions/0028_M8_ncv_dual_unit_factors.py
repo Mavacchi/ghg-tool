@@ -45,6 +45,7 @@ Create Date : 2026-05-15
 from __future__ import annotations
 
 from alembic import op
+from sqlalchemy import text as _sa_text
 
 # ---------------------------------------------------------------------------
 revision: str = "0028_M8"
@@ -59,18 +60,21 @@ _NCV_GASOLIO_KWH_PER_L: float = 9.97     # kWh/L
 _NCV_BENZINA_KWH_PER_L: float = 9.20     # kWh/L
 
 # ---------------------------------------------------------------------------
-# SQL template (mirrors 0003_M2 pattern for consistency)
+# SQL template (parameterised via sa.text bindparams to avoid SQL injection
+# through string interpolation — CWE-89; e.g. backslashes or quotes in
+# applicability_note text would otherwise break out of Python's ``!r``
+# repr-based escaping, which is *not* SQL-safe).
 # ---------------------------------------------------------------------------
-_INSERT_FACTOR = """
+_INSERT_FACTOR_SQL = """
 INSERT INTO ref.factor_catalog
     (tenant_id, factor_id, version, substance, scope, category, source,
      value, is_licence_only, is_tbc, biogenic_co2_kg_per_unit,
      unit, gwp_set, vintage, valid_from, applicability_note,
      published_by, published_at, is_published)
 SELECT t.id,
-    {factor_id!r}, {version!r}, {substance!r}, {scope}, {category!r}, {source!r},
-    {value}, FALSE, FALSE, NULL,
-    {unit!r}, {gwp_set!r}, {vintage!r}, {valid_from!r}, {note!r},
+    :factor_id, :version, :substance, :scope, :category, :source,
+    :value, FALSE, FALSE, NULL,
+    :unit, :gwp_set, :vintage, CAST(:valid_from AS date), :note,
     'system_seed', now(), TRUE
 FROM ref.tenants t WHERE t.code = 'GRESMALT';
 """
@@ -105,14 +109,14 @@ def _insert(
         note: Applicability note.
     """
     op.execute(
-        _INSERT_FACTOR.format(
+        _sa_text(_INSERT_FACTOR_SQL).bindparams(
             factor_id=factor_id,
             version=version,
             substance=substance,
             scope=scope,
             category=category,
             source=source,
-            value=str(value),
+            value=float(value),
             unit=unit,
             gwp_set=gwp_set,
             vintage=vintage,
