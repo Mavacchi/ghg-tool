@@ -19,8 +19,10 @@ Coordination with cluster METHOD:
     required.  The GDPR cluster owns revision ``0029_M12``; METHOD should use
     ``0030_M*`` or higher to avoid collision.
 
-Revision: 0029_M12
-Down revision: 0028_M8 (head of this worktree at time of writing)
+Revision: 0032_M12
+Down revision: 0031_M11 (rebased post cherry-pick — original 0029_M12/0028_M8
+was renumbered to 0032_M12/0031_M11 to maintain linear chain with cluster DB
+(0029_M9, 0030_M10) and cluster METHOD (0031_M11))
 """
 
 from __future__ import annotations
@@ -32,8 +34,8 @@ import sqlalchemy as sa
 # Alembic revision metadata
 # ---------------------------------------------------------------------------
 
-revision: str = "0029_M12"
-down_revision: str = "0028_M8"
+revision: str = "0032_M12"
+down_revision: str = "0031_M11"
 branch_labels: None = None
 depends_on: None = None
 
