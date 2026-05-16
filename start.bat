@@ -141,12 +141,12 @@ echo Modalita': PRODUCTION ^(no demo seed, no demo/demo login^).
 echo Per accendere la demo usa start-demo.bat al posto di questo.
 echo.
 
-docker compose -f docker-compose.yml --profile app up -d --build
+docker compose -f docker-compose.yml -f docker-compose.local.yml --profile app up -d --build
 if errorlevel 1 (
     echo.
     echo [ERRORE] Avvio dei container fallito.
     echo Per vedere i log esegui in un nuovo prompt:
-    echo   docker compose -f docker-compose.yml --profile app logs
+    echo   docker compose -f docker-compose.yml -f docker-compose.local.yml --profile app logs
     exit /b 1
 )
 
@@ -212,5 +212,5 @@ exit /b 0
 echo.
 echo [AVVISO] L'API non risponde entro 90 secondi.
 echo Per controllare cosa e' successo:
-echo   docker compose -f docker-compose.yml -f docker-compose.quickstart.yml --profile app logs app
+echo   docker compose -f docker-compose.yml -f docker-compose.local.yml --profile app logs app
 exit /b 1
