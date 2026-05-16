@@ -5,7 +5,10 @@ from __future__ import annotations
 import uuid
 from decimal import Decimal
 
+import pytest
+
 from ghg_tool.application.calc import scope3_cat3_fuel_energy
+from ghg_tool.domain.exceptions.calc_errors import MissingFactorError
 from tests.unit.calc.conftest import InMemoryFactorCatalog
 
 
@@ -113,3 +116,56 @@ def test_disclosure_calls_out_fr11_rule(
         created_by="t",
     )
     assert "FR-11" in (out[0].disclosure_notes or "")
+
+
+# ---------------------------------------------------------------------------
+# REQUIRED: WTT_ELEC upstream factor absent
+# ---------------------------------------------------------------------------
+
+def test_missing_wtt_elec_factor_raises(
+    ar6_gwp, correlation_id: uuid.UUID,
+) -> None:
+    """Raises MissingFactorError when WTT_ELEC_DEFRA_2025 is absent from catalog.
+
+    The catalog is seeded without 'WTT_ELEC_DEFRA_2025' so that calling
+    calculate() with sigma_scope2_kwh non-empty triggers MissingFactorError.
+
+    Per domain policy, a missing upstream electricity WTT factor must block
+    the calculation rather than silently produce zero emissions.
+    """
+    catalog_without_wtt_elec = InMemoryFactorCatalog(seed={})
+
+    with pytest.raises(MissingFactorError):
+        scope3_cat3_fuel_energy.calculate(
+            sigma_scope1={},
+            sigma_scope2_kwh={2024: Decimal("1000000")},
+            factors=catalog_without_wtt_elec,
+            gwp=ar6_gwp,
+            correlation_id=correlation_id,
+            created_by="t",
+        )
+
+
+def test_wtt_elec_absent_with_empty_scope2_still_raises(
+    ar6_gwp, correlation_id: uuid.UUID,
+) -> None:
+    """MissingFactorError raises even with empty sigma_scope2_kwh.
+
+    Implementation note: _electricity_wtt_records calls require_factor
+    unconditionally before the inner loop, so the lookup always fires
+    regardless of whether sigma_scope2_kwh is empty.  This means that a
+    catalog without WTT_ELEC_DEFRA_2025 will raise even on empty input.
+    Documented as expected behaviour — the caller must always provide a
+    complete factor catalog.
+    """
+    catalog_without_wtt_elec = InMemoryFactorCatalog(seed={})
+
+    with pytest.raises(MissingFactorError):
+        scope3_cat3_fuel_energy.calculate(
+            sigma_scope1={},
+            sigma_scope2_kwh={},  # empty but factor lookup still fires
+            factors=catalog_without_wtt_elec,
+            gwp=ar6_gwp,
+            correlation_id=correlation_id,
+            created_by="t",
+        )
