@@ -1288,7 +1288,7 @@ with tab_autocalc:
         # For Scope 1 place sub-scope below scope selector (full width).
         # For Scope 2/3 use the right column as before.
         if ac_scope == 1:
-            _ss_col, _ = st.columns([2, 1])
+            _ss_col, _unused = st.columns([2, 1])
             _ss_ctx = _ss_col
         else:
             _ss_ctx = ac_col2

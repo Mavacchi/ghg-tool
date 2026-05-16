@@ -144,7 +144,7 @@ def _is_admin() -> bool:
 # ---------------------------------------------------------------------------
 
 render_role_chip(st.session_state.get("role"), lang)
-render_context_bar()
+render_context_bar(lang=lang)
 
 st.title(_("sbti_page_title"))
 st.caption(_("sbti_page_subtitle"))
