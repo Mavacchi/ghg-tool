@@ -296,7 +296,20 @@ def upgrade() -> None:
 # ---------------------------------------------------------------------------
 
 def downgrade() -> None:
-    """Remove all factor catalog rows inserted by M8."""
+    """Remove all factor catalog rows inserted by M8.
+
+    M8 publishes its factors immediately (``is_published = TRUE``), so the
+    BEFORE-DELETE trigger ``trg_factor_immutable`` (installed by M0) blocks
+    naive DELETEs with ``RAISE EXCEPTION``. A migration-controlled downgrade
+    is a legitimate exception to the CSRD anti-mutation policy: we are not
+    correcting a published value through the application path, we are
+    reversing the entire migration step that introduced the rows.
+
+    The trigger is therefore temporarily disabled around the DELETE.  Both
+    ALTER TABLE statements and the DELETE run in the same Alembic-managed
+    transaction, so if the DELETE raises the DISABLE is rolled back and the
+    table is left with the trigger active.
+    """
     factor_ids = [
         # Gas naturale
         "COMB_GAS_NAT_CO2_DEFRA_2024_PER_SM3",
@@ -316,6 +329,12 @@ def downgrade() -> None:
     ]
     ids_sql = ", ".join(f"'{fid}'" for fid in factor_ids)
     op.execute(
+        "ALTER TABLE ref.factor_catalog DISABLE TRIGGER trg_factor_immutable;"
+    )
+    op.execute(
         f"DELETE FROM ref.factor_catalog WHERE factor_id IN ({ids_sql}) "
         f"AND version = '2024_v1.0';"
+    )
+    op.execute(
+        "ALTER TABLE ref.factor_catalog ENABLE TRIGGER trg_factor_immutable;"
     )
