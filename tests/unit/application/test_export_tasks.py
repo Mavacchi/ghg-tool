@@ -21,6 +21,10 @@ from ghg_tool.application.tasks.export_tasks import (
     export_excel_task,
     export_pdf_task,
 )
+from ghg_tool.domain.exceptions.export_errors import (
+    PDFBuildError,
+    XlsxBuildError,
+)
 
 # ---------------------------------------------------------------------------
 # _build_report_data
@@ -124,7 +128,11 @@ class TestExportPdfTask:
             )
 
         assert ar.failed()
-        assert isinstance(ar.result, RuntimeError)
+        # Task wraps the underlying RuntimeError in PDFBuildError (chained
+        # via `raise ... from exc`), so the stored Celery result is the
+        # wrapper; the original RuntimeError is the __cause__.
+        assert isinstance(ar.result, PDFBuildError)
+        assert isinstance(ar.result.__cause__, RuntimeError)
 
     def test_result_b64_is_valid_base64(self) -> None:
         fake_bytes = b"PDF content bytes"
@@ -209,7 +217,10 @@ class TestExportExcelTask:
             )
 
         assert ar.failed()
-        assert isinstance(ar.result, ValueError)
+        # Same wrapping contract as the PDF task: the underlying ValueError
+        # is wrapped in XlsxBuildError and chained as __cause__.
+        assert isinstance(ar.result, XlsxBuildError)
+        assert isinstance(ar.result.__cause__, ValueError)
 
     def test_size_bytes_matches_actual_byte_length(self) -> None:
         fake_bytes = b"y" * 2048

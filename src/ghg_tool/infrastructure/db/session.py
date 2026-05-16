@@ -15,6 +15,7 @@ Session GUC injection:
 from __future__ import annotations
 
 import os
+import sys
 from collections.abc import AsyncGenerator
 from typing import Any
 
@@ -32,16 +33,20 @@ def _resolve_database_url() -> str:
     is missing we either:
 
     - fall back to a clearly-marked test-only DSN when running under pytest
-      (``PYTEST_CURRENT_TEST`` is set automatically by the runner so this
-      branch is only ever active in CI/local tests), or
+      (detected by ``"pytest" in sys.modules``; ``PYTEST_CURRENT_TEST`` is
+      only set during setup/call/teardown — *not* during collection — so it
+      cannot be used here because this module is imported at collection time
+      via the api package), or
     - raise ``RuntimeError`` so the API fails at import time instead of
       silently connecting somewhere unexpected.
     """
     url = os.environ.get("SQLALCHEMY_URL", "").strip()
     if url:
         return url
-    if os.environ.get("PYTEST_CURRENT_TEST"):
-        # Test-only fallback — never reached outside pytest.
+    if "pytest" in sys.modules:
+        # Test-only fallback — never reached outside pytest. Use a localhost
+        # DSN with an obviously fake password so engine creation succeeds at
+        # import time; tests that actually hit the DB override the engine.
         return "postgresql+asyncpg://ghg_app:test-only@localhost:5432/ghg_tool"
     raise RuntimeError(
         "SQLALCHEMY_URL is required (no insecure default); "
