@@ -195,6 +195,38 @@ if errorlevel 1 (
 echo [OK] Dashboard pronta su http://localhost:8501
 echo.
 
+REM ---- Verifica che esista almeno un utente admin ---------------------------
+REM L'API e' in production mode (no demo seed): se nessuno ha mai creato un
+REM utente, il login fallira' con "credenziali non valide".  Controlliamo
+REM ref.users via psql nel container db.  Se la query fallisce per un motivo
+REM transitorio (DB non ancora pronto, ecc.) saltiamo il check e proseguiamo
+REM con il flusso normale - il check e' un nice-to-have, non un bloccante.
+for /f "usebackq tokens=*" %%U in (`docker exec ghg_db psql -U ghg_app -d ghg_tool -t -A -c "SELECT COUNT(*) FROM ref.users" 2^>nul`) do set "_user_count=%%U"
+if "%_user_count%"=="0" (
+    echo ===============================================
+    echo  PRIMO AVVIO: serve creare il primo utente admin
+    echo ===============================================
+    echo.
+    echo  Il database e' partito ma non c'e' ancora nessun utente, quindi
+    echo  il login dalla dashboard fallira' con "credenziali non valide".
+    echo.
+    echo  Crea il tuo utente amministratore con questo comando ^(copia/incolla
+    echo  in un prompt PowerShell o cmd, sostituisci username/email a piacere^):
+    echo.
+    echo    docker exec -it ghg_app python -m scripts.create_admin --username mavacchi --email marco.vacchi@gresmalt.it
+    echo.
+    echo  Lo script chiedera' la password due volte ^(non viene mostrata mentre
+    echo  digiti^).  Vincoli: almeno 12 caratteri, no spazi.
+    echo.
+    echo  Quando vedi "[OK] User created: ^<uuid^>" apri il browser su
+    echo  http://localhost:8501 e fai login con le credenziali appena create.
+    echo.
+    echo  NOTA: questo messaggio appare solo al primo avvio. Le volte successive
+    echo  start.bat aprira' direttamente il browser.
+    echo ===============================================
+    exit /b 0
+)
+
 REM ---- Apri il browser ------------------------------------------------------
 start "" "http://localhost:8501"
 
